@@ -20,51 +20,77 @@ export interface JournalEntryData {
   lines: JournalEntryLine[];
 }
 
-// Helper function to get current user's orgId
+// Helper function to get current user's orgId with auto-onboarding
 async function getCurrentOrgId(): Promise<string | null> {
-  const { userId } = await auth();
-  
-  if (!userId) {
-    return null;
-  }
+  try {
+    const { userId } = await auth();
 
-  // Get user's profile from database
-  const userProfile = await db
-    .select({
-      orgId: profiles.orgId,
-    })
-    .from(profiles)
-    .where(eq(profiles.userId, userId))
-    .limit(1);
-
-  if (userProfile.length === 0 || !userProfile[0].orgId) {
-    // User doesn't have a profile yet, create one with a default organization
-    const newOrg = await db
-      .insert(organizations)
-      .values({
-        name: "My Organization",
-        slug: `org-${Date.now()}`,
-      })
-      .returning({ id: organizations.id });
-
-    if (newOrg.length === 0) {
+    if (!userId) {
       return null;
     }
 
-    // Create profile for this user
+    // Get user's profile from database
+    const userProfile = await db
+      .select({
+        orgId: profiles.orgId,
+      })
+      .from(profiles)
+      .where(eq(profiles.userId, userId))
+      .limit(1);
+
+    // If profile exists, return orgId
+    if (userProfile.length > 0 && userProfile[0].orgId) {
+      return userProfile[0].orgId;
+    }
+
+    // Auto-onboarding: User doesn't have a profile yet, create one automatically
     const user = await currentUser();
+    if (!user) {
+      console.error("getCurrentOrgId: Unable to fetch current user");
+      return null;
+    }
+
+    // Create a default organization for the user
+    const timestamp = Date.now();
+    const orgSlug = `my-business-${timestamp}`;
+    
+    const newOrg = await db
+      .insert(organizations)
+      .values({
+        name: "My Business",
+        slug: orgSlug,
+        currency: "PKR",
+        fiscalYearStart: "07-01",
+        country: "Pakistan",
+      })
+      .returning({ id: organizations.id });
+
+    if (!newOrg || newOrg.length === 0) {
+      console.error("getCurrentOrgId: Failed to create organization");
+      return null;
+    }
+
+    const newOrgId = newOrg[0].id;
+
+    // Create profile for this user linking to the new organization
+    const userEmail = user.emailAddresses[0]?.emailAddress || "";
+    const userFullName = user.fullName || user.username || "User";
+
     await db.insert(profiles).values({
       userId,
-      orgId: newOrg[0].id,
+      orgId: newOrgId,
       role: "admin",
-      fullName: user?.fullName || "User",
-      email: user?.emailAddresses[0]?.emailAddress || "",
+      fullName: userFullName,
+      email: userEmail,
     });
 
-    return newOrg[0].id;
-  }
+    console.log(`Auto-onboarding: Created organization ${newOrgId} for user ${userId}`);
 
-  return userProfile[0].orgId;
+    return newOrgId;
+  } catch (error) {
+    console.error("getCurrentOrgId: Error during auto-onboarding:", error);
+    return null;
+  }
 }
 
 // Get all accounts for current user's organization
@@ -117,28 +143,53 @@ export async function seedInitialCOA() {
       { code: "1000", name: "Cash", type: "asset", description: "Cash on hand" },
       { code: "1010", name: "Bank - Main Account", type: "asset", description: "Main bank account" },
       { code: "1020", name: "Bank - Savings Account", type: "asset", description: "Savings bank account" },
+      { code: "1030", name: "Petty Cash", type: "asset", description: "Small cash fund for minor expenses" },
       { code: "1100", name: "Accounts Receivable", type: "asset", description: "Money owed by customers" },
+      { code: "1110", name: "Allowance for Doubtful Accounts", type: "asset", description: "Estimated uncollectible receivables" },
       { code: "1200", name: "Inventory", type: "asset", description: "Goods available for sale" },
+      { code: "1210", name: "Raw Materials", type: "asset", description: "Materials for production" },
+      { code: "1220", name: "Work in Progress Inventory", type: "asset", description: "Partially completed goods" },
+      { code: "1230", name: "Finished Goods Inventory", type: "asset", description: "Completed goods ready for sale" },
       { code: "1300", name: "Office Supplies", type: "asset", description: "Office supplies and materials" },
       { code: "1400", name: "Prepaid Expenses", type: "asset", description: "Expenses paid in advance" },
+      { code: "1410", name: "Prepaid Insurance", type: "asset", description: "Insurance premiums paid in advance" },
+      { code: "1420", name: "Prepaid Rent", type: "asset", description: "Rent paid in advance" },
       { code: "1500", name: "Fixed Assets - Equipment", type: "asset", description: "Business equipment" },
       { code: "1510", name: "Fixed Assets - Furniture", type: "asset", description: "Office furniture and fixtures" },
       { code: "1520", name: "Fixed Assets - Vehicles", type: "asset", description: "Company vehicles" },
+      { code: "1530", name: "Fixed Assets - Machinery", type: "asset", description: "Production machinery" },
+      { code: "1540", name: "Fixed Assets - Buildings", type: "asset", description: "Company buildings and structures" },
+      { code: "1550", name: "Fixed Assets - Computers", type: "asset", description: "Computer hardware" },
       { code: "1600", name: "Accumulated Depreciation", type: "asset", description: "Total depreciation of assets" },
+      { code: "1700", name: "Investments", type: "asset", description: "Long-term investments" },
+      { code: "1800", name: "Goodwill", type: "asset", description: "Intangible asset from acquisitions" },
+      { code: "1900", name: "Other Assets", type: "asset", description: "Miscellaneous assets" },
 
       // Liabilities (2000-2999)
       { code: "2000", name: "Accounts Payable", type: "liability", description: "Money owed to suppliers" },
       { code: "2100", name: "Credit Card Payable", type: "liability", description: "Credit card balance" },
       { code: "2200", name: "Sales Tax Payable", type: "liability", description: "Sales tax collected but not remitted" },
+      { code: "2210", name: "Income Tax Withheld", type: "liability", description: "Tax withheld from employee salaries" },
       { code: "2300", name: "Income Tax Payable", type: "liability", description: "Income tax owed" },
       { code: "2400", name: "Accrued Liabilities", type: "liability", description: "Expenses incurred but not yet paid" },
+      { code: "2410", name: "Accrued Salaries", type: "liability", description: "Salaries owed to employees" },
+      { code: "2420", name: "Accrued Interest", type: "liability", description: "Interest owed but not yet paid" },
       { code: "2500", name: "Short-term Loans", type: "liability", description: "Loans due within one year" },
+      { code: "2510", name: "Bank Overdraft", type: "liability", description: "Negative bank balance" },
       { code: "2600", name: "Long-term Loans", type: "liability", description: "Loans due after one year" },
+      { code: "2610", name: "Mortgage Payable", type: "liability", description: "Mortgage on property" },
+      { code: "2700", name: "Deferred Revenue", type: "liability", description: "Advance payments from customers" },
+      { code: "2800", name: "Provision for Employee Benefits", type: "liability", description: "Gratuity and other employee benefits" },
+      { code: "2900", name: "Other Liabilities", type: "liability", description: "Miscellaneous liabilities" },
 
       // Equity (3000-3999)
       { code: "3000", name: "Owner's Equity", type: "equity", description: "Owner's investment in the business" },
       { code: "3100", name: "Retained Earnings", type: "equity", description: "Accumulated profits/losses" },
       { code: "3200", name: "Share Capital", type: "equity", description: "Capital from shares issued" },
+      { code: "3300", name: "Additional Paid-in Capital", type: "equity", description: "Capital above par value" },
+      { code: "3400", name: "Treasury Stock", type: "equity", description: "Company's own shares repurchased" },
+      { code: "3500", name: "Current Year Earnings", type: "equity", description: "Profit/loss for current year" },
+      { code: "3600", name: "Owner's Drawings", type: "equity", description: "Withdrawals by owner" },
 
       // Income (4000-4999)
       { code: "4000", name: "Sales Revenue", type: "income", description: "Revenue from sales" },
@@ -146,21 +197,41 @@ export async function seedInitialCOA() {
       { code: "4200", name: "Interest Income", type: "income", description: "Interest earned" },
       { code: "4300", name: "Other Income", type: "income", description: "Miscellaneous income" },
       { code: "4400", name: "Discount Received", type: "income", description: "Discounts from suppliers" },
+      { code: "4500", name: "Commission Income", type: "income", description: "Commission earned" },
+      { code: "4600", name: "Rental Income", type: "income", description: "Income from property rental" },
+      { code: "4700", name: "Gain on Asset Sale", type: "income", description: "Profit from selling assets" },
+      { code: "4800", name: "Export Revenue", type: "income", description: "Revenue from export sales" },
+      { code: "4900", name: "Sales Returns & Allowances", type: "income", description: "Contra account for returns" },
 
       // Expenses (5000-5999)
       { code: "5000", name: "Cost of Goods Sold", type: "expense", description: "Direct cost of goods sold" },
+      { code: "5010", name: "Direct Labor", type: "expense", description: "Wages for production workers" },
+      { code: "5020", name: "Manufacturing Overhead", type: "expense", description: "Indirect production costs" },
+      { code: "5030", name: "Freight & Shipping", type: "expense", description: "Shipping costs for goods" },
+      { code: "5040", name: "Import Duties", type: "expense", description: "Customs and import charges" },
       { code: "5100", name: "Salaries & Wages", type: "expense", description: "Employee compensation" },
+      { code: "5110", name: "Employee Benefits", type: "expense", description: "Health insurance, provident fund" },
+      { code: "5120", name: "Overtime Pay", type: "expense", description: "Overtime compensation" },
       { code: "5200", name: "Rent Expense", type: "expense", description: "Office/warehouse rent" },
       { code: "5300", name: "Utilities", type: "expense", description: "Electricity, water, gas" },
+      { code: "5310", name: "Telephone & Internet", type: "expense", description: "Communication expenses" },
       { code: "5400", name: "Office Supplies Expense", type: "expense", description: "Office supplies used" },
       { code: "5500", name: "Depreciation Expense", type: "expense", description: "Asset depreciation" },
       { code: "5600", name: "Marketing & Advertising", type: "expense", description: "Marketing costs" },
+      { code: "5610", name: "Digital Marketing", type: "expense", description: "Online advertising costs" },
       { code: "5700", name: "Travel & Transportation", type: "expense", description: "Business travel costs" },
       { code: "5800", name: "Insurance Expense", type: "expense", description: "Business insurance premiums" },
       { code: "5900", name: "Professional Fees", type: "expense", description: "Legal, accounting, consulting fees" },
       { code: "6000", name: "Bank Charges", type: "expense", description: "Bank fees and charges" },
       { code: "6100", name: "Interest Expense", type: "expense", description: "Interest on loans" },
       { code: "6200", name: "Tax Expense", type: "expense", description: "Business taxes" },
+      { code: "6300", name: "Repairs & Maintenance", type: "expense", description: "Equipment and facility repairs" },
+      { code: "6400", name: "Training & Development", type: "expense", description: "Employee training costs" },
+      { code: "6500", name: "Software & Subscriptions", type: "expense", description: "SaaS and software licenses" },
+      { code: "6600", name: "Printing & Stationery", type: "expense", description: "Printing and office stationery" },
+      { code: "6700", name: "Bad Debts Expense", type: "expense", description: "Uncollectible accounts" },
+      { code: "6800", name: "Charity & Donations", type: "expense", description: "Charitable contributions" },
+      { code: "6900", name: "Miscellaneous Expense", type: "expense", description: "Other expenses" },
     ];
 
     const accountsToInsert = defaultAccounts.map((account) => ({
@@ -178,7 +249,8 @@ export async function seedInitialCOA() {
 
     return {
       success: true,
-      message: `Successfully created ${accountsToInsert.length} default accounts`
+      message: `Successfully created ${accountsToInsert.length} default accounts in Chart of Accounts`,
+      count: accountsToInsert.length
     };
   } catch (error) {
     console.error("Error seeding COA:", error);

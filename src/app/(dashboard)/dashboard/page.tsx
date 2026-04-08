@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Calendar,
   Clock,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
@@ -97,8 +98,21 @@ const upcomingTasks = [
 ];
 
 export default function DashboardHome() {
-  const { user } = useUser();
-  const firstName = user?.firstName || "there";
+  const { user, isLoaded } = useUser();
+  
+  // Show loading state while user data is being fetched
+  if (!isLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-nexabook-600 mx-auto mb-4" />
+          <p className="text-nexabook-600">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const firstName = user?.firstName || user?.username || "there";
   const currentHour = new Date().getHours();
 
   let greeting = "Good morning";
