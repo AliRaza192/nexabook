@@ -9,6 +9,7 @@ import {
   boolean,
   pgEnum,
 } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
 
 // Enums
 export const planTypeEnum = pgEnum('plan_type', ['free', 'professional', 'enterprise']);
@@ -75,23 +76,49 @@ export const chartOfAccountsRelations = {
   parent: chartOfAccounts.parentId ? undefined : null, // Placeholder for self-reference
 };
 
+// Product Categories
+export const productCategories = pgTable('product_categories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  description: text('description'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Products/Services
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   name: varchar('name', { length: 255 }).notNull(),
-  sku: varchar('sku', { length: 100 }),
+  sku: varchar('sku', { length: 100 }).notNull(),
+  barcode: varchar('barcode', { length: 100 }),
+  categoryId: uuid('category_id').references(() => productCategories.id),
   type: productTypeEnum('type').notNull().default('product'),
+  unit: varchar('unit', { length: 20 }).default('Pcs'), // Pcs, Kg, Ltr, Mtr, Box, etc.
   description: text('description'),
-  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }),
+  salePrice: decimal('sale_price', { precision: 12, scale: 2 }),
   costPrice: decimal('cost_price', { precision: 12, scale: 2 }),
-  stockQuantity: integer('stock_quantity').default(0),
-  reorderLevel: integer('reorder_level').default(0),
+  currentStock: integer('current_stock').default(0),
+  minStockLevel: integer('min_stock_level').default(0),
   taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+// Add relations for productCategories
+export const productCategoriesRelations = relations(productCategories, ({ many }) => ({
+  products: many(products),
+}));
+
+export const productsRelations = relations(products, ({ one }) => ({
+  category: one(productCategories, {
+    fields: [products.categoryId],
+    references: [productCategories.id],
+  }),
+}));
 
 // Customers
 export const customers = pgTable('customers', {
@@ -183,6 +210,7 @@ export const schema = {
   organizations,
   profiles,
   chartOfAccounts,
+  productCategories,
   products,
   customers,
   invoices,
@@ -198,6 +226,8 @@ export type Profile = typeof profiles.$inferSelect;
 export type NewProfile = typeof profiles.$inferInsert;
 export type ChartOfAccount = typeof chartOfAccounts.$inferSelect;
 export type NewChartOfAccount = typeof chartOfAccounts.$inferInsert;
+export type ProductCategory = typeof productCategories.$inferSelect;
+export type NewProductCategory = typeof productCategories.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type Customer = typeof customers.$inferSelect;
