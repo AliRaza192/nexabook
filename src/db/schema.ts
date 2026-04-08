@@ -14,7 +14,7 @@ import { relations } from 'drizzle-orm';
 // Enums
 export const planTypeEnum = pgEnum('plan_type', ['free', 'professional', 'enterprise']);
 export const userRoleEnum = pgEnum('user_role', ['admin', 'manager', 'staff', 'accountant']);
-export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'sent', 'paid', 'overdue', 'cancelled']);
+export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'sent', 'paid', 'partial', 'overdue', 'cancelled']);
 export const productTypeEnum = pgEnum('product_type', ['product', 'service']);
 
 // Organizations Table (Multi-Tenant Root)
@@ -129,7 +129,9 @@ export const customers = pgTable('customers', {
   phone: varchar('phone', { length: 20 }),
   address: text('address'),
   city: varchar('city', { length: 100 }),
-  ntn: varchar('ntn', { length: 50 }),
+  ntn: varchar('ntn', { length: 50 }), // National Tax Number
+  strn: varchar('strn', { length: 50 }), // Sales Tax Registration Number
+  openingBalance: decimal('opening_balance', { precision: 12, scale: 2 }).default('0'),
   balance: decimal('balance', { precision: 12, scale: 2 }).default('0'),
   creditLimit: decimal('credit_limit', { precision: 12, scale: 2 }),
   isActive: boolean('is_active').notNull().default(true),
@@ -145,11 +147,11 @@ export const invoices = pgTable('invoices', {
   customerId: uuid('customer_id').references(() => customers.id).notNull(),
   issueDate: timestamp('issue_date').notNull(),
   dueDate: timestamp('due_date'),
-  status: invoiceStatusEnum('status').notNull().default('draft'),
-  subtotal: decimal('subtotal', { precision: 12, scale: 2 }).notNull(),
-  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).default('0'),
-  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).default('0'),
-  totalAmount: decimal('total_amount', { precision: 12, scale: 2 }).notNull(),
+  status: invoiceStatusEnum('status').notNull().default('draft'), // draft, sent, paid, partial, overdue
+  subTotal: decimal('subtotal', { precision: 12, scale: 2 }).notNull(),
+  taxTotal: decimal('tax_amount', { precision: 12, scale: 2 }).default('0'),
+  discountTotal: decimal('discount_amount', { precision: 12, scale: 2 }).default('0'),
+  grandTotal: decimal('total_amount', { precision: 12, scale: 2 }).notNull(),
   notes: text('notes'),
   terms: text('terms'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -168,6 +170,30 @@ export const invoiceItems = pgTable('invoice_items', {
   taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0'),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
 });
+
+// Add relations
+export const customersRelations = relations(customers, ({ many }) => ({
+  invoices: many(invoices),
+}));
+
+export const invoicesRelations = relations(invoices, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [invoices.customerId],
+    references: [customers.id],
+  }),
+  items: many(invoiceItems),
+}));
+
+export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
+  invoice: one(invoices, {
+    fields: [invoiceItems.invoiceId],
+    references: [invoices.id],
+  }),
+  product: one(products, {
+    fields: [invoiceItems.productId],
+    references: [products.id],
+  }),
+}));
 
 // Employees
 export const employees = pgTable('employees', {
