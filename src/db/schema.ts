@@ -14,7 +14,8 @@ import { relations } from 'drizzle-orm';
 // Enums
 export const planTypeEnum = pgEnum('plan_type', ['free', 'professional', 'enterprise']);
 export const userRoleEnum = pgEnum('user_role', ['admin', 'manager', 'staff', 'accountant']);
-export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'sent', 'paid', 'partial', 'overdue', 'cancelled']);
+export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'pending', 'approved', 'sent', 'paid', 'partial', 'overdue', 'cancelled']);
+export const orderStatusEnum = pgEnum('order_status', ['draft', 'pending', 'approved', 'confirmed', 'delivered', 'cancelled']);
 export const productTypeEnum = pgEnum('product_type', ['product', 'service']);
 
 // Organizations Table (Multi-Tenant Root)
@@ -145,13 +146,22 @@ export const invoices = pgTable('invoices', {
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   invoiceNumber: varchar('invoice_number', { length: 50 }).notNull(),
   customerId: uuid('customer_id').references(() => customers.id).notNull(),
+  orderBooker: varchar('order_booker', { length: 255 }).default(''),
+  subject: varchar('subject', { length: 255 }).default(''),
+  reference: varchar('reference', { length: 100 }).default(''),
   issueDate: timestamp('issue_date').notNull(),
   dueDate: timestamp('due_date'),
-  status: invoiceStatusEnum('status').notNull().default('draft'), // draft, sent, paid, partial, overdue
-  subTotal: decimal('subtotal', { precision: 12, scale: 2 }).notNull(),
-  taxTotal: decimal('tax_amount', { precision: 12, scale: 2 }).default('0'),
-  discountTotal: decimal('discount_amount', { precision: 12, scale: 2 }).default('0'),
-  grandTotal: decimal('total_amount', { precision: 12, scale: 2 }).notNull(),
+  status: invoiceStatusEnum('status').notNull().default('draft'), // draft, pending, approved, sent, paid, partial, overdue
+  grossAmount: decimal('gross_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  shippingCharges: decimal('shipping_charges', { precision: 12, scale: 2 }).notNull().default('0'),
+  roundOff: decimal('round_off', { precision: 12, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  receivedAmount: decimal('received_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  balanceAmount: decimal('balance_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  cashBankAccountId: uuid('cash_bank_account_id').references(() => chartOfAccounts.id),
   notes: text('notes'),
   terms: text('terms'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -165,10 +175,11 @@ export const invoiceItems = pgTable('invoice_items', {
   invoiceId: uuid('invoice_id').references(() => invoices.id).notNull(),
   productId: uuid('product_id').references(() => products.id),
   description: text('description').notNull(),
-  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull(),
-  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull(),
-  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0'),
-  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
 });
 
 // Add relations
@@ -191,6 +202,70 @@ export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
   }),
   product: one(products, {
     fields: [invoiceItems.productId],
+    references: [products.id],
+  }),
+}));
+
+// Sale Orders
+export const saleOrders = pgTable('sale_orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  orderNumber: varchar('order_number', { length: 50 }).notNull(),
+  customerId: uuid('customer_id').references(() => customers.id).notNull(),
+  orderBooker: varchar('order_booker', { length: 255 }).default(''),
+  subject: varchar('subject', { length: 255 }).default(''),
+  reference: varchar('reference', { length: 100 }).default(''),
+  orderDate: timestamp('order_date').notNull(),
+  deliveryDate: timestamp('delivery_date'),
+  status: orderStatusEnum('status').notNull().default('draft'),
+  grossAmount: decimal('gross_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  shippingCharges: decimal('shipping_charges', { precision: 12, scale: 2 }).notNull().default('0'),
+  roundOff: decimal('round_off', { precision: 12, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  notes: text('notes'),
+  terms: text('terms'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Sale Order Items
+export const orderItems = pgTable('order_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  orderId: uuid('order_id').references(() => saleOrders.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
+});
+
+// Add relations for saleOrders and orderItems
+export const customersRelationsExtended = relations(customers, ({ many }) => ({
+  invoices: many(invoices),
+  saleOrders: many(saleOrders),
+}));
+
+export const saleOrdersRelations = relations(saleOrders, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [saleOrders.customerId],
+    references: [customers.id],
+  }),
+  items: many(orderItems),
+}));
+
+export const orderItemsRelations = relations(orderItems, ({ one }) => ({
+  order: one(saleOrders, {
+    fields: [orderItems.orderId],
+    references: [saleOrders.id],
+  }),
+  product: one(products, {
+    fields: [orderItems.productId],
     references: [products.id],
   }),
 }));
@@ -231,6 +306,29 @@ export const auditLogs = pgTable('audit_logs', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+// Journal Entries (General Ledger)
+export const journalEntries = pgTable('journal_entries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  entryDate: timestamp('entry_date').notNull().defaultNow(),
+  entryNumber: varchar('entry_number', { length: 50 }).notNull(),
+  referenceType: varchar('reference_type', { length: 50 }).default(''),
+  referenceId: uuid('reference_id'),
+  description: text('description').default(''),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+// Journal Entry Lines
+export const journalEntryLines = pgTable('journal_entry_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id).notNull(),
+  accountId: uuid('account_id').references(() => chartOfAccounts.id).notNull(),
+  description: text('description').default(''),
+  debitAmount: decimal('debit_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  creditAmount: decimal('credit_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+});
+
 // Export schema
 export const schema = {
   organizations,
@@ -241,8 +339,12 @@ export const schema = {
   customers,
   invoices,
   invoiceItems,
+  saleOrders,
+  orderItems,
   employees,
   auditLogs,
+  journalEntries,
+  journalEntryLines,
 };
 
 // TypeScript types
@@ -262,7 +364,15 @@ export type Invoice = typeof invoices.$inferSelect;
 export type NewInvoice = typeof invoices.$inferInsert;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
 export type NewInvoiceItem = typeof invoiceItems.$inferInsert;
+export type SaleOrder = typeof saleOrders.$inferSelect;
+export type NewSaleOrder = typeof saleOrders.$inferInsert;
+export type OrderItem = typeof orderItems.$inferSelect;
+export type NewOrderItem = typeof orderItems.$inferInsert;
 export type Employee = typeof employees.$inferSelect;
 export type NewEmployee = typeof employees.$inferInsert;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type NewAuditLog = typeof auditLogs.$inferInsert;
+export type JournalEntry = typeof journalEntries.$inferSelect;
+export type NewJournalEntry = typeof journalEntries.$inferInsert;
+export type JournalEntryLine = typeof journalEntryLines.$inferSelect;
+export type NewJournalEntryLine = typeof journalEntryLines.$inferInsert;

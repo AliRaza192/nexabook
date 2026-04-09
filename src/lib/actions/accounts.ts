@@ -1,8 +1,8 @@
 "use server";
 
 import { db } from "@/db";
-import { chartOfAccounts, organizations, profiles } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { chartOfAccounts, organizations, profiles, journalEntries, journalEntryLines, auditLogs } from "@/db/schema";
+import { eq, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
@@ -261,7 +261,7 @@ export async function seedInitialCOA() {
 // Create a journal entry for current user's organization
 export async function createJournalEntry(data: JournalEntryData) {
   const orgId = await getCurrentOrgId();
-  
+
   if (!orgId) {
     return { success: false, error: "No organization found" };
   }
@@ -273,9 +273,9 @@ export async function createJournalEntry(data: JournalEntryData) {
 
     // Validate debits equal credits
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
-      return { 
-        success: false, 
-        error: `Journal entry is not balanced. Total Debit: ${totalDebit.toFixed(2)}, Total Credit: ${totalCredit.toFixed(2)}` 
+      return {
+        success: false,
+        error: `Journal entry is not balanced. Total Debit: ${totalDebit.toFixed(2)}, Total Credit: ${totalCredit.toFixed(2)}`
       };
     }
 
@@ -291,17 +291,59 @@ export async function createJournalEntry(data: JournalEntryData) {
       }
     }
 
-    // TODO: In a full implementation, you would:
-    // 1. Insert into journal_entries table
-    // 2. Insert into journal_entry_lines table
-    // 3. Update account balances
+    // Generate entry number
+    const entryCount = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.orgId, orgId));
     
-    // For now, we'll just return success
+    const entryNumber = `JE-${String(entryCount.length + 1).padStart(5, '0')}`;
+
+    // Create journal entry
+    const [journalEntry] = await db
+      .insert(journalEntries)
+      .values({
+        orgId,
+        entryNumber,
+        entryDate: new Date(data.date),
+        referenceType: 'manual',
+        description: data.description,
+      })
+      .returning();
+
+    // Create journal entry lines
+    for (const line of data.lines) {
+      await db.insert(journalEntryLines).values({
+        orgId,
+        journalEntryId: journalEntry.id,
+        accountId: line.accountId,
+        description: line.description,
+        debitAmount: line.debit || '0',
+        creditAmount: line.credit || '0',
+      });
+    }
+
+    // Create audit log
+    await db.insert(auditLogs).values({
+      orgId,
+      userId: (await auth()).userId || 'system',
+      action: 'JOURNAL_ENTRY_CREATED',
+      entityType: 'journal_entry',
+      entityId: journalEntry.id,
+      changes: JSON.stringify({
+        entryNumber,
+        description: data.description,
+        totalDebit,
+        totalCredit,
+      }),
+    });
+
     revalidatePath("/dashboard/accounts/journal-entries");
-    
-    return { 
-      success: true, 
-      message: "Journal entry created successfully" 
+
+    return {
+      success: true,
+      message: "Journal entry created successfully",
+      entryNumber
     };
   } catch (error) {
     console.error("Error creating journal entry:", error);

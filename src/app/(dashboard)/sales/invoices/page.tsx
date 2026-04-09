@@ -37,11 +37,11 @@ interface Invoice {
   invoiceNumber: string;
   issueDate: Date;
   dueDate: Date | null;
-  status: 'draft' | 'sent' | 'paid' | 'partial' | 'overdue';
-  subTotal: string | null;
-  taxTotal: string | null;
-  discountTotal: string | null;
-  grandTotal: string | null;
+  status: 'draft' | 'pending' | 'approved' | 'sent' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+  grossAmount: string | null;
+  taxAmount: string | null;
+  netAmount: string | null;
+  balanceAmount: string | null;
   createdAt: Date;
   customer: {
     id: string;
@@ -124,10 +124,13 @@ function StatCard({
 function getStatusBadge(status: string) {
   const statusConfig: Record<string, { label: string; variant: any; icon: any }> = {
     draft: { label: "Draft", variant: "outline" as const, icon: FileText },
+    pending: { label: "Pending", variant: "secondary" as const, icon: Clock },
+    approved: { label: "Approved", variant: "success" as const, icon: CheckCircle },
     sent: { label: "Sent", variant: "default" as const, icon: Clock },
     paid: { label: "Paid", variant: "success" as const, icon: CheckCircle },
     partial: { label: "Partial", variant: "warning" as const, icon: DollarSign },
     overdue: { label: "Overdue", variant: "destructive" as const, icon: AlertCircle },
+    cancelled: { label: "Cancelled", variant: "outline" as const, icon: AlertCircle },
   };
 
   return statusConfig[status] || statusConfig.draft;
@@ -283,6 +286,8 @@ export default function InvoicesPage() {
                 <SelectContent>
                   <SelectItem value="all">All Statuses</SelectItem>
                   <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
                   <SelectItem value="sent">Sent</SelectItem>
                   <SelectItem value="paid">Paid</SelectItem>
                   <SelectItem value="partial">Partial</SelectItem>
@@ -385,7 +390,7 @@ export default function InvoicesPage() {
                         </td>
                         <td className="py-3 px-4">
                           <p className="text-sm font-semibold text-nexabook-900">
-                            {formatCurrency(invoice.grandTotal)}
+                            {formatCurrency(invoice.netAmount)}
                           </p>
                         </td>
                         <td className="py-3 px-4">
