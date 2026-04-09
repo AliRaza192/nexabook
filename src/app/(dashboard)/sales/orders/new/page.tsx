@@ -250,7 +250,7 @@ export default function NewSaleOrderPage() {
                   <DropdownMenuItem onClick={() => handleSave("approve-print")}>Approve & Print</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button variant="outline" className="w-full h-10 border-orange-300 text-orange-700 hover:bg-orange-50 hover:text-orange-800 hover:border-orange-400 font-semibold" onClick={() => router.push("/sales/orders")}><X className="mr-2 h-4 w-4" />CLOSE</Button>
+              <Button variant="outline" className="w-full h-10 border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400 font-semibold" onClick={() => router.push("/sales/orders")}><X className="mr-2 h-4 w-4" />CLOSE</Button>
             </CardContent>
           </Card>
         </div>
