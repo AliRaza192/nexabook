@@ -19,6 +19,18 @@ export const orderStatusEnum = pgEnum('order_status', ['draft', 'pending', 'appr
 export const productTypeEnum = pgEnum('product_type', ['product', 'service']);
 export const jobOrderStatusEnum = pgEnum('job_order_status', ['draft', 'in-progress', 'completed', 'cancelled']);
 export const bomStatusEnum = pgEnum('bom_status', ['draft', 'active', 'archived']);
+// CRM Enums
+export const leadStatusEnum = pgEnum('lead_status', ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'lost']);
+export const ticketPriorityEnum = pgEnum('ticket_priority', ['low', 'medium', 'high', 'urgent']);
+export const ticketStatusEnum = pgEnum('ticket_status', ['open', 'in_progress', 'resolved', 'closed', 'reopened']);
+// Sales Enums
+export const quotationStatusEnum = pgEnum('quotation_status', ['draft', 'sent', 'accepted', 'rejected', 'expired', 'converted']);
+export const deliveryStatusEnum = pgEnum('delivery_status', ['pending', 'dispatched', 'in_transit', 'delivered', 'returned', 'cancelled']);
+export const recurringIntervalEnum = pgEnum('recurring_interval', ['weekly', 'monthly', 'quarterly', 'yearly']);
+// Returns & Purchases Enums
+export const returnReasonEnum = pgEnum('return_reason', ['defective', 'wrong_item', 'not_as_described', 'customer_request', 'damaged_in_transit', 'other']);
+export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'bank_transfer', 'cheque', 'online', 'credit_card', 'other']);
+export const settlementStatusEnum = pgEnum('settlement_status', ['pending', 'partial', 'settled', 'cancelled']);
 
 // Organizations Table (Multi-Tenant Root)
 export const organizations = pgTable('organizations', {
@@ -544,35 +556,6 @@ export const jobOrderComponents = pgTable('job_order_components', {
   consumedQty: decimal('consumed_qty', { precision: 10, scale: 2 }).default('0'),
 });
 
-// Export schema
-export const schema = {
-  organizations,
-  profiles,
-  chartOfAccounts,
-  productCategories,
-  products,
-  customers,
-  invoices,
-  invoiceItems,
-  saleOrders,
-  orderItems,
-  employees,
-  attendance,
-  payrollRuns,
-  payslips,
-  auditLogs,
-  journalEntries,
-  journalEntryLines,
-  vendors,
-  purchaseInvoices,
-  purchaseItems,
-  expenses,
-  manufacturingBoms,
-  bomItems,
-  jobOrders,
-  jobOrderComponents,
-};
-
 // Vendor and Purchase Relations (must be after all tables are defined)
 export const vendorsRelations = relations(vendors, ({ many }) => ({
   purchaseInvoices: many(purchaseInvoices),
@@ -596,6 +579,415 @@ export const purchaseItemsRelations = relations(purchaseItems, ({ one }) => ({
     references: [products.id],
   }),
 }));
+
+// ==========================================
+// CRM MODULE TABLES
+// ==========================================
+
+// CRM Leads
+export const leads = pgTable('leads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }),
+  phone: varchar('phone', { length: 20 }),
+  company: varchar('company', { length: 255 }),
+  designation: varchar('designation', { length: 100 }),
+  source: varchar('source', { length: 100 }), // Website, Referral, Social, Advertisement, etc.
+  status: leadStatusEnum('status').notNull().default('new'),
+  estimatedValue: decimal('estimated_value', { precision: 12, scale: 2 }).default('0'),
+  assignedTo: varchar('assigned_to', { length: 255 }), // User ID
+  notes: text('notes'),
+  convertedToCustomerId: uuid('converted_to_customer_id').references(() => customers.id),
+  isConverted: boolean('is_converted').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// CRM Tickets (Support)
+export const tickets = pgTable('tickets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  customerId: uuid('customer_id').references(() => customers.id),
+  leadId: uuid('lead_id').references(() => leads.id),
+  ticketNumber: varchar('ticket_number', { length: 50 }).notNull(),
+  subject: varchar('subject', { length: 255 }).notNull(),
+  description: text('description').notNull(),
+  priority: ticketPriorityEnum('priority').notNull().default('medium'),
+  status: ticketStatusEnum('status').notNull().default('open'),
+  assignedTo: varchar('assigned_to', { length: 255 }),
+  resolvedAt: timestamp('resolved_at'),
+  resolvedBy: varchar('resolved_by', { length: 255 }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// CRM Events (Meetings/Calls)
+export const crmEvents = pgTable('crm_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  customerId: uuid('customer_id').references(() => customers.id),
+  leadId: uuid('lead_id').references(() => leads.id),
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  eventType: varchar('event_type', { length: 50 }).notNull(), // Meeting, Call, Email, Task, Note
+  scheduledAt: timestamp('scheduled_at').notNull(),
+  duration: integer('duration').default(30), // in minutes
+  status: varchar('status', { length: 20 }).notNull().default('scheduled'), // Scheduled, Completed, Cancelled, No Show
+  location: varchar('location', { length: 255 }),
+  createdBy: varchar('created_by', { length: 255 }).notNull(),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// CRM Calls Log
+export const crmCalls = pgTable('crm_calls', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  customerId: uuid('customer_id').references(() => customers.id),
+  leadId: uuid('lead_id').references(() => leads.id),
+  callType: varchar('call_type', { length: 50 }).notNull(), // Incoming, Outgoing, Missed
+  subject: varchar('subject', { length: 255 }).notNull(),
+  duration: integer('duration').default(0), // in seconds
+  summary: text('summary'),
+  outcome: varchar('outcome', { length: 100 }), // Connected, Voicemail, No Answer, Busy, etc.
+  followUpDate: timestamp('follow_up_date'),
+  createdBy: varchar('created_by', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ==========================================
+// SALES MODULE ADDITIONAL TABLES
+// ==========================================
+
+// Quotations
+export const quotations = pgTable('quotations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  quotationNumber: varchar('quotation_number', { length: 50 }).notNull(),
+  customerId: uuid('customer_id').references(() => customers.id).notNull(),
+  subject: varchar('subject', { length: 255 }).default(''),
+  reference: varchar('reference', { length: 100 }).default(''),
+  issueDate: timestamp('issue_date').notNull(),
+  expiryDate: timestamp('expiry_date'),
+  status: quotationStatusEnum('status').notNull().default('draft'),
+  grossAmount: decimal('gross_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  shippingCharges: decimal('shipping_charges', { precision: 12, scale: 2 }).notNull().default('0'),
+  roundOff: decimal('round_off', { precision: 12, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  notes: text('notes'),
+  terms: text('terms'),
+  convertedToInvoiceId: uuid('converted_to_invoice_id').references(() => invoices.id),
+  isConverted: boolean('is_converted').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Quotation Items
+export const quotationItems = pgTable('quotation_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  quotationId: uuid('quotation_id').references(() => quotations.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
+});
+
+// Delivery Notes
+export const deliveryNotes = pgTable('delivery_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  deliveryNumber: varchar('delivery_number', { length: 50 }).notNull(),
+  invoiceId: uuid('invoice_id').references(() => invoices.id),
+  orderId: uuid('order_id').references(() => saleOrders.id),
+  customerId: uuid('customer_id').references(() => customers.id).notNull(),
+  deliveryDate: timestamp('delivery_date').notNull(),
+  status: deliveryStatusEnum('status').notNull().default('pending'),
+  shippedVia: varchar('shipped_via', { length: 100 }),
+  trackingNumber: varchar('tracking_number', { length: 100 }),
+  deliveredBy: varchar('delivered_by', { length: 255 }),
+  deliveryAddress: text('delivery_address'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Delivery Note Items
+export const deliveryNoteItems = pgTable('delivery_note_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  deliveryNoteId: uuid('delivery_note_id').references(() => deliveryNotes.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  orderedQty: decimal('ordered_qty', { precision: 10, scale: 2 }).notNull(),
+  deliveredQty: decimal('delivered_qty', { precision: 10, scale: 2 }).notNull(),
+});
+
+// Recurring Invoices
+export const recurringInvoices = pgTable('recurring_invoices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  customerId: uuid('customer_id').references(() => customers.id).notNull(),
+  templateName: varchar('template_name', { length: 255 }).notNull(),
+  interval: recurringIntervalEnum('interval').notNull(),
+  startDate: timestamp('start_date').notNull(),
+  endDate: timestamp('end_date'),
+  nextInvoiceDate: timestamp('next_invoice_date'),
+  status: varchar('status', { length: 20 }).notNull().default('active'), // Active, Paused, Completed, Cancelled
+  lastGeneratedInvoiceId: uuid('last_generated_invoice_id').references(() => invoices.id),
+  // Invoice template fields
+  subject: varchar('subject', { length: 255 }).default(''),
+  notes: text('notes'),
+  terms: text('terms'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  shippingCharges: decimal('shipping_charges', { precision: 12, scale: 2 }).notNull().default('0'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Recurring Invoice Items
+export const recurringInvoiceItems = pgTable('recurring_invoice_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  recurringInvoiceId: uuid('recurring_invoice_id').references(() => recurringInvoices.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
+});
+
+// Sales Returns
+export const salesReturns = pgTable('sales_returns', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  returnNumber: varchar('return_number', { length: 50 }).notNull(),
+  invoiceId: uuid('invoice_id').references(() => invoices.id),
+  customerId: uuid('customer_id').references(() => customers.id).notNull(),
+  returnDate: timestamp('return_date').notNull(),
+  reason: returnReasonEnum('reason').notNull(),
+  reasonDetails: text('reason_details'),
+  grossAmount: decimal('gross_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  refundAmount: decimal('refund_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  status: varchar('status', { length: 20 }).notNull().default('pending'), // Pending, Approved, Refunded, Cancelled
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Sales Return Items
+export const salesReturnItems = pgTable('sales_return_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  salesReturnId: uuid('sales_return_id').references(() => salesReturns.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull(),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull(),
+});
+
+// ==========================================
+// PURCHASES MODULE ADDITIONAL TABLES
+// ==========================================
+
+// Purchase Orders
+export const purchaseOrders = pgTable('purchase_orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  orderNumber: varchar('order_number', { length: 50 }).notNull(),
+  vendorId: uuid('vendor_id').references(() => vendors.id).notNull(),
+  orderDate: timestamp('order_date').notNull(),
+  expectedDeliveryDate: timestamp('expected_delivery_date'),
+  reference: varchar('reference', { length: 100 }).default(''),
+  subject: varchar('subject', { length: 255 }).default(''),
+  grossAmount: decimal('gross_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  shippingCharges: decimal('shipping_charges', { precision: 12, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  status: orderStatusEnum('status').notNull().default('draft'),
+  notes: text('notes'),
+  terms: text('terms'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Purchase Order Items
+export const purchaseOrderItems = pgTable('purchase_order_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  purchaseOrderId: uuid('purchase_order_id').references(() => purchaseOrders.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
+});
+
+// Good Receiving Notes (GRN)
+export const goodReceivingNotes = pgTable('good_receiving_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  grnNumber: varchar('grn_number', { length: 50 }).notNull(),
+  purchaseOrderId: uuid('purchase_order_id').references(() => purchaseOrders.id),
+  purchaseInvoiceId: uuid('purchase_invoice_id').references(() => purchaseInvoices.id),
+  vendorId: uuid('vendor_id').references(() => vendors.id).notNull(),
+  receivingDate: timestamp('receiving_date').notNull(),
+  reference: varchar('reference', { length: 100 }).default(''),
+  status: varchar('status', { length: 20 }).notNull().default('received'), // Received, Inspected, Accepted, Rejected
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// GRN Items
+export const grnItems = pgTable('grn_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  grnId: uuid('grn_id').references(() => goodReceivingNotes.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  orderedQty: decimal('ordered_qty', { precision: 10, scale: 2 }).notNull(),
+  receivedQty: decimal('received_qty', { precision: 10, scale: 2 }).notNull(),
+  acceptedQty: decimal('accepted_qty', { precision: 10, scale: 2 }).notNull(),
+  rejectedQty: decimal('rejected_qty', { precision: 10, scale: 2 }).default('0'),
+});
+
+// Purchase Returns
+export const purchaseReturns = pgTable('purchase_returns', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  returnNumber: varchar('return_number', { length: 50 }).notNull(),
+  purchaseInvoiceId: uuid('purchase_invoice_id').references(() => purchaseInvoices.id),
+  vendorId: uuid('vendor_id').references(() => vendors.id).notNull(),
+  returnDate: timestamp('return_date').notNull(),
+  reason: returnReasonEnum('reason').notNull(),
+  reasonDetails: text('reason_details'),
+  grossAmount: decimal('gross_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  refundAmount: decimal('refund_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  status: varchar('status', { length: 20 }).notNull().default('pending'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Purchase Return Items
+export const purchaseReturnItems = pgTable('purchase_return_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  purchaseReturnId: uuid('purchase_return_id').references(() => purchaseReturns.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull(),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull(),
+});
+
+// ==========================================
+// PAYMENTS & SETTLEMENT TABLES
+// ==========================================
+
+// Customer Payments (Receive Payments)
+export const customerPayments = pgTable('customer_payments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  paymentNumber: varchar('payment_number', { length: 50 }).notNull(),
+  customerId: uuid('customer_id').references(() => customers.id).notNull(),
+  paymentDate: timestamp('payment_date').notNull(),
+  paymentMethod: paymentMethodEnum('payment_method').notNull(),
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  reference: varchar('reference', { length: 100 }).default(''),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Customer Payment Allocations (Settlement)
+export const customerPaymentAllocations = pgTable('customer_payment_allocations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  customerPaymentId: uuid('customer_payment_id').references(() => customerPayments.id).notNull(),
+  invoiceId: uuid('invoice_id').references(() => invoices.id).notNull(),
+  allocatedAmount: decimal('allocated_amount', { precision: 12, scale: 2 }).notNull(),
+});
+
+// Vendor Payments
+export const vendorPayments = pgTable('vendor_payments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  paymentNumber: varchar('payment_number', { length: 50 }).notNull(),
+  vendorId: uuid('vendor_id').references(() => vendors.id).notNull(),
+  paymentDate: timestamp('payment_date').notNull(),
+  paymentMethod: paymentMethodEnum('payment_method').notNull(),
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  reference: varchar('reference', { length: 100 }).default(''),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Vendor Payment Allocations (Settlement)
+export const vendorPaymentAllocations = pgTable('vendor_payment_allocations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  vendorPaymentId: uuid('vendor_payment_id').references(() => vendorPayments.id).notNull(),
+  purchaseInvoiceId: uuid('purchase_invoice_id').references(() => purchaseInvoices.id).notNull(),
+  allocatedAmount: decimal('allocated_amount', { precision: 12, scale: 2 }).notNull(),
+});
+
+// Settlements (Generic for both customer and vendor)
+export const settlements = pgTable('settlements', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  settlementNumber: varchar('settlement_number', { length: 50 }).notNull(),
+  entityType: varchar('entity_type', { length: 20 }).notNull(), // customer, vendor
+  entityId: uuid('entity_id').notNull(), // customerId or vendorId
+  settlementDate: timestamp('settlement_date').notNull(),
+  totalOutstanding: decimal('total_outstanding', { precision: 12, scale: 2 }).notNull(),
+  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).default('0'),
+  paidAmount: decimal('paid_amount', { precision: 12, scale: 2 }).notNull(),
+  adjustedAmount: decimal('adjusted_amount', { precision: 12, scale: 2 }).default('0'),
+  status: settlementStatusEnum('status').notNull().default('pending'),
+  paymentMethod: paymentMethodEnum('payment_method'),
+  reference: varchar('reference', { length: 100 }).default(''),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Settlement Lines
+export const settlementLines = pgTable('settlement_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  settlementId: uuid('settlement_id').references(() => settlements.id).notNull(),
+  documentType: varchar('document_type', { length: 20 }).notNull(), // invoice, credit_note, debit_note
+  documentId: uuid('document_id').notNull(),
+  originalAmount: decimal('original_amount', { precision: 12, scale: 2 }).notNull(),
+  paidAmount: decimal('paid_amount', { precision: 12, scale: 2 }).default('0'),
+  adjustedAmount: decimal('adjusted_amount', { precision: 12, scale: 2 }).default('0'),
+  discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).default('0'),
+  balanceAmount: decimal('balance_amount', { precision: 12, scale: 2 }).notNull(),
+});
 
 // TypeScript types
 export type Organization = typeof organizations.$inferSelect;
@@ -690,3 +1082,390 @@ export const jobOrderComponentsRelations = relations(jobOrderComponents, ({ one 
     references: [products.id],
   }),
 }));
+
+// ==========================================
+// CRM RELATIONS
+// ==========================================
+export const leadsRelations = relations(leads, ({ one, many }) => ({
+  convertedCustomer: one(customers, {
+    fields: [leads.convertedToCustomerId],
+    references: [customers.id],
+  }),
+  tickets: many(tickets),
+  events: many(crmEvents),
+  calls: many(crmCalls),
+}));
+
+export const ticketsRelations = relations(tickets, ({ one }) => ({
+  customer: one(customers, {
+    fields: [tickets.customerId],
+    references: [customers.id],
+  }),
+  lead: one(leads, {
+    fields: [tickets.leadId],
+    references: [leads.id],
+  }),
+}));
+
+export const crmEventsRelations = relations(crmEvents, ({ one }) => ({
+  customer: one(customers, {
+    fields: [crmEvents.customerId],
+    references: [customers.id],
+  }),
+  lead: one(leads, {
+    fields: [crmEvents.leadId],
+    references: [leads.id],
+  }),
+}));
+
+export const crmCallsRelations = relations(crmCalls, ({ one }) => ({
+  customer: one(customers, {
+    fields: [crmCalls.customerId],
+    references: [customers.id],
+  }),
+  lead: one(leads, {
+    fields: [crmCalls.leadId],
+    references: [leads.id],
+  }),
+}));
+
+// ==========================================
+// SALES RELATIONS
+// ==========================================
+export const quotationsRelations = relations(quotations, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [quotations.customerId],
+    references: [customers.id],
+  }),
+  items: many(quotationItems),
+  convertedInvoice: one(invoices, {
+    fields: [quotations.convertedToInvoiceId],
+    references: [invoices.id],
+  }),
+}));
+
+export const quotationItemsRelations = relations(quotationItems, ({ one }) => ({
+  quotation: one(quotations, {
+    fields: [quotationItems.quotationId],
+    references: [quotations.id],
+  }),
+  product: one(products, {
+    fields: [quotationItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const deliveryNotesRelations = relations(deliveryNotes, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [deliveryNotes.customerId],
+    references: [customers.id],
+  }),
+  invoice: one(invoices, {
+    fields: [deliveryNotes.invoiceId],
+    references: [invoices.id],
+  }),
+  order: one(saleOrders, {
+    fields: [deliveryNotes.orderId],
+    references: [saleOrders.id],
+  }),
+  items: many(deliveryNoteItems),
+}));
+
+export const deliveryNoteItemsRelations = relations(deliveryNoteItems, ({ one }) => ({
+  deliveryNote: one(deliveryNotes, {
+    fields: [deliveryNoteItems.deliveryNoteId],
+    references: [deliveryNotes.id],
+  }),
+  product: one(products, {
+    fields: [deliveryNoteItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const recurringInvoicesRelations = relations(recurringInvoices, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [recurringInvoices.customerId],
+    references: [customers.id],
+  }),
+  items: many(recurringInvoiceItems),
+  lastInvoice: one(invoices, {
+    fields: [recurringInvoices.lastGeneratedInvoiceId],
+    references: [invoices.id],
+  }),
+}));
+
+export const recurringInvoiceItemsRelations = relations(recurringInvoiceItems, ({ one }) => ({
+  recurringInvoice: one(recurringInvoices, {
+    fields: [recurringInvoiceItems.recurringInvoiceId],
+    references: [recurringInvoices.id],
+  }),
+  product: one(products, {
+    fields: [recurringInvoiceItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const salesReturnsRelations = relations(salesReturns, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [salesReturns.customerId],
+    references: [customers.id],
+  }),
+  invoice: one(invoices, {
+    fields: [salesReturns.invoiceId],
+    references: [invoices.id],
+  }),
+  items: many(salesReturnItems),
+}));
+
+export const salesReturnItemsRelations = relations(salesReturnItems, ({ one }) => ({
+  salesReturn: one(salesReturns, {
+    fields: [salesReturnItems.salesReturnId],
+    references: [salesReturns.id],
+  }),
+  product: one(products, {
+    fields: [salesReturnItems.productId],
+    references: [products.id],
+  }),
+}));
+
+// ==========================================
+// PURCHASES RELATIONS
+// ==========================================
+export const purchaseOrdersRelations = relations(purchaseOrders, ({ one, many }) => ({
+  vendor: one(vendors, {
+    fields: [purchaseOrders.vendorId],
+    references: [vendors.id],
+  }),
+  items: many(purchaseOrderItems),
+}));
+
+export const purchaseOrderItemsRelations = relations(purchaseOrderItems, ({ one }) => ({
+  purchaseOrder: one(purchaseOrders, {
+    fields: [purchaseOrderItems.purchaseOrderId],
+    references: [purchaseOrders.id],
+  }),
+  product: one(products, {
+    fields: [purchaseOrderItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const goodReceivingNotesRelations = relations(goodReceivingNotes, ({ one, many }) => ({
+  vendor: one(vendors, {
+    fields: [goodReceivingNotes.vendorId],
+    references: [vendors.id],
+  }),
+  purchaseOrder: one(purchaseOrders, {
+    fields: [goodReceivingNotes.purchaseOrderId],
+    references: [purchaseOrders.id],
+  }),
+  purchaseInvoice: one(purchaseInvoices, {
+    fields: [goodReceivingNotes.purchaseInvoiceId],
+    references: [purchaseInvoices.id],
+  }),
+  items: many(grnItems),
+}));
+
+export const grnItemsRelations = relations(grnItems, ({ one }) => ({
+  grn: one(goodReceivingNotes, {
+    fields: [grnItems.grnId],
+    references: [goodReceivingNotes.id],
+  }),
+  product: one(products, {
+    fields: [grnItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const purchaseReturnsRelations = relations(purchaseReturns, ({ one, many }) => ({
+  vendor: one(vendors, {
+    fields: [purchaseReturns.vendorId],
+    references: [vendors.id],
+  }),
+  purchaseInvoice: one(purchaseInvoices, {
+    fields: [purchaseReturns.purchaseInvoiceId],
+    references: [purchaseInvoices.id],
+  }),
+  items: many(purchaseReturnItems),
+}));
+
+export const purchaseReturnItemsRelations = relations(purchaseReturnItems, ({ one }) => ({
+  purchaseReturn: one(purchaseReturns, {
+    fields: [purchaseReturnItems.purchaseReturnId],
+    references: [purchaseReturns.id],
+  }),
+  product: one(products, {
+    fields: [purchaseReturnItems.productId],
+    references: [products.id],
+  }),
+}));
+
+// ==========================================
+// PAYMENTS & SETTLEMENTS RELATIONS
+// ==========================================
+export const customerPaymentsRelations = relations(customerPayments, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [customerPayments.customerId],
+    references: [customers.id],
+  }),
+  allocations: many(customerPaymentAllocations),
+}));
+
+export const customerPaymentAllocationsRelations = relations(customerPaymentAllocations, ({ one }) => ({
+  payment: one(customerPayments, {
+    fields: [customerPaymentAllocations.customerPaymentId],
+    references: [customerPayments.id],
+  }),
+  invoice: one(invoices, {
+    fields: [customerPaymentAllocations.invoiceId],
+    references: [invoices.id],
+  }),
+}));
+
+export const vendorPaymentsRelations = relations(vendorPayments, ({ one, many }) => ({
+  vendor: one(vendors, {
+    fields: [vendorPayments.vendorId],
+    references: [vendors.id],
+  }),
+  allocations: many(vendorPaymentAllocations),
+}));
+
+export const vendorPaymentAllocationsRelations = relations(vendorPaymentAllocations, ({ one }) => ({
+  payment: one(vendorPayments, {
+    fields: [vendorPaymentAllocations.vendorPaymentId],
+    references: [vendorPayments.id],
+  }),
+  purchaseInvoice: one(purchaseInvoices, {
+    fields: [vendorPaymentAllocations.purchaseInvoiceId],
+    references: [purchaseInvoices.id],
+  }),
+}));
+
+export const settlementsRelations = relations(settlements, ({ many }) => ({
+  lines: many(settlementLines),
+}));
+
+export const settlementLinesRelations = relations(settlementLines, ({ one }) => ({
+  settlement: one(settlements, {
+    fields: [settlementLines.settlementId],
+    references: [settlements.id],
+  }),
+}));
+
+// ==========================================
+// NEW TYPESCRIPT TYPES
+// ==========================================
+
+// CRM Types
+export type Lead = typeof leads.$inferSelect;
+export type NewLead = typeof leads.$inferInsert;
+export type Ticket = typeof tickets.$inferSelect;
+export type NewTicket = typeof tickets.$inferInsert;
+export type CrmEvent = typeof crmEvents.$inferSelect;
+export type NewCrmEvent = typeof crmEvents.$inferInsert;
+export type CrmCall = typeof crmCalls.$inferSelect;
+export type NewCrmCall = typeof crmCalls.$inferInsert;
+
+// Sales Types
+export type Quotation = typeof quotations.$inferSelect;
+export type NewQuotation = typeof quotations.$inferInsert;
+export type QuotationItem = typeof quotationItems.$inferSelect;
+export type NewQuotationItem = typeof quotationItems.$inferInsert;
+export type DeliveryNote = typeof deliveryNotes.$inferSelect;
+export type NewDeliveryNote = typeof deliveryNotes.$inferInsert;
+export type DeliveryNoteItem = typeof deliveryNoteItems.$inferSelect;
+export type NewDeliveryNoteItem = typeof deliveryNoteItems.$inferInsert;
+export type RecurringInvoice = typeof recurringInvoices.$inferSelect;
+export type NewRecurringInvoice = typeof recurringInvoices.$inferInsert;
+export type RecurringInvoiceItem = typeof recurringInvoiceItems.$inferSelect;
+export type NewRecurringInvoiceItem = typeof recurringInvoiceItems.$inferInsert;
+export type SalesReturn = typeof salesReturns.$inferSelect;
+export type NewSalesReturn = typeof salesReturns.$inferInsert;
+export type SalesReturnItem = typeof salesReturnItems.$inferSelect;
+export type NewSalesReturnItem = typeof salesReturnItems.$inferInsert;
+
+// Purchases Types
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+export type NewPurchaseOrder = typeof purchaseOrders.$inferInsert;
+export type PurchaseOrderItem = typeof purchaseOrderItems.$inferSelect;
+export type NewPurchaseOrderItem = typeof purchaseOrderItems.$inferInsert;
+export type GoodReceivingNote = typeof goodReceivingNotes.$inferSelect;
+export type NewGoodReceivingNote = typeof goodReceivingNotes.$inferInsert;
+export type GrnItem = typeof grnItems.$inferSelect;
+export type NewGrnItem = typeof grnItems.$inferInsert;
+export type PurchaseReturn = typeof purchaseReturns.$inferSelect;
+export type NewPurchaseReturn = typeof purchaseReturns.$inferInsert;
+export type PurchaseReturnItem = typeof purchaseReturnItems.$inferSelect;
+export type NewPurchaseReturnItem = typeof purchaseReturnItems.$inferInsert;
+
+// Payments & Settlements Types
+export type CustomerPayment = typeof customerPayments.$inferSelect;
+export type NewCustomerPayment = typeof customerPayments.$inferInsert;
+export type CustomerPaymentAllocation = typeof customerPaymentAllocations.$inferSelect;
+export type NewCustomerPaymentAllocation = typeof customerPaymentAllocations.$inferInsert;
+export type VendorPayment = typeof vendorPayments.$inferSelect;
+export type NewVendorPayment = typeof vendorPayments.$inferInsert;
+export type VendorPaymentAllocation = typeof vendorPaymentAllocations.$inferSelect;
+export type NewVendorPaymentAllocation = typeof vendorPaymentAllocations.$inferInsert;
+export type Settlement = typeof settlements.$inferSelect;
+export type NewSettlement = typeof settlements.$inferInsert;
+export type SettlementLine = typeof settlementLines.$inferSelect;
+export type NewSettlementLine = typeof settlementLines.$inferInsert;
+
+// Export complete schema
+export const schema = {
+  organizations,
+  profiles,
+  chartOfAccounts,
+  productCategories,
+  products,
+  customers,
+  invoices,
+  invoiceItems,
+  saleOrders,
+  orderItems,
+  employees,
+  attendance,
+  payrollRuns,
+  payslips,
+  auditLogs,
+  journalEntries,
+  journalEntryLines,
+  vendors,
+  purchaseInvoices,
+  purchaseItems,
+  expenses,
+  manufacturingBoms,
+  bomItems,
+  jobOrders,
+  jobOrderComponents,
+  // CRM
+  leads,
+  tickets,
+  crmEvents,
+  crmCalls,
+  // Sales
+  quotations,
+  quotationItems,
+  deliveryNotes,
+  deliveryNoteItems,
+  recurringInvoices,
+  recurringInvoiceItems,
+  salesReturns,
+  salesReturnItems,
+  // Purchases
+  purchaseOrders,
+  purchaseOrderItems,
+  goodReceivingNotes,
+  grnItems,
+  purchaseReturns,
+  purchaseReturnItems,
+  // Payments & Settlements
+  customerPayments,
+  customerPaymentAllocations,
+  vendorPayments,
+  vendorPaymentAllocations,
+  settlements,
+  settlementLines,
+};
+
