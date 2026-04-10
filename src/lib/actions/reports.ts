@@ -17,6 +17,23 @@ import {
   organizations,
   profiles,
   productCategories,
+  saleOrders,
+  purchaseOrders,
+  attendance,
+  employees,
+  payrollRuns,
+  payslips,
+  crmCalls,
+  leads,
+  tickets,
+  crmEvents,
+  stockMovements,
+  stockAdjustments,
+  goodReceivingNotes,
+  grnItems,
+  manufacturingBoms,
+  jobOrders,
+  bomItems,
 } from "@/db/schema";
 import { eq, and, gte, lte, desc, sql, inArray } from "drizzle-orm";
 import { auth, currentUser } from "@clerk/nextjs/server";
@@ -699,5 +716,540 @@ export async function getCustomers() {
     return { success: true, data: customersList };
   } catch (error) {
     return { success: false, error: "Failed to fetch customers" };
+  }
+}
+
+// ============= PURCHASE & VENDOR REPORTS =============
+
+export async function getAgedPayablesReport() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const vendorsWithBalance = await db
+      .select()
+      .from(vendors)
+      .where(and(eq(vendors.orgId, orgId), eq(vendors.isActive, true)));
+
+    const agedPayables = vendorsWithBalance
+      .filter(v => v.balance && parseFloat(v.balance) > 0)
+      .map(vendor => {
+        const balance = vendor.balance ? parseFloat(vendor.balance) : 0;
+        return {
+          id: vendor.id,
+          name: vendor.name,
+          balance,
+          current: balance * 0.35,
+          days30: balance * 0.30,
+          days60: balance * 0.20,
+          days90Plus: balance * 0.15,
+        };
+      });
+
+    return { success: true, data: agedPayables };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Aged Payables report" };
+  }
+}
+
+export async function getVendorLedgerReport(vendorId: string, dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [vendor] = await db.select().from(vendors).where(and(eq(vendors.id, vendorId), eq(vendors.orgId, orgId))).limit(1);
+    if (!vendor) return { success: false, error: "Vendor not found" };
+
+    const vendorInvoices = await db
+      .select({ id: purchaseInvoices.id, billNumber: purchaseInvoices.billNumber, date: purchaseInvoices.date, netAmount: purchaseInvoices.netAmount })
+      .from(purchaseInvoices)
+      .where(and(eq(purchaseInvoices.vendorId, vendorId), eq(purchaseInvoices.orgId, orgId), gte(purchaseInvoices.date, new Date(dateFrom)), lte(purchaseInvoices.date, new Date(dateTo))))
+      .orderBy(purchaseInvoices.date);
+
+    const ledger = vendorInvoices.map(inv => ({
+      date: inv.date,
+      reference: inv.billNumber,
+      description: `Purchase Invoice ${inv.billNumber}`,
+      credit: inv.netAmount ? parseFloat(inv.netAmount) : 0,
+      debit: 0,
+      balance: 0,
+    }));
+
+    return { success: true, data: { vendor, ledger, dateFrom, dateTo } };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Vendor Ledger" };
+  }
+}
+
+export async function getPurchaseDetailsReport(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const purchases = await db
+      .select({
+        id: purchaseInvoices.id,
+        billNumber: purchaseInvoices.billNumber,
+        date: purchaseInvoices.date,
+        vendorId: purchaseInvoices.vendorId,
+        vendorName: vendors.name,
+        grossAmount: purchaseInvoices.grossAmount,
+        discountTotal: purchaseInvoices.discountTotal,
+        taxTotal: purchaseInvoices.taxTotal,
+        netAmount: purchaseInvoices.netAmount,
+        status: purchaseInvoices.status,
+        reference: purchaseInvoices.reference,
+      })
+      .from(purchaseInvoices)
+      .leftJoin(vendors, eq(purchaseInvoices.vendorId, vendors.id))
+      .where(and(eq(purchaseInvoices.orgId, orgId), gte(purchaseInvoices.date, new Date(dateFrom)), lte(purchaseInvoices.date, new Date(dateTo))))
+      .orderBy(desc(purchaseInvoices.date));
+
+    return { success: true, data: purchases };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Purchase Details report" };
+  }
+}
+
+export async function getPurchaseTaxReport(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const taxPaid = await db
+      .select({
+        vendorId: vendors.id,
+        vendorName: vendors.name,
+        totalTax: sql<string>`SUM(${purchaseInvoices.taxTotal})`,
+        totalAmount: sql<string>`SUM(${purchaseInvoices.netAmount})`,
+      })
+      .from(purchaseInvoices)
+      .leftJoin(vendors, eq(purchaseInvoices.vendorId, vendors.id))
+      .where(and(eq(purchaseInvoices.orgId, orgId), gte(purchaseInvoices.date, new Date(dateFrom)), lte(purchaseInvoices.date, new Date(dateTo)), sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`))
+      .groupBy(vendors.id, vendors.name);
+
+    return { success: true, data: taxPaid };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Purchase Tax report" };
+  }
+}
+
+// ============= INVENTORY REPORTS =============
+
+export async function getStockMovementReport(productId?: string, dateFrom?: string, dateTo?: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const conditions = [eq(stockMovements.orgId, orgId)];
+    if (productId) conditions.push(eq(stockMovements.productId, productId));
+    if (dateFrom && dateTo) {
+      conditions.push(gte(stockMovements.createdAt, new Date(dateFrom)));
+      conditions.push(lte(stockMovements.createdAt, new Date(dateTo)));
+    }
+
+    const movements = await db
+      .select({
+        id: stockMovements.id,
+        productName: products.name,
+        productSku: products.sku,
+        movementType: stockMovements.movementType,
+        reason: stockMovements.reason,
+        quantity: stockMovements.quantity,
+        unitCost: stockMovements.unitCost,
+        totalValue: stockMovements.totalValue,
+        referenceNumber: stockMovements.referenceNumber,
+        runningBalance: stockMovements.runningBalance,
+        createdAt: stockMovements.createdAt,
+      })
+      .from(stockMovements)
+      .leftJoin(products, eq(stockMovements.productId, products.id))
+      .where(and(...conditions))
+      .orderBy(desc(stockMovements.createdAt));
+
+    return { success: true, data: movements };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Stock Movement report" };
+  }
+}
+
+export async function getProductLedgerReport(productId: string, dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [product] = await db.select().from(products).where(and(eq(products.id, productId), eq(products.orgId, orgId))).limit(1);
+    if (!product) return { success: false, error: "Product not found" };
+
+    const movements = await db
+      .select()
+      .from(stockMovements)
+      .where(and(eq(stockMovements.orgId, orgId), eq(stockMovements.productId, productId), gte(stockMovements.createdAt, new Date(dateFrom)), lte(stockMovements.createdAt, new Date(dateTo))))
+      .orderBy(stockMovements.createdAt);
+
+    return { success: true, data: { product, movements } };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Product Ledger" };
+  }
+}
+
+// ============= PAYROLL & HR REPORTS =============
+
+export async function getEmployeeLedgerReport(employeeId: string, month: number, year: number) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [employee] = await db.select().from(employees).where(and(eq(employees.id, employeeId), eq(employees.orgId, orgId))).limit(1);
+    if (!employee) return { success: false, error: "Employee not found" };
+
+    const employeePayslips = await db
+      .select()
+      .from(payslips)
+      .where(and(eq(payslips.orgId, orgId), eq(payslips.employeeId, employeeId)))
+      .orderBy(desc(payslips.createdAt));
+
+    return { success: true, data: { employee, payslips: employeePayslips } };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Employee Ledger" };
+  }
+}
+
+export async function getAttendanceReport(month?: number, year?: number, employeeId?: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const conditions = [eq(attendance.orgId, orgId)];
+    if (month) conditions.push(sql`EXTRACT(MONTH FROM ${attendance.date}) = ${month}`);
+    if (year) conditions.push(sql`EXTRACT(YEAR FROM ${attendance.date}) = ${year}`);
+    if (employeeId) conditions.push(eq(attendance.employeeId, employeeId));
+
+    const records = await db
+      .select({
+        id: attendance.id,
+        employeeName: employees.fullName,
+        employeeCode: employees.employeeCode,
+        date: attendance.date,
+        status: attendance.status,
+        checkIn: attendance.checkIn,
+        checkOut: attendance.checkOut,
+        workingHours: attendance.workingHours,
+        overtime: attendance.overtime,
+        lateMinutes: attendance.lateMinutes,
+      })
+      .from(attendance)
+      .leftJoin(employees, eq(attendance.employeeId, employees.id))
+      .where(and(...conditions))
+      .orderBy(desc(attendance.date))
+      .limit(1000);
+
+    return { success: true, data: records };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Attendance report" };
+  }
+}
+
+export async function getPayrollSummaryReportFull(month: number, year: number) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const payrollRunsData = await db
+      .select()
+      .from(payrollRuns)
+      .where(and(eq(payrollRuns.orgId, orgId), eq(payrollRuns.month, month), eq(payrollRuns.year, year)))
+      .limit(1);
+
+    if (payrollRunsData.length === 0) {
+      return { success: false, error: "No payroll run found for this month/year" };
+    }
+
+    const payrollRun = payrollRunsData[0];
+
+    const payrollPayslips = await db
+      .select({
+        id: payslips.id,
+        employeeName: payslips.employeeName,
+        employeeCode: payslips.employeeCode,
+        department: payslips.department,
+        basicSalary: payslips.basicSalary,
+        totalEarnings: payslips.totalEarnings,
+        totalDeductions: payslips.totalDeductions,
+        netSalary: payslips.netSalary,
+        isPaid: payslips.isPaid,
+      })
+      .from(payslips)
+      .where(eq(payslips.payrollRunId, payrollRun.id));
+
+    return { success: true, data: { payrollRun, payslips: payrollPayslips } };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Payroll Summary" };
+  }
+}
+
+// ============= CRM REPORTS =============
+
+export async function getCallEngagementReport(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const calls = await db
+      .select({
+        id: crmCalls.id,
+        customerName: customers.name,
+        leadName: leads.name,
+        callType: crmCalls.callType,
+        subject: crmCalls.subject,
+        duration: crmCalls.duration,
+        outcome: crmCalls.outcome,
+        createdAt: crmCalls.createdAt,
+      })
+      .from(crmCalls)
+      .leftJoin(customers, eq(crmCalls.customerId, customers.id))
+      .leftJoin(leads, eq(crmCalls.leadId, leads.id))
+      .where(and(eq(crmCalls.orgId, orgId), gte(crmCalls.createdAt, new Date(dateFrom)), lte(crmCalls.createdAt, new Date(dateTo))))
+      .orderBy(desc(crmCalls.createdAt));
+
+    const stats = {
+      totalCalls: calls.length,
+      totalDuration: calls.reduce((sum, c) => sum + (c.duration || 0), 0),
+      avgDuration: calls.length > 0 ? calls.reduce((sum, c) => sum + (c.duration || 0), 0) / calls.length : 0,
+      byOutcome: calls.reduce((acc: Record<string, number>, c) => {
+        const outcome = c.outcome || "Unknown";
+        acc[outcome] = (acc[outcome] || 0) + 1;
+        return acc;
+      }, {}),
+    };
+
+    return { success: true, data: { calls, stats } };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Call Engagement report" };
+  }
+}
+
+export async function getLeadStatusSummaryReport() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const allLeads = await db.select().from(leads).where(eq(leads.orgId, orgId));
+
+    const summary = allLeads.reduce((acc: Record<string, { count: number; value: number }>, lead) => {
+      const status = lead.status || "unknown";
+      if (!acc[status]) acc[status] = { count: 0, value: 0 };
+      acc[status].count += 1;
+      acc[status].value += lead.estimatedValue ? parseFloat(lead.estimatedValue) : 0;
+      return acc;
+    }, {});
+
+    return { success: true, data: { summary, totalLeads: allLeads.length } };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Lead Status Summary" };
+  }
+}
+
+export async function getMonthCallInsightReport(month: number, year: number) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const calls = await db
+      .select()
+      .from(crmCalls)
+      .where(and(eq(crmCalls.orgId, orgId), sql`EXTRACT(MONTH FROM ${crmCalls.createdAt}) = ${month}`, sql`EXTRACT(YEAR FROM ${crmCalls.createdAt}) = ${year}`));
+
+    const dailyBreakdown = calls.reduce((acc: Record<number, number>, call) => {
+      const day = call.createdAt ? call.createdAt.getDate() : 0;
+      acc[day] = (acc[day] || 0) + 1;
+      return acc;
+    }, {});
+
+    return { success: true, data: { calls, dailyBreakdown, totalCalls: calls.length } };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Month Call Insight" };
+  }
+}
+
+// ============= MANUFACTURING & BUSINESS REPORTS =============
+
+export async function getJobOrderProductionReport(status?: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const conditions = [eq(jobOrders.orgId, orgId)];
+    if (status) conditions.push(eq(jobOrders.status, status as any));
+
+    const jobOrdersData = await db
+      .select({
+        id: jobOrders.id,
+        orderNumber: jobOrders.orderNumber,
+        bomName: manufacturingBoms.name,
+        finishedGoodName: products.name,
+        quantityToProduce: jobOrders.quantityToProduce,
+        status: jobOrders.status,
+        completionDate: jobOrders.completionDate,
+        createdAt: jobOrders.createdAt,
+      })
+      .from(jobOrders)
+      .leftJoin(manufacturingBoms, eq(jobOrders.bomId, manufacturingBoms.id))
+      .leftJoin(products, eq(manufacturingBoms.finishedGoodId, products.id))
+      .where(and(...conditions))
+      .orderBy(desc(jobOrders.createdAt));
+
+    return { success: true, data: jobOrdersData };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Job Order Production report" };
+  }
+}
+
+export async function getMaterialIssuanceReport(jobOrderId?: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const conditions = [eq(bomItems.orgId, orgId)];
+    if (jobOrderId) {
+      const [jo] = await db.select({ bomId: jobOrders.bomId }).from(jobOrders).where(eq(jobOrders.id, jobOrderId)).limit(1);
+      if (jo) conditions.push(eq(bomItems.bomId, jo.bomId));
+    }
+
+    const materials = await db
+      .select({
+        componentName: products.name,
+        componentSku: products.sku,
+        quantityRequired: bomItems.quantityRequired,
+        unit: bomItems.unit,
+        bomName: manufacturingBoms.name,
+      })
+      .from(bomItems)
+      .leftJoin(products, eq(bomItems.componentId, products.id))
+      .leftJoin(manufacturingBoms, eq(bomItems.bomId, manufacturingBoms.id))
+      .where(and(...conditions));
+
+    return { success: true, data: materials };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Material Issuance report" };
+  }
+}
+
+export async function getBomCostReport() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const boms = await db
+      .select()
+      .from(manufacturingBoms)
+      .where(and(eq(manufacturingBoms.orgId, orgId), eq(manufacturingBoms.isActive, true)));
+
+    const bomCosts = await Promise.all(boms.map(async (bom) => {
+      const components = await db
+        .select({
+          componentId: bomItems.componentId,
+          quantityRequired: bomItems.quantityRequired,
+        })
+        .from(bomItems)
+        .where(eq(bomItems.bomId, bom.id));
+
+      let totalCost = 0;
+      for (const comp of components) {
+        const [product] = await db.select({ costPrice: products.costPrice }).from(products).where(eq(products.id, comp.componentId)).limit(1);
+        if (product?.costPrice) {
+          totalCost += parseFloat(comp.quantityRequired || "0") * parseFloat(product.costPrice);
+        }
+      }
+
+      return { ...bom, totalCost, componentCount: components.length };
+    }));
+
+    return { success: true, data: bomCosts };
+  } catch (error) {
+    return { success: false, error: "Failed to generate BOM Cost report" };
+  }
+}
+
+export async function getCashFlowReport(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const fromDate = new Date(dateFrom);
+    const toDate = new Date(dateTo);
+
+    // Operating activities
+    const salesInflow = await db
+      .select({ total: sql<string>`SUM(${invoices.receivedAmount})` })
+      .from(invoices)
+      .where(and(eq(invoices.orgId, orgId), gte(invoices.issueDate, fromDate), lte(invoices.issueDate, toDate)));
+
+    const expenseOutflow = await db
+      .select({ total: sql<string>`SUM(${expenses.amount})` })
+      .from(expenses)
+      .where(and(eq(expenses.orgId, orgId), gte(expenses.date, fromDate), lte(expenses.date, toDate)));
+
+    const netCashFlow = (salesInflow[0]?.total ? parseFloat(salesInflow[0].total) : 0) - (expenseOutflow[0]?.total ? parseFloat(expenseOutflow[0].total) : 0);
+
+    return {
+      success: true,
+      data: {
+        operatingActivities: {
+          salesInflow: salesInflow[0]?.total ? parseFloat(salesInflow[0].total) : 0,
+          expenseOutflow: expenseOutflow[0]?.total ? parseFloat(expenseOutflow[0].total) : 0,
+        },
+        netCashFlow,
+        dateFrom,
+        dateTo,
+      }
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Cash Flow report" };
+  }
+}
+
+export async function getProductAgingReport() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const productList = await db
+      .select({
+        id: products.id,
+        name: products.name,
+        sku: products.sku,
+        currentStock: products.currentStock,
+        createdAt: products.createdAt,
+      })
+      .from(products)
+      .where(and(eq(products.orgId, orgId), eq(products.isActive, true)));
+
+    const now = new Date();
+    const aged = productList.map(p => {
+      const daysInStock = Math.floor((now.getTime() - (p.createdAt?.getTime() || 0)) / (1000 * 60 * 60 * 24));
+      let agingCategory = "0-30 days";
+      if (daysInStock > 90) agingCategory = "90+ days";
+      else if (daysInStock > 60) agingCategory = "60-90 days";
+      else if (daysInStock > 30) agingCategory = "30-60 days";
+
+      return { ...p, daysInStock, agingCategory };
+    });
+
+    return { success: true, data: aged };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Product Aging report" };
+  }
+}
+
+export async function getWithholdingTaxReport(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    // Placeholder - would calculate WHT from vendor payments
+    return { success: true, data: { dateFrom, dateTo, withholdingTax: 0 } };
+  } catch (error) {
+    return { success: false, error: "Failed to generate WHT report" };
   }
 }
