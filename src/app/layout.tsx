@@ -6,8 +6,40 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "NexaBook - The All-in-One Operating System for Your Business",
+  title: "NexaBook - Enterprise Cloud ERP",
   description: "Invoicing, Inventory, Payroll, and Accounting — localized for Pakistan and built for the world.",
+  keywords: ["ERP", "accounting", "invoicing", "inventory", "payroll", "business software", "cloud ERP"],
+  authors: [{ name: "NexaBook" }],
+  creator: "NexaBook",
+  publisher: "NexaBook",
+  metadataBase: new URL("https://nexabook.com"),
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: "https://nexabook.com",
+    title: "NexaBook - Enterprise Cloud ERP",
+    description: "Invoicing, Inventory, Payroll, and Accounting — localized for Pakistan and built for the world.",
+    siteName: "NexaBook",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "NexaBook - Enterprise Cloud ERP",
+    description: "Invoicing, Inventory, Payroll, and Accounting — localized for Pakistan and built for the world.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
 };
 
 export default function RootLayout({

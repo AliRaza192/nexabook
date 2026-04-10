@@ -95,7 +95,7 @@ export default function NewSaleOrderPage() {
         if (customersRes.success && customersRes.data) setCustomers(customersRes.data as Customer[]);
         if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
         if (orderNumRes.success && orderNumRes.data) setOrderNumber(orderNumRes.data as string);
-      } catch (error) { console.error(error); } finally { setLoading(false); }
+      } catch (error) { } finally { setLoading(false); }
     };
     loadData();
   }, []);
@@ -150,7 +150,7 @@ export default function NewSaleOrderPage() {
         if (action === "close" || action === "approve" || action === "approve-print") router.push("/sales/orders");
         else { alert(`Order ${result.orderNumber} saved!`); router.refresh(); }
       } else { alert(result.error || "Failed"); }
-    } catch (error) { console.error(error); alert("Failed"); } finally { setSubmitting(false); }
+    } catch (error) { alert("Failed"); } finally { setSubmitting(false); }
   };
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" /><p className="text-gray-600">Loading...</p></div>;

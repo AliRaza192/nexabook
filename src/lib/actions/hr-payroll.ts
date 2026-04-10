@@ -34,7 +34,6 @@ async function getCurrentOrgId(): Promise<string | null> {
     }
     return null;
   } catch (error) {
-    console.error("getCurrentOrgId error:", error);
     return null;
   }
 }
@@ -56,7 +55,6 @@ async function getCurrentUserName(): Promise<string | null> {
     }
     return null;
   } catch (error) {
-    console.error("getCurrentUserName error:", error);
     return null;
   }
 }
@@ -126,7 +124,6 @@ export async function getEmployees(status?: string, searchQuery?: string, depart
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getEmployees error:", error);
     return { success: false, error: "Failed to fetch employees" };
   }
 }
@@ -147,7 +144,6 @@ export async function getEmployee(id: string) {
 
     return { success: true, data: result[0] };
   } catch (error) {
-    console.error("getEmployee error:", error);
     return { success: false, error: "Failed to fetch employee" };
   }
 }
@@ -207,7 +203,6 @@ export async function createEmployee(data: EmployeeFormData) {
     revalidatePath('/hr-payroll/employees');
     return { success: true, data: newEmployee, message: "Employee created successfully" };
   } catch (error: any) {
-    console.error("createEmployee error:", error);
     if (error.code === '23505') { // Unique violation
       return { success: false, error: "Employee code already exists" };
     }
@@ -273,7 +268,6 @@ export async function updateEmployee(id: string, data: EmployeeFormData) {
     revalidatePath('/hr-payroll/employees');
     return { success: true, data: updatedEmployee, message: "Employee updated successfully" };
   } catch (error: any) {
-    console.error("updateEmployee error:", error);
     if (error.code === '23505') {
       return { success: false, error: "Employee code already exists" };
     }
@@ -308,7 +302,6 @@ export async function deleteEmployee(id: string) {
     revalidatePath('/hr-payroll/employees');
     return { success: true, message: "Employee removed successfully" };
   } catch (error) {
-    console.error("deleteEmployee error:", error);
     return { success: false, error: "Failed to remove employee" };
   }
 }
@@ -358,7 +351,6 @@ export async function getAttendance(startDate: string, endDate: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getAttendance error:", error);
     return { success: false, error: "Failed to fetch attendance" };
   }
 }
@@ -420,7 +412,6 @@ export async function markAttendance(records: AttendanceRecord[]) {
     revalidatePath('/hr-payroll/attendance');
     return { success: true, message: `Attendance marked for ${records.length} employees` };
   } catch (error) {
-    console.error("markAttendance error:", error);
     return { success: false, error: "Failed to mark attendance" };
   }
 }
@@ -581,7 +572,6 @@ export async function getPayrollCalculations(month: number, year: number) {
 
     return { success: true, data: calculations };
   } catch (error) {
-    console.error("getPayrollCalculations error:", error);
     return { success: false, error: "Failed to calculate payroll" };
   }
 }
@@ -814,7 +804,6 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
       journalEntryId: journalEntry.id,
     };
   } catch (error) {
-    console.error("generateAndApprovePayroll error:", error);
     return { success: false, error: "Failed to process payroll" };
   }
 }
@@ -835,7 +824,6 @@ export async function getPayrollRuns() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getPayrollRuns error:", error);
     return { success: false, error: "Failed to fetch payroll runs" };
   }
 }
@@ -854,7 +842,6 @@ export async function getPayslips(payrollRunId: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getPayslips error:", error);
     return { success: false, error: "Failed to fetch payslips" };
   }
 }
@@ -875,7 +862,6 @@ export async function getPayslip(id: string) {
 
     return { success: true, data: result[0] };
   } catch (error) {
-    console.error("getPayslip error:", error);
     return { success: false, error: "Failed to fetch payslip" };
   }
 }
@@ -899,7 +885,6 @@ export async function markPayslipPaid(id: string, paymentMethod: string) {
     revalidatePath('/hr-payroll/reports');
     return { success: true, message: "Payslip marked as paid" };
   } catch (error) {
-    console.error("markPayslipPaid error:", error);
     return { success: false, error: "Failed to mark payslip as paid" };
   }
 }
@@ -923,7 +908,6 @@ export async function getDepartments() {
 
     return { success: true, data: departments };
   } catch (error) {
-    console.error("getDepartments error:", error);
     return { success: false, error: "Failed to fetch departments" };
   }
 }

@@ -46,7 +46,6 @@ async function getCurrentOrgId(): Promise<string | null> {
     // Auto-onboarding: User doesn't have a profile yet, create one automatically
     const user = await currentUser();
     if (!user) {
-      console.error("getCurrentOrgId: Unable to fetch current user");
       return null;
     }
 
@@ -66,7 +65,6 @@ async function getCurrentOrgId(): Promise<string | null> {
       .returning({ id: organizations.id });
 
     if (!newOrg || newOrg.length === 0) {
-      console.error("getCurrentOrgId: Failed to create organization");
       return null;
     }
 
@@ -84,11 +82,8 @@ async function getCurrentOrgId(): Promise<string | null> {
       email: userEmail,
     });
 
-    console.log(`Auto-onboarding: Created organization ${newOrgId} for user ${userId}`);
-
     return newOrgId;
   } catch (error) {
-    console.error("getCurrentOrgId: Error during auto-onboarding:", error);
     return null;
   }
 }
@@ -110,7 +105,6 @@ export async function getAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
-    console.error("Error fetching accounts:", error);
     return { success: false, error: "Failed to fetch accounts" };
   }
 }
@@ -253,7 +247,6 @@ export async function seedInitialCOA() {
       count: accountsToInsert.length
     };
   } catch (error) {
-    console.error("Error seeding COA:", error);
     return { success: false, error: "Failed to seed chart of accounts" };
   }
 }
@@ -346,7 +339,6 @@ export async function createJournalEntry(data: JournalEntryData) {
       entryNumber
     };
   } catch (error) {
-    console.error("Error creating journal entry:", error);
     return { success: false, error: "Failed to create journal entry" };
   }
 }
@@ -366,7 +358,6 @@ export async function getAccountById(accountId: string) {
 
     return { success: true, data: account[0] };
   } catch (error) {
-    console.error("Error fetching account:", error);
     return { success: false, error: "Failed to fetch account" };
   }
 }

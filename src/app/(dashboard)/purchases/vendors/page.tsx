@@ -131,7 +131,6 @@ function AddVendorDialog({ open, onOpenChange, onVendorCreated }: {
         alert(result.error || "Failed to create vendor");
       }
     } catch (error) {
-      console.error(error);
       alert("Failed to create vendor");
     } finally {
       setSubmitting(false);
@@ -266,7 +265,6 @@ export default function VendorsPage() {
         setStats({ totalVendors, activeVendors, totalPayable });
       }
     } catch (error) {
-      console.error("Failed to load vendors:", error);
     } finally {
       setLoading(false);
     }

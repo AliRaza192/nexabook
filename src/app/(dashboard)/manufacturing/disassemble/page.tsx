@@ -103,7 +103,6 @@ export default function DisassemblePage() {
         setProducts(productData.filter((p) => p.type === "product"));
       }
     } catch (error) {
-      console.error("Failed to load data:", error);
     } finally {
       setLoading(false);
     }
@@ -189,7 +188,6 @@ export default function DisassemblePage() {
         alert(result.error || "Failed to disassemble");
       }
     } catch (error) {
-      console.error("Error during disassembly:", error);
       alert("An error occurred during disassembly");
     } finally {
       setSubmitting(false);

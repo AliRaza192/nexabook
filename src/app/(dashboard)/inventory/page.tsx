@@ -396,7 +396,6 @@ export default function InventoryPage() {
         setStats(statsRes.data);
       }
     } catch (error) {
-      console.error("Failed to load inventory data:", error);
     } finally {
       setLoading(false);
     }
@@ -420,7 +419,6 @@ export default function InventoryPage() {
         alert(result.error || "Failed to add product");
       }
     } catch (error) {
-      console.error("Error adding product:", error);
       alert("Failed to add product");
     } finally {
       setSubmitting(false);

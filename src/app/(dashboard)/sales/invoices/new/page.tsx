@@ -223,7 +223,6 @@ export default function NewInvoicePage() {
         if (invoiceNumRes.success && invoiceNumRes.data) setInvoiceNumber(invoiceNumRes.data as string);
         if (cashBankRes.success && cashBankRes.data) setCashBankAccounts(cashBankRes.data as CashBankAccount[]);
       } catch (error) {
-        console.error("Failed to load data:", error);
       } finally {
         setLoading(false);
       }
@@ -318,7 +317,7 @@ export default function NewInvoicePage() {
         if (action === "close" || action === "approve" || action === "approve-print") router.push("/sales/invoices");
         else { alert(`Invoice ${result.invoiceNumber} saved!`); router.refresh(); }
       } else { alert(result.error || "Failed"); }
-    } catch (error) { console.error(error); alert("Failed"); } finally { setSubmitting(false); }
+    } catch (error) { alert("Failed"); } finally { setSubmitting(false); }
   };
 
   if (loading) {

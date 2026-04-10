@@ -25,10 +25,9 @@ export default function ProfitAndLossReportPage() {
       if (result.success && result.data) {
         setReportData(result.data);
       } else {
-        console.error(result.error);
+        // Error handled silently
       }
     } catch (error) {
-      console.error("Failed to load report:", error);
     } finally {
       setLoading(false);
     }

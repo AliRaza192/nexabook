@@ -62,7 +62,6 @@ async function getCurrentOrgId(): Promise<string | null> {
 
     return newProfile.orgId;
   } catch (error) {
-    console.error("getCurrentOrgId error:", error);
     return null;
   }
 }
@@ -129,7 +128,6 @@ export async function getCustomers(searchQuery?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getCustomers error:", error);
     return { success: false, error: "Failed to fetch customers" };
   }
 }
@@ -154,7 +152,6 @@ export async function getCustomerById(customerId: string) {
 
     return { success: true, data: customer };
   } catch (error) {
-    console.error("getCustomerById error:", error);
     return { success: false, error: "Failed to fetch customer" };
   }
 }
@@ -192,7 +189,6 @@ export async function createCustomer(data: CustomerFormData) {
 
     return { success: true, data: newCustomer, message: "Customer created successfully" };
   } catch (error) {
-    console.error("createCustomer error:", error);
     return { success: false, error: "Failed to create customer" };
   }
 }
@@ -229,7 +225,6 @@ export async function updateCustomer(customerId: string, data: Partial<CustomerF
 
     return { success: true, data: updatedCustomer, message: "Customer updated successfully" };
   } catch (error) {
-    console.error("updateCustomer error:", error);
     return { success: false, error: "Failed to update customer" };
   }
 }
@@ -251,7 +246,6 @@ export async function deleteCustomer(customerId: string) {
 
     return { success: true, message: "Customer deleted successfully" };
   } catch (error) {
-    console.error("deleteCustomer error:", error);
     return { success: false, error: "Failed to delete customer" };
   }
 }
@@ -337,7 +331,6 @@ export async function getInvoices(searchQuery?: string, statusFilter?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getInvoices error:", error);
     return { success: false, error: "Failed to fetch invoices" };
   }
 }
@@ -367,7 +360,6 @@ export async function getInvoiceById(invoiceId: string) {
 
     return { success: true, data: { ...invoice, items } };
   } catch (error) {
-    console.error("getInvoiceById error:", error);
     return { success: false, error: "Failed to fetch invoice" };
   }
 }
@@ -501,7 +493,6 @@ export async function createInvoice(data: InvoiceFormData) {
       invoiceNumber
     };
   } catch (error) {
-    console.error("createInvoice error:", error);
     return { success: false, error: "Failed to create invoice" };
   }
 }
@@ -688,7 +679,6 @@ export async function approveInvoice(invoiceId: string) {
 
     return result;
   } catch (error) {
-    console.error("approveInvoice error:", error);
     return { success: false, error: error instanceof Error ? error.message : "Failed to approve invoice" };
   }
 }
@@ -715,7 +705,6 @@ export async function updateInvoiceStatus(invoiceId: string, status: 'draft' | '
 
     return { success: true, data: updatedInvoice, message: "Invoice status updated" };
   } catch (error) {
-    console.error("updateInvoiceStatus error:", error);
     return { success: false, error: "Failed to update invoice status" };
   }
 }
@@ -742,7 +731,6 @@ export async function deleteInvoice(invoiceId: string) {
 
     return { success: true, message: "Invoice deleted successfully" };
   } catch (error) {
-    console.error("deleteInvoice error:", error);
     return { success: false, error: "Failed to delete invoice" };
   }
 }
@@ -783,7 +771,6 @@ export async function getInvoiceStats() {
       },
     };
   } catch (error) {
-    console.error("getInvoiceStats error:", error);
     return { success: false, error: "Failed to fetch invoice stats" };
   }
 }
@@ -840,16 +827,6 @@ export async function createInvoiceJournalEntry(invoiceId: string) {
     // Note: This function is deprecated - use approveInvoice instead
     // which creates proper journal entries with the new schema
 
-    // For now, just log the entry
-    console.log('Journal Entry for Invoice:', {
-      invoiceId,
-      debit: { account: 'Accounts Receivable', amount: invoice.netAmount },
-      credits: [
-        { account: 'Sales Revenue', amount: invoice.grossAmount },
-        { account: 'Sales Tax Payable', amount: invoice.taxAmount },
-      ],
-    });
-
     // Create audit log
     await db.insert(auditLogs).values({
       orgId,
@@ -866,7 +843,6 @@ export async function createInvoiceJournalEntry(invoiceId: string) {
 
     return { success: true, message: "Journal entry created for invoice" };
   } catch (error) {
-    console.error("createInvoiceJournalEntry error:", error);
     return { success: false, error: "Failed to create journal entry" };
   }
 }
@@ -895,15 +871,14 @@ export async function getCashBankAccounts() {
       .orderBy(chartOfAccounts.code);
 
     // Filter for cash and bank accounts specifically
-    const cashBankAccounts = accounts.filter(acc => 
-      acc.name.toLowerCase().includes('cash') || 
+    const cashBankAccounts = accounts.filter(acc =>
+      acc.name.toLowerCase().includes('cash') ||
       acc.name.toLowerCase().includes('bank') ||
       acc.code.startsWith('11') // Common prefix for cash/bank accounts
     );
 
     return { success: true, data: cashBankAccounts };
   } catch (error) {
-    console.error("getCashBankAccounts error:", error);
     return { success: false, error: "Failed to fetch cash/bank accounts" };
   }
 }
@@ -919,7 +894,6 @@ export async function getNextInvoiceNumber() {
     const invoiceNumber = await generateInvoiceNumber(orgId);
     return { success: true, data: invoiceNumber };
   } catch (error) {
-    console.error("getNextInvoiceNumber error:", error);
     return { success: false, error: "Failed to generate invoice number" };
   }
 }
@@ -979,7 +953,6 @@ export async function getNextSaleOrderNumber() {
     const orderNumber = await generateSaleOrderNumber(orgId);
     return { success: true, data: orderNumber };
   } catch (error) {
-    console.error("getNextSaleOrderNumber error:", error);
     return { success: false, error: "Failed to generate sale order number" };
   }
 }
@@ -1063,7 +1036,6 @@ export async function createSaleOrder(data: SaleOrderFormData) {
       orderNumber
     };
   } catch (error) {
-    console.error("createSaleOrder error:", error);
     return { success: false, error: "Failed to create sale order" };
   }
 }
@@ -1115,7 +1087,6 @@ export async function approveSaleOrder(orderId: string) {
 
     return { success: true, data: updatedOrder, message: 'Sale order approved' };
   } catch (error) {
-    console.error("approveSaleOrder error:", error);
     return { success: false, error: "Failed to approve sale order" };
   }
 }
@@ -1165,7 +1136,6 @@ export async function getSaleOrders(searchQuery?: string, statusFilter?: string)
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getSaleOrders error:", error);
     return { success: false, error: "Failed to fetch sale orders" };
   }
 }
@@ -1195,7 +1165,6 @@ export async function getSaleOrderById(orderId: string) {
 
     return { success: true, data: { ...order, items } };
   } catch (error) {
-    console.error("getSaleOrderById error:", error);
     return { success: false, error: "Failed to fetch sale order" };
   }
 }

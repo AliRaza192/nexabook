@@ -27,7 +27,6 @@ export default function CustomerLedgerReportPage() {
           setCustomers(result.data as Array<{ id: string; name: string }>);
         }
       } catch (error) {
-        console.error("Failed to load customers:", error);
       }
     };
 
@@ -51,10 +50,9 @@ export default function CustomerLedgerReportPage() {
       if (result.success && result.data) {
         setReportData(result.data);
       } else {
-        console.error(result.error);
+        // Error handled silently
       }
     } catch (error) {
-      console.error("Failed to load report:", error);
     } finally {
       setLoading(false);
     }

@@ -55,7 +55,6 @@ async function getCurrentOrgId(): Promise<string | null> {
 
     return org.id;
   } catch (error) {
-    console.error("getCurrentOrgId error:", error);
     return null;
   }
 }
@@ -132,7 +131,6 @@ export async function getCurrentPosShift() {
 
     return { success: true, data: shift[0] };
   } catch (error) {
-    console.error("getCurrentPosShift error:", error);
     return { success: false, error: "Failed to fetch shift" };
   }
 }
@@ -254,7 +252,6 @@ export async function startShift(openingAmount: number) {
     revalidatePath('/pos');
     return { success: true, data: shift, message: "Shift started successfully" };
   } catch (error) {
-    console.error("startShift error:", error);
     return { success: false, error: "Failed to start shift" };
   }
 }
@@ -347,7 +344,6 @@ export async function endShift(actualCash: number, expectedCash: number) {
       data: { expectedCash, actualCash, variance }
     };
   } catch (error) {
-    console.error("endShift error:", error);
     return { success: false, error: "Failed to end shift" };
   }
 }
@@ -554,7 +550,6 @@ export async function processPosSale(saleData: PosSaleData) {
       netAmount
     };
   } catch (error) {
-    console.error("processPosSale error:", error);
     return { success: false, error: "Failed to process sale" };
   }
 }
@@ -637,7 +632,6 @@ export async function getPosProducts(searchQuery?: string, categoryId?: string) 
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getPosProducts error:", error);
     return { success: false, error: "Failed to fetch products" };
   }
 }
@@ -659,7 +653,6 @@ export async function getPosCategories() {
 
     return { success: true, data: categories };
   } catch (error) {
-    console.error("getPosCategories error:", error);
     return { success: false, error: "Failed to fetch categories" };
   }
 }

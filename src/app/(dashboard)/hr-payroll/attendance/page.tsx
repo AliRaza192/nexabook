@@ -85,7 +85,6 @@ export default function AttendancePage() {
         setEmployees(result.data as Employee[]);
       }
     } catch (error) {
-      console.error("Failed to load employees:", error);
     } finally {
       setLoading(false);
     }
@@ -128,7 +127,6 @@ export default function AttendancePage() {
         alert(result.error || "Failed to save attendance");
       }
     } catch (error) {
-      console.error("Save attendance error:", error);
       alert("Failed to save attendance");
     } finally {
       setSaving(false);

@@ -121,7 +121,6 @@ export default function SaleOrdersPage() {
         setOrders(ordersRes.data as SaleOrder[]);
       }
     } catch (error) {
-      console.error("Failed to load orders:", error);
     } finally {
       setLoading(false);
     }

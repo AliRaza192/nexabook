@@ -213,7 +213,6 @@ export default function CustomersPage() {
         setCustomers(result.data as Customer[]);
       }
     } catch (error) {
-      console.error("Failed to load customers:", error);
     } finally {
       setLoading(false);
     }
@@ -235,7 +234,6 @@ export default function CustomersPage() {
         alert(result.error || "Failed to create customer");
       }
     } catch (error) {
-      console.error("Error creating customer:", error);
       alert("Failed to create customer");
     } finally {
       setSubmitting(false);

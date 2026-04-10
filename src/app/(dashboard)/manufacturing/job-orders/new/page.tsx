@@ -135,7 +135,6 @@ export default function JobOrdersPage() {
         setBoms(bomsRes.data as unknown as BomSelect[]);
       }
     } catch (error) {
-      console.error("Failed to load data:", error);
     } finally {
       setLoading(false);
     }
@@ -224,7 +223,6 @@ export default function JobOrdersPage() {
         alert(result.error || "Failed to create job order");
       }
     } catch (error) {
-      console.error("Error creating job order:", error);
       alert("An error occurred while creating the job order");
     } finally {
       setSubmitting(false);
@@ -247,7 +245,6 @@ export default function JobOrdersPage() {
         alert(result.error || "Failed to complete job order");
       }
     } catch (error) {
-      console.error("Error completing job order:", error);
       alert("An error occurred while completing the job order");
     } finally {
       setCompletingOrderId(null);
@@ -267,7 +264,6 @@ export default function JobOrdersPage() {
         alert(result.error || "Failed to delete job order");
       }
     } catch (error) {
-      console.error("Error deleting job order:", error);
       alert("An error occurred while deleting the job order");
     }
   };

@@ -126,7 +126,6 @@ export default function EmployeesPage() {
         setDepartments(departmentsRes.data as string[]);
       }
     } catch (error) {
-      console.error("Failed to load data:", error);
     } finally {
       setLoading(false);
     }
@@ -220,7 +219,6 @@ export default function EmployeesPage() {
         alert(result.error || "Failed to save employee");
       }
     } catch (error) {
-      console.error("Save error:", error);
       alert("Failed to save employee");
     } finally {
       setSubmitting(false);

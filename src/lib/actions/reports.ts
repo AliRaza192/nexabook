@@ -55,7 +55,6 @@ async function getCurrentOrgId(): Promise<string | null> {
 
     return newProfile.orgId;
   } catch (error) {
-    console.error("getCurrentOrgId error:", error);
     return null;
   }
 }
@@ -177,7 +176,6 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
       }
     };
   } catch (error) {
-    console.error("getProfitAndLossReport error:", error);
     return { success: false, error: "Failed to generate Profit & Loss report" };
   }
 }
@@ -267,7 +265,6 @@ export async function getBalanceSheetReport(asOfDate: string) {
       }
     };
   } catch (error) {
-    console.error("getBalanceSheetReport error:", error);
     return { success: false, error: "Failed to generate Balance Sheet" };
   }
 }
@@ -386,7 +383,6 @@ export async function getCustomerLedgerReport(
       }
     };
   } catch (error) {
-    console.error("getCustomerLedgerReport error:", error);
     return { success: false, error: "Failed to generate Customer Ledger" };
   }
 }
@@ -423,7 +419,6 @@ export async function getAuditTrail(
 
     return { success: true, data: logs };
   } catch (error) {
-    console.error("getAuditTrail error:", error);
     return { success: false, error: "Failed to fetch audit trail" };
   }
 }
@@ -489,7 +484,6 @@ export async function getTrialBalanceReport(asOfDate: string) {
       }
     };
   } catch (error) {
-    console.error("getTrialBalanceReport error:", error);
     return { success: false, error: "Failed to generate Trial Balance" };
   }
 }
@@ -528,7 +522,6 @@ export async function getStockOnHandReport() {
 
     return { success: true, data: { items: itemsWithValue, totalValue } };
   } catch (error) {
-    console.error("getStockOnHandReport error:", error);
     return { success: false, error: "Failed to generate Stock on Hand report" };
   }
 }
@@ -554,7 +547,6 @@ export async function getLowStockReport() {
 
     return { success: true, data: lowStockItems };
   } catch (error) {
-    console.error("getLowStockReport error:", error);
     return { success: false, error: "Failed to generate Low Stock report" };
   }
 }
@@ -591,7 +583,6 @@ export async function getSalesByProductReport(dateFrom: string, dateTo: string) 
 
     return { success: true, data: salesData };
   } catch (error) {
-    console.error("getSalesByProductReport error:", error);
     return { success: false, error: "Failed to generate Sales by Product report" };
   }
 }
@@ -627,7 +618,6 @@ export async function getAgedReceivablesReport() {
 
     return { success: true, data: agedReceivables };
   } catch (error) {
-    console.error("getAgedReceivablesReport error:", error);
     return { success: false, error: "Failed to generate Aged Receivables report" };
   }
 }
@@ -643,7 +633,6 @@ export async function getPayrollSummaryReport(month: number, year: number) {
     // Placeholder implementation
     return { success: true, data: { month, year, summary: "Payroll summary report" } };
   } catch (error) {
-    console.error("getPayrollSummaryReport error:", error);
     return { success: false, error: "Failed to generate Payroll Summary" };
   }
 }
@@ -690,7 +679,6 @@ export async function getSalesTaxReport(dateFrom: string, dateTo: string) {
       }
     };
   } catch (error) {
-    console.error("getSalesTaxReport error:", error);
     return { success: false, error: "Failed to generate Sales Tax report" };
   }
 }
@@ -710,7 +698,6 @@ export async function getCustomers() {
 
     return { success: true, data: customersList };
   } catch (error) {
-    console.error("getCustomers error:", error);
     return { success: false, error: "Failed to fetch customers" };
   }
 }

@@ -58,7 +58,6 @@ async function getCurrentOrgId(): Promise<string | null> {
 
     return newProfile.orgId;
   } catch (error) {
-    console.error("getCurrentOrgId error:", error);
     return null;
   }
 }
@@ -144,7 +143,6 @@ export async function getVendors(searchQuery?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getVendors error:", error);
     return { success: false, error: "Failed to fetch vendors" };
   }
 }
@@ -173,7 +171,6 @@ export async function createVendor(data: VendorFormData) {
     revalidatePath('/purchases/vendors');
     return { success: true, data: newVendor, message: "Vendor created successfully" };
   } catch (error) {
-    console.error("createVendor error:", error);
     return { success: false, error: "Failed to create vendor" };
   }
 }
@@ -202,7 +199,6 @@ export async function updateVendor(vendorId: string, data: Partial<VendorFormDat
     revalidatePath('/purchases/vendors');
     return { success: true, data: updatedVendor, message: "Vendor updated successfully" };
   } catch (error) {
-    console.error("updateVendor error:", error);
     return { success: false, error: "Failed to update vendor" };
   }
 }
@@ -220,7 +216,6 @@ export async function deleteVendor(vendorId: string) {
     revalidatePath('/purchases/vendors');
     return { success: true, message: "Vendor deleted successfully" };
   } catch (error) {
-    console.error("deleteVendor error:", error);
     return { success: false, error: "Failed to delete vendor" };
   }
 }
@@ -293,7 +288,6 @@ export async function getPurchaseInvoices(searchQuery?: string, statusFilter?: s
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getPurchaseInvoices error:", error);
     return { success: false, error: "Failed to fetch purchase invoices" };
   }
 }
@@ -306,7 +300,6 @@ export async function getNextBillNumber() {
     const billNumber = await generateBillNumber(orgId);
     return { success: true, data: billNumber };
   } catch (error) {
-    console.error("getNextBillNumber error:", error);
     return { success: false, error: "Failed to generate bill number" };
   }
 }
@@ -377,7 +370,6 @@ export async function createPurchaseInvoice(data: PurchaseInvoiceFormData) {
       billNumber
     };
   } catch (error) {
-    console.error("createPurchaseInvoice error:", error);
     return { success: false, error: "Failed to create purchase invoice" };
   }
 }
@@ -541,7 +533,6 @@ export async function approvePurchaseInvoice(invoiceId: string) {
 
     return result;
   } catch (error) {
-    console.error("approvePurchaseInvoice error:", error);
     return { success: false, error: error instanceof Error ? error.message : "Failed to approve invoice" };
   }
 }
@@ -675,7 +666,6 @@ export async function revisePurchaseInvoice(invoiceId: string) {
 
     return result;
   } catch (error) {
-    console.error("revisePurchaseInvoice error:", error);
     return { success: false, error: error instanceof Error ? error.message : "Failed to revise invoice" };
   }
 }
@@ -700,7 +690,6 @@ export async function getPurchaseInvoiceById(invoiceId: string) {
 
     return { success: true, data: { ...invoice, items } };
   } catch (error) {
-    console.error("getPurchaseInvoiceById error:", error);
     return { success: false, error: "Failed to fetch invoice" };
   }
 }
@@ -786,7 +775,6 @@ export async function recordExpense(data: ExpenseFormData) {
 
     return { success: true, data: newExpense, message: "Expense recorded successfully", entryNumber };
   } catch (error) {
-    console.error("recordExpense error:", error);
     return { success: false, error: "Failed to record expense" };
   }
 }
@@ -824,7 +812,6 @@ export async function getExpenses(limit?: number) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getExpenses error:", error);
     return { success: false, error: "Failed to fetch expenses" };
   }
 }
@@ -851,7 +838,6 @@ export async function getExpenseAccounts() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getExpenseAccounts error:", error);
     return { success: false, error: "Failed to fetch expense accounts" };
   }
 }
@@ -881,7 +867,6 @@ export async function getCashBankAccounts() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getCashBankAccounts error:", error);
     return { success: false, error: "Failed to fetch cash/bank accounts" };
   }
 }

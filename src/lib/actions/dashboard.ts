@@ -51,7 +51,6 @@ async function getCurrentOrgId(): Promise<string | null> {
 
     return newProfile.orgId;
   } catch (error) {
-    console.error("getCurrentOrgId error:", error);
     return null;
   }
 }
@@ -382,7 +381,6 @@ export async function getDashboardData(dateRange?: { from: Date; to: Date }): Pr
       }
     };
   } catch (error) {
-    console.error("getDashboardData error:", error);
     return { success: false, error: "Failed to fetch dashboard data" };
   }
 }

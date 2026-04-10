@@ -118,7 +118,6 @@ export default function BOMPage() {
         setProducts(productData.filter((p) => p.type === "product"));
       }
     } catch (error) {
-      console.error("Failed to load data:", error);
     } finally {
       setLoading(false);
     }
@@ -207,7 +206,6 @@ export default function BOMPage() {
         alert(result.error || "Failed to create BOM");
       }
     } catch (error) {
-      console.error("Error creating BOM:", error);
       alert("An error occurred while creating the BOM");
     } finally {
       setSubmitting(false);
@@ -227,7 +225,6 @@ export default function BOMPage() {
         alert(result.error || "Failed to delete BOM");
       }
     } catch (error) {
-      console.error("Error deleting BOM:", error);
       alert("An error occurred while deleting the BOM");
     }
   };
@@ -243,7 +240,6 @@ export default function BOMPage() {
         alert(result.error || "Failed to update status");
       }
     } catch (error) {
-      console.error("Error updating status:", error);
       alert("An error occurred while updating the status");
     }
   };

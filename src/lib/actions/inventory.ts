@@ -32,7 +32,6 @@ async function getCurrentOrgId(): Promise<string | null> {
     // Auto-onboarding: User doesn't have a profile yet, create one automatically
     const user = await currentUser();
     if (!user) {
-      console.error("getCurrentOrgId: Unable to fetch current user");
       return null;
     }
 
@@ -61,7 +60,6 @@ async function getCurrentOrgId(): Promise<string | null> {
 
     return newProfile.orgId;
   } catch (error) {
-    console.error("getCurrentOrgId error:", error);
     return null;
   }
 }
@@ -167,7 +165,6 @@ export async function getProducts(searchQuery?: string, categoryId?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("getProducts error:", error);
     return { success: false, error: "Failed to fetch products" };
   }
 }
@@ -228,7 +225,6 @@ export async function addProduct(data: ProductFormData) {
     
     return { success: true, data: newProduct, message: "Product added successfully" };
   } catch (error) {
-    console.error("addProduct error:", error);
     return { success: false, error: "Failed to add product" };
   }
 }
@@ -249,7 +245,6 @@ export async function getCategories() {
 
     return { success: true, data: cats };
   } catch (error) {
-    console.error("getCategories error:", error);
     return { success: false, error: "Failed to fetch categories" };
   }
 }
@@ -293,7 +288,6 @@ export async function addCategory(data: CategoryFormData) {
     
     return { success: true, data: newCategory, message: "Category added successfully" };
   } catch (error) {
-    console.error("addCategory error:", error);
     return { success: false, error: "Failed to add category" };
   }
 }
@@ -318,7 +312,6 @@ export async function getProductById(productId: string) {
 
     return { success: true, data: product };
   } catch (error) {
-    console.error("getProductById error:", error);
     return { success: false, error: "Failed to fetch product" };
   }
 }
@@ -357,7 +350,6 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
     
     return { success: true, data: updatedProduct, message: "Product updated successfully" };
   } catch (error) {
-    console.error("updateProduct error:", error);
     return { success: false, error: "Failed to update product" };
   }
 }
@@ -379,7 +371,6 @@ export async function deleteProduct(productId: string) {
     
     return { success: true, message: "Product deleted successfully" };
   } catch (error) {
-    console.error("deleteProduct error:", error);
     return { success: false, error: "Failed to delete product" };
   }
 }
@@ -432,7 +423,6 @@ export async function getInventoryStats() {
       },
     };
   } catch (error) {
-    console.error("getInventoryStats error:", error);
     return { success: false, error: "Failed to fetch inventory stats" };
   }
 }
@@ -471,7 +461,6 @@ export async function getLowStockProducts() {
 
     return { success: true, data: filtered };
   } catch (error) {
-    console.error("getLowStockProducts error:", error);
     return { success: false, error: "Failed to fetch low stock products" };
   }
 }

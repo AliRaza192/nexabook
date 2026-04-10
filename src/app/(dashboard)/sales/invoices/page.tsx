@@ -161,7 +161,6 @@ export default function InvoicesPage() {
         setStats(statsRes.data);
       }
     } catch (error) {
-      console.error("Failed to load invoices:", error);
     } finally {
       setLoading(false);
     }

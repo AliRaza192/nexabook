@@ -257,7 +257,6 @@ export default function NewPurchaseInvoicePage() {
         if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
         if (billNumRes.success && billNumRes.data) setBillNumber(billNumRes.data as string);
       } catch (error) {
-        console.error("Failed to load data:", error);
       } finally {
         setLoading(false);
       }
@@ -382,7 +381,6 @@ export default function NewPurchaseInvoicePage() {
         alert(result.error || "Failed to create invoice");
       }
     } catch (error) {
-      console.error(error);
       alert("Failed to create invoice");
     } finally {
       setSubmitting(false);

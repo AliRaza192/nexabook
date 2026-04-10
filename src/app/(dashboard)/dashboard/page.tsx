@@ -183,10 +183,9 @@ export default function BIDashboard() {
       if (result.success && result.data) {
         setDashboardData(result.data);
       } else {
-        console.error(result.error);
+        // Error handled silently
       }
     } catch (error) {
-      console.error("Failed to load dashboard data:", error);
     } finally {
       setLoading(false);
     }

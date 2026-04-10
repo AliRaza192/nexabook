@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { UserButton, useUser } from "@clerk/nextjs";
+import { UserButton, SignOutButton, useUser } from "@clerk/nextjs";
 import {
   LayoutDashboard,
   Handshake,
@@ -26,6 +26,7 @@ import {
   Bell,
   ChevronLeft,
   Building,
+  LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -408,6 +409,13 @@ export default function DashboardLayout({
                 <Bell className="h-5 w-5 text-nexabook-600" />
                 <span className="absolute top-1.5 right-1.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white"></span>
               </button>
+
+              {/* Logout Button */}
+              <SignOutButton>
+                <button className="p-2 hover:bg-nexabook-100 rounded-lg transition-colors" title="Sign out">
+                  <LogOut className="h-5 w-5 text-nexabook-600" />
+                </button>
+              </SignOutButton>
 
               {/* Divider */}
               <div className="h-6 w-px bg-nexabook-200 hidden md:block" />

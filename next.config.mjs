@@ -8,9 +8,10 @@ const nextConfig = {
       },
     ],
   },
-  turbopack: {
-    root: "/home/aliraza/Desktop/nexa-book",
-  },
+  // Production optimizations
+  poweredByHeader: false,
+  compress: true,
+  reactStrictMode: true,
 };
 
 export default nextConfig;

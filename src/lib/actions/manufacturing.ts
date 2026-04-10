@@ -54,7 +54,6 @@ async function getCurrentOrgId(): Promise<string | null> {
 
     return newProfile.orgId;
   } catch (error) {
-    console.error("getCurrentOrgId error:", error);
     return null;
   }
 }
@@ -149,7 +148,6 @@ export async function getBoms(status?: string) {
 
     return { success: true, data: boms };
   } catch (error) {
-    console.error("getBoms error:", error);
     return { success: false, error: "Failed to fetch BOMs" };
   }
 }
@@ -208,7 +206,6 @@ export async function getBomById(bomId: string): Promise<{ success: boolean; dat
 
     return { success: true, data: { ...bom, bomItems: items } as BomWithDetails };
   } catch (error) {
-    console.error("getBomById error:", error);
     return { success: false, error: "Failed to fetch BOM" };
   }
 }
@@ -275,7 +272,6 @@ export async function createBom(data: BomFormData) {
     revalidatePath('/manufacturing/bom');
     return { success: true, data: newBom, message: "BOM created successfully" };
   } catch (error) {
-    console.error("createBom error:", error);
     return { success: false, error: "Failed to create BOM" };
   }
 }
@@ -294,7 +290,6 @@ export async function updateBomStatus(bomId: string, status: 'draft' | 'active' 
     revalidatePath('/manufacturing/bom');
     return { success: true, message: "BOM status updated successfully" };
   } catch (error) {
-    console.error("updateBomStatus error:", error);
     return { success: false, error: "Failed to update BOM status" };
   }
 }
@@ -313,7 +308,6 @@ export async function deleteBom(bomId: string) {
     revalidatePath('/manufacturing/bom');
     return { success: true, message: "BOM deleted successfully" };
   } catch (error) {
-    console.error("deleteBom error:", error);
     return { success: false, error: "Failed to delete BOM" };
   }
 }
@@ -348,7 +342,6 @@ export async function getNextJobOrderNumber() {
 
     return { success: true, data: `JO-${String(nextNumber).padStart(4, '0')}` };
   } catch (error) {
-    console.error("getNextJobOrderNumber error:", error);
     return { success: false, error: "Failed to generate order number" };
   }
 }
@@ -395,7 +388,6 @@ export async function getJobOrders(status?: string) {
 
     return { success: true, data: orders };
   } catch (error) {
-    console.error("getJobOrders error:", error);
     return { success: false, error: "Failed to fetch job orders" };
   }
 }
@@ -434,7 +426,6 @@ export async function getJobOrderById(jobOrderId: string) {
 
     return { success: true, data: { ...order, components } };
   } catch (error) {
-    console.error("getJobOrderById error:", error);
     return { success: false, error: "Failed to fetch job order" };
   }
 }
@@ -496,7 +487,6 @@ export async function createJobOrder(data: JobOrderFormData) {
     revalidatePath('/manufacturing/job-orders');
     return { success: true, data: newOrder, message: "Job order created successfully" };
   } catch (error) {
-    console.error("createJobOrder error:", error);
     return { success: false, error: "Failed to create job order" };
   }
 }
@@ -675,7 +665,6 @@ export async function completeJobOrder(jobOrderId: string) {
     revalidatePath('/manufacturing/job-orders');
     return { success: true, message: "Job order completed successfully. Inventory and accounts updated." };
   } catch (error) {
-    console.error("completeJobOrder error:", error);
     return { success: false, error: "Failed to complete job order" };
   }
 }
@@ -693,7 +682,6 @@ export async function deleteJobOrder(jobOrderId: string) {
     revalidatePath('/manufacturing/job-orders');
     return { success: true, message: "Job order deleted successfully" };
   } catch (error) {
-    console.error("deleteJobOrder error:", error);
     return { success: false, error: "Failed to delete job order" };
   }
 }
@@ -853,7 +841,6 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
     revalidatePath('/manufacturing/disassemble');
     return { success: true, message: "Disassembly completed successfully. Inventory updated." };
   } catch (error) {
-    console.error("disassembleFinishedGood error:", error);
     return { success: false, error: "Failed to disassemble finished good" };
   }
 }
@@ -872,7 +859,6 @@ export async function getProducts() {
 
     return { success: true, data: allProducts };
   } catch (error) {
-    console.error("getProducts error:", error);
     return { success: false, error: "Failed to fetch products" };
   }
 }

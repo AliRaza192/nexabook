@@ -160,7 +160,6 @@ export default function ExpensesPage() {
         setStats({ totalExpenses, totalAmount, thisMonth });
       }
     } catch (error) {
-      console.error("Failed to load data:", error);
     } finally {
       setLoading(false);
     }
@@ -207,7 +206,6 @@ export default function ExpensesPage() {
         alert(result.error || "Failed to record expense");
       }
     } catch (error) {
-      console.error(error);
       alert("Failed to record expense");
     } finally {
       setSubmitting(false);

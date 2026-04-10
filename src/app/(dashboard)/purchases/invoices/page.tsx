@@ -141,7 +141,6 @@ export default function PurchaseInvoicesPage() {
         setStats({ totalInvoices, totalPurchases, approvedInvoices, draftInvoices });
       }
     } catch (error) {
-      console.error("Failed to load purchase invoices:", error);
     } finally {
       setLoading(false);
     }

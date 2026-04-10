@@ -81,7 +81,6 @@ export default function RunPayrollPage() {
         alert(result.error || "Failed to generate payroll calculations");
       }
     } catch (error) {
-      console.error("Generate payroll error:", error);
       alert("Failed to generate payroll");
     } finally {
       setLoading(false);
@@ -104,7 +103,6 @@ export default function RunPayrollPage() {
         alert(result.error || "Failed to process payroll");
       }
     } catch (error) {
-      console.error("Approve payroll error:", error);
       alert("Failed to process payroll");
     } finally {
       setProcessing(false);

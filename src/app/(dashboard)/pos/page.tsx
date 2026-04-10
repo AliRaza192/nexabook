@@ -100,7 +100,6 @@ export default function PosPage() {
           setShiftOpen(true);
         }
       } catch (error) {
-        console.error("Failed to load POS data:", error);
       } finally {
         setLoading(false);
       }
@@ -191,7 +190,6 @@ export default function PosPage() {
         }
       }
     } catch (error) {
-      console.error("Shift error:", error);
       alert("Failed to process shift");
     } finally {
       setSubmitting(false);
@@ -232,7 +230,6 @@ export default function PosPage() {
         alert(result.error || "Failed to process sale");
       }
     } catch (error) {
-      console.error("Sale error:", error);
       alert("Failed to process sale");
     } finally {
       setSubmitting(false);

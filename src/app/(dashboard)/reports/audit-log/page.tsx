@@ -51,10 +51,9 @@ export default function AuditTrailPage() {
       if (result.success && result.data) {
         setAuditLogs(result.data);
       } else {
-        console.error(result.error);
+        // Error handled silently
       }
     } catch (error) {
-      console.error("Failed to load audit trail:", error);
     } finally {
       setLoading(false);
     }
