@@ -270,24 +270,122 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   }),
 }));
 
-// Employees
+// Employees (Enhanced with Pakistan-specific fields)
 export const employees = pgTable('employees', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   userId: varchar('user_id', { length: 255 }), // Links to profile if user has account
-  employeeCode: varchar('employee_code', { length: 50 }).notNull(),
+  employeeCode: varchar('employee_code', { length: 50 }).notNull().unique(),
   fullName: varchar('full_name', { length: 255 }).notNull(),
   email: varchar('email', { length: 255 }),
   phone: varchar('phone', { length: 20 }),
+  cnic: varchar('cnic', { length: 15 }), // Pakistani CNIC format: 12345-1234567-1
+  fatherName: varchar('father_name', { length: 255 }),
+  dateOfBirth: timestamp('date_of_birth'),
+  address: text('address'),
+  city: varchar('city', { length: 100 }),
   department: varchar('department', { length: 100 }),
   designation: varchar('designation', { length: 100 }),
-  basicSalary: decimal('basic_salary', { precision: 12, scale: 2 }),
-  bankAccount: varchar('bank_account', { length: 50 }),
+  joiningDate: timestamp('joining_date').notNull(),
+  confirmationDate: timestamp('confirmation_date'),
   bankName: varchar('bank_name', { length: 100 }),
-  cnic: varchar('cnic', { length: 15 }), // Pakistani CNIC format
-  joinDate: timestamp('join_date').notNull(),
+  accountNumber: varchar('account_number', { length: 50 }),
+  branchName: varchar('branch_name', { length: 100 }),
+  basicSalary: decimal('basic_salary', { precision: 12, scale: 2 }).notNull().default('0'),
+  houseRent: decimal('house_rent', { precision: 12, scale: 2 }).default('0'),
+  medicalAllowance: decimal('medical_allowance', { precision: 12, scale: 2 }).default('0'),
+  conveyanceAllowance: decimal('conveyance_allowance', { precision: 12, scale: 2 }).default('0'),
+  otherAllowances: decimal('other_allowances', { precision: 12, scale: 2 }).default('0'),
+  eobiDeduction: decimal('eobi_deduction', { precision: 12, scale: 2 }).default('0'), // EOBI deduction
+  incomeTaxDeduction: decimal('income_tax_deduction', { precision: 12, scale: 2 }).default('0'),
+  status: varchar('status', { length: 20 }).notNull().default('Active'), // Active, On Leave, Terminated
   exitDate: timestamp('exit_date'),
+  emergencyContact: varchar('emergency_contact', { length: 255 }),
+  emergencyPhone: varchar('emergency_phone', { length: 20 }),
   isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Attendance
+export const attendance = pgTable('attendance', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  employeeId: uuid('employee_id').references(() => employees.id).notNull(),
+  date: timestamp('date').notNull(),
+  status: varchar('status', { length: 20 }).notNull().default('Present'), // Present, Absent, Leave, Late, Half Day
+  checkIn: timestamp('check_in'),
+  checkOut: timestamp('check_out'),
+  workingHours: decimal('working_hours', { precision: 5, scale: 2 }),
+  overtime: decimal('overtime', { precision: 5, scale: 2 }).default('0'),
+  lateMinutes: integer('late_minutes').default(0),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Payroll Runs
+export const payrollRuns = pgTable('payroll_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  month: integer('month').notNull(), // 1-12
+  year: integer('year').notNull(),
+  title: varchar('title', { length: 100 }).notNull(), // e.g., "January 2026 Payroll"
+  totalEmployees: integer('total_employees').default(0),
+  totalGross: decimal('total_gross', { precision: 14, scale: 2 }).default('0'),
+  totalDeductions: decimal('total_deductions', { precision: 14, scale: 2 }).default('0'),
+  totalNet: decimal('total_net', { precision: 14, scale: 2 }).default('0'),
+  status: varchar('status', { length: 20 }).notNull().default('Draft'), // Draft, Processing, Approved, Posted
+  journalEntryId: uuid('journal_entry_id'),
+  processedBy: varchar('processed_by', { length: 255 }),
+  approvedBy: varchar('approved_by', { length: 255 }),
+  approvedAt: timestamp('approved_at'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Payslips
+export const payslips = pgTable('payslips', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  payrollRunId: uuid('payroll_run_id').references(() => payrollRuns.id).notNull(),
+  employeeId: uuid('employee_id').references(() => employees.id).notNull(),
+  employeeName: varchar('employee_name', { length: 255 }).notNull(),
+  employeeCode: varchar('employee_code', { length: 50 }).notNull(),
+  designation: varchar('designation', { length: 100 }),
+  department: varchar('department', { length: 100 }),
+  cnic: varchar('cnic', { length: 15 }),
+  bankName: varchar('bank_name', { length: 100 }),
+  accountNumber: varchar('account_number', { length: 50 }),
+  // Earnings
+  basicSalary: decimal('basic_salary', { precision: 12, scale: 2 }).notNull().default('0'),
+  houseRent: decimal('house_rent', { precision: 12, scale: 2 }).default('0'),
+  medicalAllowance: decimal('medical_allowance', { precision: 12, scale: 2 }).default('0'),
+  conveyanceAllowance: decimal('conveyance_allowance', { precision: 12, scale: 2 }).default('0'),
+  otherAllowances: decimal('other_allowances', { precision: 12, scale: 2 }).default('0'),
+  overtimePay: decimal('overtime_pay', { precision: 12, scale: 2 }).default('0'),
+  bonus: decimal('bonus', { precision: 12, scale: 2 }).default('0'),
+  totalEarnings: decimal('total_earnings', { precision: 12, scale: 2 }).notNull().default('0'),
+  // Deductions
+  eobiDeduction: decimal('eobi_deduction', { precision: 12, scale: 2 }).default('0'),
+  incomeTax: decimal('income_tax', { precision: 12, scale: 2 }).default('0'),
+  providentFund: decimal('provident_fund', { precision: 12, scale: 2 }).default('0'),
+  otherDeductions: decimal('other_deductions', { precision: 12, scale: 2 }).default('0'),
+  unpaidLeaveDeduction: decimal('unpaid_leave_deduction', { precision: 12, scale: 2 }).default('0'),
+  totalDeductions: decimal('total_deductions', { precision: 12, scale: 2 }).notNull().default('0'),
+  // Net
+  netSalary: decimal('net_salary', { precision: 12, scale: 2 }).notNull().default('0'),
+  // Attendance info
+  presentDays: decimal('present_days', { precision: 5, scale: 2 }).default('0'),
+  absentDays: decimal('absent_days', { precision: 5, scale: 2 }).default('0'),
+  leaveDays: decimal('leave_days', { precision: 5, scale: 2 }).default('0'),
+  unpaidLeaveDays: decimal('unpaid_leave_days', { precision: 5, scale: 2 }).default('0'),
+  totalWorkingDays: integer('total_working_days').default(26),
+  // Payment
+  isPaid: boolean('is_paid').notNull().default(false),
+  paymentDate: timestamp('payment_date'),
+  paymentMethod: varchar('payment_method', { length: 20 }), // Bank Transfer, Cash, Cheque
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -342,6 +440,9 @@ export const schema = {
   saleOrders,
   orderItems,
   employees,
+  attendance,
+  payrollRuns,
+  payslips,
   auditLogs,
   journalEntries,
   journalEntryLines,
@@ -370,6 +471,12 @@ export type OrderItem = typeof orderItems.$inferSelect;
 export type NewOrderItem = typeof orderItems.$inferInsert;
 export type Employee = typeof employees.$inferSelect;
 export type NewEmployee = typeof employees.$inferInsert;
+export type Attendance = typeof attendance.$inferSelect;
+export type NewAttendance = typeof attendance.$inferInsert;
+export type PayrollRun = typeof payrollRuns.$inferSelect;
+export type NewPayrollRun = typeof payrollRuns.$inferInsert;
+export type Payslip = typeof payslips.$inferSelect;
+export type NewPayslip = typeof payslips.$inferInsert;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type NewAuditLog = typeof auditLogs.$inferInsert;
 export type JournalEntry = typeof journalEntries.$inferSelect;
