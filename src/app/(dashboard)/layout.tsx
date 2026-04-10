@@ -142,6 +142,14 @@ const navItems: NavItem[] = [
     icon: <BarChart3 className="h-5 w-5" />,
     href: "/reports",
     badge: 100,
+    children: [
+      { name: "Profit & Loss", href: "/reports/profit-and-loss" },
+      { name: "Balance Sheet", href: "/reports/balance-sheet" },
+      { name: "Customer Ledger", href: "/reports/customer-ledger" },
+      { name: "Audit Trail", href: "/reports/audit-log" },
+      { name: "Stock on Hand", href: "/reports/stock-on-hand" },
+      { name: "Sales Tax", href: "/reports/sales-tax" },
+    ],
   },
   {
     name: "Settings",
