@@ -31,6 +31,17 @@ export const recurringIntervalEnum = pgEnum('recurring_interval', ['weekly', 'mo
 export const returnReasonEnum = pgEnum('return_reason', ['defective', 'wrong_item', 'not_as_described', 'customer_request', 'damaged_in_transit', 'other']);
 export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'bank_transfer', 'cheque', 'online', 'credit_card', 'other']);
 export const settlementStatusEnum = pgEnum('settlement_status', ['pending', 'partial', 'settled', 'cancelled']);
+// Banking & Advanced Accounts Enums
+export const depositTypeEnum = pgEnum('deposit_type', ['cash', 'cheque']);
+export const transferTypeEnum = pgEnum('transfer_type', ['bank_to_bank', 'cash_to_bank', 'bank_to_cash']);
+export const creditDebitNoteTypeEnum = pgEnum('credit_debit_note_type', ['credit_note', 'debit_note']);
+export const pdcStatusEnum = pgEnum('pdc_status', ['received', 'deposited', 'cleared', 'bounced']);
+export const stockMovementTypeEnum = pgEnum('stock_movement_type', ['in', 'out']);
+export const stockMovementReasonEnum = pgEnum('stock_movement_reason', ['sale', 'purchase', 'return', 'transfer', 'adjustment', 'grn', 'delivery']);
+export const stockAdjustmentReasonEnum = pgEnum('stock_adjustment_reason', ['damage', 'gift', 'correction', 'expired', 'lost', 'found', 'sample']);
+export const valuationMethodEnum = pgEnum('valuation_method', ['fifo', 'weighted_average']);
+export const miscContactTypeEnum = pgEnum('misc_contact_type', ['capital_investment', 'loan_proceeds', 'loan_repayment', 'owner_withdrawal', 'dividend', 'other']);
+export const approvalStatusEnum = pgEnum('approval_status', ['draft', 'pending_approval', 'approved', 'rejected']);
 
 // Organizations Table (Multi-Tenant Root)
 export const organizations = pgTable('organizations', {
@@ -989,6 +1000,381 @@ export const settlementLines = pgTable('settlement_lines', {
   balanceAmount: decimal('balance_amount', { precision: 12, scale: 2 }).notNull(),
 });
 
+// ==========================================
+// BANKING & FUND MANAGEMENT TABLES
+// ==========================================
+
+// Bank Accounts
+export const bankAccounts = pgTable('bank_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  accountName: varchar('account_name', { length: 255 }).notNull(),
+  iban: varchar('iban', { length: 50 }),
+  accountNumber: varchar('account_number', { length: 50 }).notNull(),
+  branchName: varchar('branch_name', { length: 150 }),
+  bankName: varchar('bank_name', { length: 150 }),
+  accountType: varchar('account_type', { length: 30 }).notNull().default('checking'), // checking, savings, cash
+  openingBalance: decimal('opening_balance', { precision: 14, scale: 2 }).notNull().default('0'),
+  currentBalance: decimal('current_balance', { precision: 14, scale: 2 }).notNull().default('0'),
+  currency: varchar('currency', { length: 10 }).default('PKR'),
+  isActive: boolean('is_active').notNull().default(true),
+  approvalStatus: approvalStatusEnum('approval_status').notNull().default('approved'),
+  approvedBy: varchar('approved_by', { length: 255 }),
+  approvedAt: timestamp('approved_at'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Bank Deposits
+export const bankDeposits = pgTable('bank_deposits', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  depositNumber: varchar('deposit_number', { length: 50 }).notNull(),
+  bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id).notNull(),
+  depositType: depositTypeEnum('deposit_type').notNull(),
+  amount: decimal('amount', { precision: 14, scale: 2 }).notNull(),
+  depositDate: timestamp('deposit_date').notNull(),
+  reference: varchar('reference', { length: 100 }).default(''),
+  chequeNumber: varchar('cheque_number', { length: 50 }),
+  chequeDate: timestamp('cheque_date'),
+  drawnFrom: varchar('drawn_from', { length: 255 }),
+  notes: text('notes'),
+  approvalStatus: approvalStatusEnum('approval_status').notNull().default('pending_approval'),
+  approvedBy: varchar('approved_by', { length: 255 }),
+  approvedAt: timestamp('approved_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Funds Transfers
+export const fundsTransfers = pgTable('funds_transfers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  transferNumber: varchar('transfer_number', { length: 50 }).notNull(),
+  transferType: transferTypeEnum('transfer_type').notNull(),
+  fromBankAccountId: uuid('from_bank_account_id').references(() => bankAccounts.id).notNull(),
+  toBankAccountId: uuid('to_bank_account_id').references(() => bankAccounts.id).notNull(),
+  amount: decimal('amount', { precision: 14, scale: 2 }).notNull(),
+  transferDate: timestamp('transfer_date').notNull(),
+  reference: varchar('reference', { length: 100 }).default(''),
+  notes: text('notes'),
+  approvalStatus: approvalStatusEnum('approval_status').notNull().default('pending_approval'),
+  approvedBy: varchar('approved_by', { length: 255 }),
+  approvedAt: timestamp('approved_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Other Collections & Payments (Misc Contacts)
+export const miscContacts = pgTable('misc_contacts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  referenceNumber: varchar('reference_number', { length: 50 }).notNull(),
+  contactType: miscContactTypeEnum('contact_type').notNull(),
+  partyName: varchar('party_name', { length: 255 }).notNull(),
+  amount: decimal('amount', { precision: 14, scale: 2 }).notNull(),
+  paymentMethod: paymentMethodEnum('payment_method').notNull(),
+  bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id),
+  transactionDate: timestamp('transaction_date').notNull(),
+  reference: varchar('reference', { length: 100 }).default(''),
+  description: text('description'),
+  approvalStatus: approvalStatusEnum('approval_status').notNull().default('pending_approval'),
+  approvedBy: varchar('approved_by', { length: 255 }),
+  approvedAt: timestamp('approved_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ==========================================
+// CREDIT & DEBIT NOTES TABLES
+// ==========================================
+
+// Credit & Debit Notes
+export const creditDebitNotes = pgTable('credit_debit_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  noteNumber: varchar('note_number', { length: 50 }).notNull(),
+  noteType: creditDebitNoteTypeEnum('note_type').notNull(),
+  customerId: uuid('customer_id').references(() => customers.id),
+  vendorId: uuid('vendor_id').references(() => vendors.id),
+  invoiceId: uuid('invoice_id').references(() => invoices.id),
+  purchaseInvoiceId: uuid('purchase_invoice_id').references(() => purchaseInvoices.id),
+  salesReturnId: uuid('sales_return_id').references(() => salesReturns.id),
+  purchaseReturnId: uuid('purchase_return_id').references(() => purchaseReturns.id),
+  issueDate: timestamp('issue_date').notNull(),
+  amount: decimal('amount', { precision: 14, scale: 2 }).notNull(),
+  taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 14, scale: 2 }).notNull(),
+  reason: varchar('reason', { length: 255 }),
+  notes: text('notes'),
+  approvalStatus: approvalStatusEnum('approval_status').notNull().default('pending_approval'),
+  approvedBy: varchar('approved_by', { length: 255 }),
+  approvedAt: timestamp('approved_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Credit/Debit Note Line Items
+export const creditDebitNoteLines = pgTable('credit_debit_note_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  creditDebitNoteId: uuid('credit_debit_note_id').references(() => creditDebitNotes.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull(),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull(),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull(),
+});
+
+// ==========================================
+// PDC INSTRUMENTS TABLES
+// ==========================================
+
+// Post-Dated Cheques (PDC) Instruments
+export const pdcInstruments = pgTable('pdc_instruments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  instrumentNumber: varchar('instrument_number', { length: 50 }).notNull(),
+  instrumentType: varchar('instrument_type', { length: 30 }).notNull().default('cheque'), // cheque, dd, other
+  partyType: varchar('party_type', { length: 20 }).notNull(), // customer, vendor
+  customerId: uuid('customer_id').references(() => customers.id),
+  vendorId: uuid('vendor_id').references(() => vendors.id),
+  bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id),
+  amount: decimal('amount', { precision: 14, scale: 2 }).notNull(),
+  issueDate: timestamp('issue_date').notNull(),
+  chequeDate: timestamp('cheque_date').notNull(),
+  bankName: varchar('bank_name', { length: 150 }),
+  branchName: varchar('branch_name', { length: 150 }),
+  status: pdcStatusEnum('status').notNull().default('received'),
+  depositedDate: timestamp('deposited_date'),
+  clearedDate: timestamp('cleared_date'),
+  bounceReason: text('bounce_reason'),
+  reference: varchar('reference', { length: 100 }).default(''),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ==========================================
+// OTHER CONTACT SETTLEMENT TABLES
+// ==========================================
+
+// Misc Contact Settlements
+export const miscContactSettlements = pgTable('misc_contact_settlements', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  settlementNumber: varchar('settlement_number', { length: 50 }).notNull(),
+  partyName: varchar('party_name', { length: 255 }).notNull(),
+  contactType: miscContactTypeEnum('contact_type').notNull(),
+  settlementDate: timestamp('settlement_date').notNull(),
+  totalOutstanding: decimal('total_outstanding', { precision: 14, scale: 2 }).notNull(),
+  settledAmount: decimal('settled_amount', { precision: 14, scale: 2 }).notNull(),
+  discountAmount: decimal('discount_amount', { precision: 14, scale: 2 }).default('0'),
+  paymentMethod: paymentMethodEnum('payment_method'),
+  bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id),
+  reference: varchar('reference', { length: 100 }).default(''),
+  notes: text('notes'),
+  approvalStatus: approvalStatusEnum('approval_status').notNull().default('pending_approval'),
+  approvedBy: varchar('approved_by', { length: 255 }),
+  approvedAt: timestamp('approved_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// ==========================================
+// INVENTORY DEPTH TABLES
+// ==========================================
+
+// Stock Movements Ledger
+export const stockMovements = pgTable('stock_movements', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  movementType: stockMovementTypeEnum('movement_type').notNull(),
+  reason: stockMovementReasonEnum('reason'),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull(),
+  unitCost: decimal('unit_cost', { precision: 12, scale: 2 }).default('0'),
+  totalValue: decimal('total_value', { precision: 14, scale: 2 }).default('0'),
+  referenceType: varchar('reference_type', { length: 50 }), // sale, purchase, grn, return, adjustment
+  referenceId: uuid('reference_id'),
+  referenceNumber: varchar('reference_number', { length: 50 }),
+  runningBalance: decimal('running_balance', { precision: 10, scale: 2 }).notNull(),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+// Stock Adjustments
+export const stockAdjustments = pgTable('stock_adjustments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  adjustmentNumber: varchar('adjustment_number', { length: 50 }).notNull(),
+  adjustmentDate: timestamp('adjustment_date').notNull(),
+  reason: stockAdjustmentReasonEnum('reason').notNull(),
+  notes: text('notes'),
+  approvalStatus: approvalStatusEnum('approval_status').notNull().default('pending_approval'),
+  approvedBy: varchar('approved_by', { length: 255 }),
+  approvedAt: timestamp('approved_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Stock Adjustment Lines
+export const stockAdjustmentLines = pgTable('stock_adjustment_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  stockAdjustmentId: uuid('stock_adjustment_id').references(() => stockAdjustments.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  currentStock: decimal('current_stock', { precision: 10, scale: 2 }).notNull(),
+  adjustedQuantity: decimal('adjusted_quantity', { precision: 10, scale: 2 }).notNull(),
+  difference: decimal('difference', { precision: 10, scale: 2 }).notNull(),
+  unitCost: decimal('unit_cost', { precision: 12, scale: 2 }).default('0'),
+  totalValue: decimal('total_value', { precision: 14, scale: 2 }).default('0'),
+  notes: text('notes'),
+});
+
+// Stock Valuation Logs
+export const stockValuationLogs = pgTable('stock_valuation_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  valuationDate: timestamp('valuation_date').notNull(),
+  method: valuationMethodEnum('method').notNull(),
+  totalItems: integer('total_items').notNull().default(0),
+  totalValue: decimal('total_value', { precision: 16, scale: 2 }).notNull(),
+  valuationDetails: text('valuation_details'), // JSON string of per-item valuation
+  runBy: varchar('run_by', { length: 255 }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+// ==========================================
+// RELATIONS FOR NEW TABLES
+// ==========================================
+
+// Banking Relations
+export const bankAccountsRelations = relations(bankAccounts, ({ many }) => ({
+  deposits: many(bankDeposits),
+  fromTransfers: many(fundsTransfers, { relationName: 'fromTransfer' }),
+  toTransfers: many(fundsTransfers, { relationName: 'toTransfer' }),
+  miscContacts: many(miscContacts),
+  pdcInstruments: many(pdcInstruments),
+  miscContactSettlements: many(miscContactSettlements),
+}));
+
+export const bankDepositsRelations = relations(bankDeposits, ({ one }) => ({
+  bankAccount: one(bankAccounts, {
+    fields: [bankDeposits.bankAccountId],
+    references: [bankAccounts.id],
+  }),
+}));
+
+export const fundsTransfersRelations = relations(fundsTransfers, ({ one }) => ({
+  fromBankAccount: one(bankAccounts, {
+    fields: [fundsTransfers.fromBankAccountId],
+    references: [bankAccounts.id],
+  }),
+  toBankAccount: one(bankAccounts, {
+    fields: [fundsTransfers.toBankAccountId],
+    references: [bankAccounts.id],
+  }),
+}));
+
+export const miscContactsRelations = relations(miscContacts, ({ one }) => ({
+  bankAccount: one(bankAccounts, {
+    fields: [miscContacts.bankAccountId],
+    references: [bankAccounts.id],
+  }),
+}));
+
+// Credit & Debit Notes Relations
+export const creditDebitNotesRelations = relations(creditDebitNotes, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [creditDebitNotes.customerId],
+    references: [customers.id],
+  }),
+  vendor: one(vendors, {
+    fields: [creditDebitNotes.vendorId],
+    references: [vendors.id],
+  }),
+  invoice: one(invoices, {
+    fields: [creditDebitNotes.invoiceId],
+    references: [invoices.id],
+  }),
+  purchaseInvoice: one(purchaseInvoices, {
+    fields: [creditDebitNotes.purchaseInvoiceId],
+    references: [purchaseInvoices.id],
+  }),
+  salesReturn: one(salesReturns, {
+    fields: [creditDebitNotes.salesReturnId],
+    references: [salesReturns.id],
+  }),
+  purchaseReturn: one(purchaseReturns, {
+    fields: [creditDebitNotes.purchaseReturnId],
+    references: [purchaseReturns.id],
+  }),
+  lines: many(creditDebitNoteLines),
+}));
+
+export const creditDebitNoteLinesRelations = relations(creditDebitNoteLines, ({ one }) => ({
+  creditDebitNote: one(creditDebitNotes, {
+    fields: [creditDebitNoteLines.creditDebitNoteId],
+    references: [creditDebitNotes.id],
+  }),
+  product: one(products, {
+    fields: [creditDebitNoteLines.productId],
+    references: [products.id],
+  }),
+}));
+
+// PDC Instruments Relations
+export const pdcInstrumentsRelations = relations(pdcInstruments, ({ one }) => ({
+  customer: one(customers, {
+    fields: [pdcInstruments.customerId],
+    references: [customers.id],
+  }),
+  vendor: one(vendors, {
+    fields: [pdcInstruments.vendorId],
+    references: [vendors.id],
+  }),
+  bankAccount: one(bankAccounts, {
+    fields: [pdcInstruments.bankAccountId],
+    references: [bankAccounts.id],
+  }),
+}));
+
+// Misc Contact Settlement Relations
+export const miscContactSettlementsRelations = relations(miscContactSettlements, ({ one }) => ({
+  bankAccount: one(bankAccounts, {
+    fields: [miscContactSettlements.bankAccountId],
+    references: [bankAccounts.id],
+  }),
+}));
+
+// Stock Movement Relations
+export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
+  product: one(products, {
+    fields: [stockMovements.productId],
+    references: [products.id],
+  }),
+}));
+
+// Stock Adjustment Relations
+export const stockAdjustmentsRelations = relations(stockAdjustments, ({ many }) => ({
+  lines: many(stockAdjustmentLines),
+}));
+
+export const stockAdjustmentLinesRelations = relations(stockAdjustmentLines, ({ one }) => ({
+  stockAdjustment: one(stockAdjustments, {
+    fields: [stockAdjustmentLines.stockAdjustmentId],
+    references: [stockAdjustments.id],
+  }),
+  product: one(products, {
+    fields: [stockAdjustmentLines.productId],
+    references: [products.id],
+  }),
+}));
+
 // TypeScript types
 export type Organization = typeof organizations.$inferSelect;
 export type NewOrganization = typeof organizations.$inferInsert;
@@ -1412,6 +1798,32 @@ export type NewSettlement = typeof settlements.$inferInsert;
 export type SettlementLine = typeof settlementLines.$inferSelect;
 export type NewSettlementLine = typeof settlementLines.$inferInsert;
 
+// Banking & Advanced Accounts Types
+export type BankAccount = typeof bankAccounts.$inferSelect;
+export type NewBankAccount = typeof bankAccounts.$inferInsert;
+export type BankDeposit = typeof bankDeposits.$inferSelect;
+export type NewBankDeposit = typeof bankDeposits.$inferInsert;
+export type FundsTransfer = typeof fundsTransfers.$inferSelect;
+export type NewFundsTransfer = typeof fundsTransfers.$inferInsert;
+export type MiscContact = typeof miscContacts.$inferSelect;
+export type NewMiscContact = typeof miscContacts.$inferInsert;
+export type CreditDebitNote = typeof creditDebitNotes.$inferSelect;
+export type NewCreditDebitNote = typeof creditDebitNotes.$inferInsert;
+export type CreditDebitNoteLine = typeof creditDebitNoteLines.$inferSelect;
+export type NewCreditDebitNoteLine = typeof creditDebitNoteLines.$inferInsert;
+export type PdcInstrument = typeof pdcInstruments.$inferSelect;
+export type NewPdcInstrument = typeof pdcInstruments.$inferInsert;
+export type MiscContactSettlement = typeof miscContactSettlements.$inferSelect;
+export type NewMiscContactSettlement = typeof miscContactSettlements.$inferInsert;
+export type StockMovement = typeof stockMovements.$inferSelect;
+export type NewStockMovement = typeof stockMovements.$inferInsert;
+export type StockAdjustment = typeof stockAdjustments.$inferSelect;
+export type NewStockAdjustment = typeof stockAdjustments.$inferInsert;
+export type StockAdjustmentLine = typeof stockAdjustmentLines.$inferSelect;
+export type NewStockAdjustmentLine = typeof stockAdjustmentLines.$inferInsert;
+export type StockValuationLog = typeof stockValuationLogs.$inferSelect;
+export type NewStockValuationLog = typeof stockValuationLogs.$inferInsert;
+
 // Export complete schema
 export const schema = {
   organizations,
@@ -1467,5 +1879,19 @@ export const schema = {
   vendorPaymentAllocations,
   settlements,
   settlementLines,
+  // Banking & Advanced Accounts
+  bankAccounts,
+  bankDeposits,
+  fundsTransfers,
+  miscContacts,
+  creditDebitNotes,
+  creditDebitNoteLines,
+  pdcInstruments,
+  miscContactSettlements,
+  // Inventory Depth
+  stockMovements,
+  stockAdjustments,
+  stockAdjustmentLines,
+  stockValuationLogs,
 };
 
