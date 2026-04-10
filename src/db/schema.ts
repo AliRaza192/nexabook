@@ -427,6 +427,71 @@ export const journalEntryLines = pgTable('journal_entry_lines', {
   creditAmount: decimal('credit_amount', { precision: 12, scale: 2 }).notNull().default('0'),
 });
 
+// Vendors (Suppliers)
+export const vendors = pgTable('vendors', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  phone: varchar('phone', { length: 20 }),
+  email: varchar('email', { length: 255 }),
+  ntn: varchar('ntn', { length: 50 }),
+  strn: varchar('strn', { length: 50 }),
+  address: text('address'),
+  openingBalance: decimal('opening_balance', { precision: 12, scale: 2 }).default('0'),
+  balance: decimal('balance', { precision: 12, scale: 2 }).default('0'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Purchase Invoices
+export const purchaseInvoices = pgTable('purchase_invoices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  vendorId: uuid('vendor_id').references(() => vendors.id).notNull(),
+  billNumber: varchar('bill_number', { length: 50 }).notNull(),
+  date: timestamp('date').notNull(),
+  dueDate: timestamp('due_date'),
+  reference: varchar('reference', { length: 100 }).default(''),
+  subject: varchar('subject', { length: 255 }).default(''),
+  grossAmount: decimal('gross_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountTotal: decimal('discount_total', { precision: 12, scale: 2 }).notNull().default('0'),
+  taxTotal: decimal('tax_total', { precision: 12, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  status: varchar('status', { length: 20 }).notNull().default('Draft'), // Draft, Approved, Revised
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Purchase Invoice Items
+export const purchaseItems = pgTable('purchase_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  purchaseInvoiceId: uuid('purchase_invoice_id').references(() => purchaseInvoices.id).notNull(),
+  productId: uuid('product_id').references(() => products.id),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
+  unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
+  discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
+  taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
+});
+
+// Expenses
+export const expenses = pgTable('expenses', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  accountId: uuid('account_id').references(() => chartOfAccounts.id).notNull(),
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  date: timestamp('date').notNull(),
+  reference: varchar('reference', { length: 100 }).default(''),
+  description: text('description'),
+  paidFromAccountId: uuid('paid_from_account_id').references(() => chartOfAccounts.id).notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Export schema
 export const schema = {
   organizations,
@@ -446,7 +511,35 @@ export const schema = {
   auditLogs,
   journalEntries,
   journalEntryLines,
+  vendors,
+  purchaseInvoices,
+  purchaseItems,
+  expenses,
 };
+
+// Vendor and Purchase Relations (must be after all tables are defined)
+export const vendorsRelations = relations(vendors, ({ many }) => ({
+  purchaseInvoices: many(purchaseInvoices),
+}));
+
+export const purchaseInvoicesRelations = relations(purchaseInvoices, ({ one, many }) => ({
+  vendor: one(vendors, {
+    fields: [purchaseInvoices.vendorId],
+    references: [vendors.id],
+  }),
+  items: many(purchaseItems),
+}));
+
+export const purchaseItemsRelations = relations(purchaseItems, ({ one }) => ({
+  purchaseInvoice: one(purchaseInvoices, {
+    fields: [purchaseItems.purchaseInvoiceId],
+    references: [purchaseInvoices.id],
+  }),
+  product: one(products, {
+    fields: [purchaseItems.productId],
+    references: [products.id],
+  }),
+}));
 
 // TypeScript types
 export type Organization = typeof organizations.$inferSelect;
@@ -483,3 +576,11 @@ export type JournalEntry = typeof journalEntries.$inferSelect;
 export type NewJournalEntry = typeof journalEntries.$inferInsert;
 export type JournalEntryLine = typeof journalEntryLines.$inferSelect;
 export type NewJournalEntryLine = typeof journalEntryLines.$inferInsert;
+export type Vendor = typeof vendors.$inferSelect;
+export type NewVendor = typeof vendors.$inferInsert;
+export type PurchaseInvoice = typeof purchaseInvoices.$inferSelect;
+export type NewPurchaseInvoice = typeof purchaseInvoices.$inferInsert;
+export type PurchaseItem = typeof purchaseItems.$inferSelect;
+export type NewPurchaseItem = typeof purchaseItems.$inferInsert;
+export type Expense = typeof expenses.$inferSelect;
+export type NewExpense = typeof expenses.$inferInsert;
