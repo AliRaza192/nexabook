@@ -17,6 +17,8 @@ export const userRoleEnum = pgEnum('user_role', ['admin', 'manager', 'staff', 'a
 export const invoiceStatusEnum = pgEnum('invoice_status', ['draft', 'pending', 'approved', 'sent', 'paid', 'partial', 'overdue', 'cancelled']);
 export const orderStatusEnum = pgEnum('order_status', ['draft', 'pending', 'approved', 'confirmed', 'delivered', 'cancelled']);
 export const productTypeEnum = pgEnum('product_type', ['product', 'service']);
+export const jobOrderStatusEnum = pgEnum('job_order_status', ['draft', 'in-progress', 'completed', 'cancelled']);
+export const bomStatusEnum = pgEnum('bom_status', ['draft', 'active', 'archived']);
 
 // Organizations Table (Multi-Tenant Root)
 export const organizations = pgTable('organizations', {
@@ -492,6 +494,56 @@ export const expenses = pgTable('expenses', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Manufacturing: Bill of Materials (BOM)
+export const manufacturingBoms = pgTable('manufacturing_boms', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  finishedGoodId: uuid('finished_good_id').references(() => products.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  code: varchar('code', { length: 50 }).notNull(),
+  quantity: integer('quantity').notNull().default(1),
+  totalEstimatedCost: decimal('total_estimated_cost', { precision: 12, scale: 2 }).default('0'),
+  instructions: text('instructions'),
+  status: bomStatusEnum('status').notNull().default('draft'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Manufacturing: BOM Items (Components)
+export const bomItems = pgTable('bom_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  bomId: uuid('bom_id').references(() => manufacturingBoms.id).notNull(),
+  componentId: uuid('component_id').references(() => products.id).notNull(),
+  quantityRequired: decimal('quantity_required', { precision: 10, scale: 2 }).notNull().default('1'),
+  unit: varchar('unit', { length: 20 }).default('Pcs'),
+});
+
+// Manufacturing: Job Orders
+export const jobOrders = pgTable('job_orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  bomId: uuid('bom_id').references(() => manufacturingBoms.id).notNull(),
+  orderNumber: varchar('order_number', { length: 50 }).notNull(),
+  quantityToProduce: integer('quantity_to_produce').notNull().default(1),
+  status: jobOrderStatusEnum('status').notNull().default('draft'),
+  completionDate: timestamp('completion_date'),
+  instructions: text('instructions'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Manufacturing: Job Order Components (Material consumption tracking)
+export const jobOrderComponents = pgTable('job_order_components', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  jobOrderId: uuid('job_order_id').references(() => jobOrders.id).notNull(),
+  componentId: uuid('component_id').references(() => products.id).notNull(),
+  requiredQty: decimal('required_qty', { precision: 10, scale: 2 }).notNull(),
+  consumedQty: decimal('consumed_qty', { precision: 10, scale: 2 }).default('0'),
+});
+
 // Export schema
 export const schema = {
   organizations,
@@ -515,6 +567,10 @@ export const schema = {
   purchaseInvoices,
   purchaseItems,
   expenses,
+  manufacturingBoms,
+  bomItems,
+  jobOrders,
+  jobOrderComponents,
 };
 
 // Vendor and Purchase Relations (must be after all tables are defined)
@@ -584,3 +640,53 @@ export type PurchaseItem = typeof purchaseItems.$inferSelect;
 export type NewPurchaseItem = typeof purchaseItems.$inferInsert;
 export type Expense = typeof expenses.$inferSelect;
 export type NewExpense = typeof expenses.$inferInsert;
+
+// Manufacturing Types
+export type ManufacturingBom = typeof manufacturingBoms.$inferSelect;
+export type NewManufacturingBom = typeof manufacturingBoms.$inferInsert;
+export type BomItem = typeof bomItems.$inferSelect;
+export type NewBomItem = typeof bomItems.$inferInsert;
+export type JobOrder = typeof jobOrders.$inferSelect;
+export type NewJobOrder = typeof jobOrders.$inferInsert;
+export type JobOrderComponent = typeof jobOrderComponents.$inferSelect;
+export type NewJobOrderComponent = typeof jobOrderComponents.$inferInsert;
+
+// Manufacturing Relations
+export const manufacturingBomsRelations = relations(manufacturingBoms, ({ one, many }) => ({
+  finishedGood: one(products, {
+    fields: [manufacturingBoms.finishedGoodId],
+    references: [products.id],
+  }),
+  bomItems: many(bomItems),
+  jobOrders: many(jobOrders),
+}));
+
+export const bomItemsRelations = relations(bomItems, ({ one }) => ({
+  bom: one(manufacturingBoms, {
+    fields: [bomItems.bomId],
+    references: [manufacturingBoms.id],
+  }),
+  component: one(products, {
+    fields: [bomItems.componentId],
+    references: [products.id],
+  }),
+}));
+
+export const jobOrdersRelations = relations(jobOrders, ({ one, many }) => ({
+  bom: one(manufacturingBoms, {
+    fields: [jobOrders.bomId],
+    references: [manufacturingBoms.id],
+  }),
+  components: many(jobOrderComponents),
+}));
+
+export const jobOrderComponentsRelations = relations(jobOrderComponents, ({ one }) => ({
+  jobOrder: one(jobOrders, {
+    fields: [jobOrderComponents.jobOrderId],
+    references: [jobOrders.id],
+  }),
+  component: one(products, {
+    fields: [jobOrderComponents.componentId],
+    references: [products.id],
+  }),
+}));

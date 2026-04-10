@@ -114,7 +114,8 @@ const navItems: NavItem[] = [
     href: "/manufacturing",
     children: [
       { name: "BOM", href: "/manufacturing/bom" },
-      { name: "Job Orders", href: "/manufacturing/jobs" },
+      { name: "Job Orders", href: "/manufacturing/job-orders/new" },
+      { name: "Disassemble", href: "/manufacturing/disassemble" },
     ],
   },
   {
