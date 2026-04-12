@@ -113,17 +113,19 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
 
     const totalSales = salesResult[0]?.totalSales ? parseFloat(salesResult[0].totalSales) : 0;
 
-    // Calculate COGS (from purchase invoices - inventory purchases)
+    // Calculate COGS: actual cost of goods SOLD (invoice items × product costPrice)
     const cogsResult = await db
       .select({
-        totalCOGS: sql<string>`SUM(${purchaseInvoices.netAmount})`,
+        totalCOGS: sql<string>`SUM(CAST(${invoiceItems.quantity} AS DECIMAL) * CAST(COALESCE(${products.costPrice}, 0) AS DECIMAL))`,
       })
-      .from(purchaseInvoices)
+      .from(invoiceItems)
+      .innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id))
+      .leftJoin(products, eq(invoiceItems.productId, products.id))
       .where(and(
-        eq(purchaseInvoices.orgId, orgId),
-        gte(purchaseInvoices.date, fromDate),
-        lte(purchaseInvoices.date, toDate),
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+        eq(invoices.orgId, orgId),
+        gte(invoices.issueDate, fromDate),
+        lte(invoices.issueDate, toDate),
+        sql`${invoices.status} NOT IN ('draft', 'cancelled')`
       ));
 
     const totalCOGS = cogsResult[0]?.totalCOGS ? parseFloat(cogsResult[0].totalCOGS) : 0;
