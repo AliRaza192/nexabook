@@ -429,10 +429,10 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         }
       }
 
-      // 3. Update vendor balance
+      // 3. Update vendor balance (accumulate payable)
       await tx
         .update(vendors)
-        .set({ balance: (parseFloat(invoice.netAmount)).toFixed(2) })
+        .set({ balance: sql`COALESCE(${vendors.balance}, 0) + ${invoice.netAmount}` })
         .where(eq(vendors.id, invoice.vendorId));
 
       // 4. Create Journal Entry
@@ -1536,10 +1536,8 @@ export async function approvePurchaseReturn(id: string) {
       // Update vendor balance (reduce payable)
       const [vendor] = await tx.select().from(vendors).where(eq(vendors.id, purchaseReturn.vendorId)).limit(1);
       if (vendor) {
-        const currentBalance = parseFloat(vendor.balance || '0');
         const refundAmt = parseFloat(purchaseReturn.refundAmount || '0');
-        const newBalance = Math.max(0, currentBalance - refundAmt).toFixed(2);
-        await tx.update(vendors).set({ balance: newBalance }).where(eq(vendors.id, purchaseReturn.vendorId));
+        await tx.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${refundAmt}, 0)` }).where(eq(vendors.id, purchaseReturn.vendorId));
       }
 
       // Create debit note journal entry
@@ -1737,9 +1735,7 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
     // Update vendor balance (reduce payable)
     const [vendor] = await db.select().from(vendors).where(eq(vendors.id, data.vendorId)).limit(1);
     if (vendor) {
-      const currentBalance = parseFloat(vendor.balance || '0');
-      const newBalance = Math.max(0, currentBalance - parseFloat(data.amount)).toFixed(2);
-      await db.update(vendors).set({ balance: newBalance }).where(eq(vendors.id, data.vendorId));
+      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${parseFloat(data.amount)}, 0)` }).where(eq(vendors.id, data.vendorId));
     }
 
     revalidatePath('/purchases/payments');
@@ -1880,12 +1876,10 @@ export async function createVendorSettlement(data: {
       }
     }
 
-    // Update vendor balance
+    // Update vendor balance (reduce payable)
     const [vendor] = await db.select().from(vendors).where(eq(vendors.id, data.vendorId)).limit(1);
     if (vendor) {
-      const currentBalance = parseFloat(vendor.balance || '0');
-      const newBalance = Math.max(0, currentBalance - totalSettlement).toFixed(2);
-      await db.update(vendors).set({ balance: newBalance }).where(eq(vendors.id, data.vendorId));
+      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${totalSettlement}, 0)` }).where(eq(vendors.id, data.vendorId));
     }
 
     revalidatePath('/purchases/settlement');
