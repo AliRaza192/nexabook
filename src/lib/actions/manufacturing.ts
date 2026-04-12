@@ -531,7 +531,7 @@ export async function completeJobOrder(jobOrderId: string) {
 
     if (!finishedGood) return { success: false, error: "Finished good not found" };
 
-    // Get job order components
+    // Get job order components — include costPrice for monetary valuation
     const components = await db
       .select({
         componentId: jobOrderComponents.componentId,
@@ -540,6 +540,7 @@ export async function completeJobOrder(jobOrderId: string) {
           id: products.id,
           name: products.name,
           currentStock: products.currentStock,
+          costPrice: products.costPrice,
         },
       })
       .from(jobOrderComponents)
@@ -638,16 +639,50 @@ export async function completeJobOrder(jobOrderId: string) {
           creditAmount: '0',
         });
 
-        // Credit entries for raw materials
+        // Calculate total raw material cost (monetary value, NOT quantity)
+        let totalRawMaterialCost = 0;
         for (const comp of components) {
+          const qty = parseFloat(comp.requiredQty);
+          const costPrice = parseFloat(comp.component?.costPrice || '0');
+          const lineValue = qty * costPrice;
+          totalRawMaterialCost += lineValue;
+
+          // Credit: Raw Material with monetary value
           await db.insert(journalEntryLines).values({
             orgId,
             journalEntryId: journalEntry.id,
             accountId: inventoryAccount[0].id,
             description: `Credit: Raw Material - ${comp.component?.name || 'Component'}`,
             debitAmount: '0',
-            creditAmount: comp.requiredQty,
+            creditAmount: lineValue.toFixed(2),
           });
+        }
+
+        // Balance the journal entry: if finished goods value differs from
+        // raw material cost, post the difference to the same inventory account
+        const variance = totalValue - totalRawMaterialCost;
+        if (Math.abs(variance) > 0.01) {
+          if (variance > 0) {
+            // Finished goods worth more than raw materials — additional debit
+            await db.insert(journalEntryLines).values({
+              orgId,
+              journalEntryId: journalEntry.id,
+              accountId: inventoryAccount[0].id,
+              description: `Debit: Manufacturing Value Adjustment`,
+              debitAmount: variance.toFixed(2),
+              creditAmount: '0',
+            });
+          } else {
+            // Finished goods worth less — additional credit
+            await db.insert(journalEntryLines).values({
+              orgId,
+              journalEntryId: journalEntry.id,
+              accountId: inventoryAccount[0].id,
+              description: `Credit: Manufacturing Value Adjustment`,
+              debitAmount: '0',
+              creditAmount: Math.abs(variance).toFixed(2),
+            });
+          }
         }
       }
     }
