@@ -1,68 +1,10 @@
 "use server";
 
 import { db } from "@/db";
-import { products, productCategories, organizations, profiles } from "@/db/schema";
+import { products, productCategories } from "@/db/schema";
 import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { auth, currentUser } from "@clerk/nextjs/server";
-
-// Helper function to get current user's orgId with auto-onboarding
-async function getCurrentOrgId(): Promise<string | null> {
-  try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return null;
-    }
-
-    // Get user's profile from database
-    const userProfile = await db
-      .select({
-        orgId: profiles.orgId,
-      })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    // If profile exists, return orgId
-    if (userProfile.length > 0 && userProfile[0].orgId) {
-      return userProfile[0].orgId;
-    }
-
-    // Auto-onboarding: User doesn't have a profile yet, create one automatically
-    const user = await currentUser();
-    if (!user) {
-      return null;
-    }
-
-    // Create default organization
-    const fullName = user.fullName || user.emailAddresses[0]?.emailAddress?.split('@')[0] || 'User';
-    const slug = fullName.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now();
-
-    const [org] = await db
-      .insert(organizations)
-      .values({
-        name: fullName + "'s Organization",
-        slug,
-      })
-      .returning({ id: organizations.id });
-
-    const [newProfile] = await db
-      .insert(profiles)
-      .values({
-        userId,
-        orgId: org.id,
-        role: 'admin',
-        fullName,
-        email: user.emailAddresses[0]?.emailAddress || '',
-      })
-      .returning({ orgId: profiles.orgId });
-
-    return newProfile.orgId;
-  } catch (error) {
-    return null;
-  }
-}
+import { getCurrentOrgId } from "./shared";
 
 // Product interfaces
 export interface ProductFormData {

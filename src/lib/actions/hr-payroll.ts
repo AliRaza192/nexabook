@@ -11,32 +11,11 @@ import {
   chartOfAccounts,
   auditLogs,
   profiles,
-  organizations,
 } from "@/db/schema";
 import { eq, and, desc, asc, ilike, or, sql, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { auth, currentUser } from "@clerk/nextjs/server";
-
-// Helper function to get current user's orgId
-async function getCurrentOrgId(): Promise<string | null> {
-  try {
-    const { userId } = await auth();
-    if (!userId) return null;
-
-    const userProfile = await db
-      .select({ orgId: profiles.orgId })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length > 0 && userProfile[0].orgId) {
-      return userProfile[0].orgId;
-    }
-    return null;
-  } catch (error) {
-    return null;
-  }
-}
+import { auth } from "@clerk/nextjs/server";
+import { getCurrentOrgId } from "./shared";
 
 // Helper: Get current user name
 async function getCurrentUserName(): Promise<string | null> {

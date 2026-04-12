@@ -3,54 +3,14 @@
 import { db } from "@/db";
 import {
   creditDebitNotes, creditDebitNoteLines, pdcInstruments,
-  miscContactSettlements, organizations, profiles,
+  miscContactSettlements,
   journalEntries, journalEntryLines, bankAccounts,
   customers, vendors, products,
 } from "@/db/schema";
 import { eq, and, desc, ilike, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { auth, currentUser } from "@clerk/nextjs/server";
-
-// Helper function to get current user's orgId with auto-onboarding
-async function getCurrentOrgId(): Promise<string | null> {
-  try {
-    const { userId } = await auth();
-    if (!userId) return null;
-
-    const userProfile = await db
-      .select({ orgId: profiles.orgId })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length > 0 && userProfile[0].orgId) {
-      return userProfile[0].orgId;
-    }
-
-    const user = await currentUser();
-    if (!user) return null;
-
-    const timestamp = Date.now();
-    const orgSlug = `my-business-${timestamp}`;
-    const [newOrg] = await db
-      .insert(organizations)
-      .values({ name: "My Business", slug: orgSlug, currency: "PKR", fiscalYearStart: "07-01", country: "Pakistan" })
-      .returning({ id: organizations.id });
-
-    if (!newOrg) return null;
-
-    const userEmail = user.emailAddresses[0]?.emailAddress || "";
-    const userFullName = user.fullName || user.username || "User";
-
-    await db.insert(profiles).values({
-      userId, orgId: newOrg.id, role: "admin", fullName: userFullName, email: userEmail,
-    });
-
-    return newOrg.id;
-  } catch (error) {
-    return null;
-  }
-}
+import { auth } from "@clerk/nextjs/server";
+import { getCurrentOrgId } from "./shared";
 
 // ==========================================
 // CREDIT & DEBIT NOTES

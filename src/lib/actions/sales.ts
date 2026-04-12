@@ -5,8 +5,6 @@ import {
   customers,
   invoices,
   invoiceItems,
-  organizations,
-  profiles,
   chartOfAccounts,
   products,
   auditLogs,
@@ -30,54 +28,8 @@ import {
 } from "@/db/schema";
 import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { auth, currentUser } from "@clerk/nextjs/server";
-
-// Helper function to get current user's orgId
-async function getCurrentOrgId(): Promise<string | null> {
-  try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return null;
-    }
-
-    const userProfile = await db
-      .select({ orgId: profiles.orgId })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length > 0 && userProfile[0].orgId) {
-      return userProfile[0].orgId;
-    }
-
-    const user = await currentUser();
-    if (!user) return null;
-
-    const fullName = user.fullName || user.emailAddresses[0]?.emailAddress?.split('@')[0] || 'User';
-    const slug = fullName.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now();
-
-    const [org] = await db
-      .insert(organizations)
-      .values({ name: fullName + "'s Organization", slug })
-      .returning({ id: organizations.id });
-
-    const [newProfile] = await db
-      .insert(profiles)
-      .values({
-        userId,
-        orgId: org.id,
-        role: 'admin',
-        fullName,
-        email: user.emailAddresses[0]?.emailAddress || '',
-      })
-      .returning({ orgId: profiles.orgId });
-
-    return newProfile.orgId;
-  } catch (error) {
-    return null;
-  }
-}
+import { auth } from "@clerk/nextjs/server";
+import { getCurrentOrgId } from "./shared";
 
 // ==================== CUSTOMER ACTIONS ====================
 
