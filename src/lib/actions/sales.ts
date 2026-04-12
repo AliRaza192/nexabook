@@ -612,6 +612,29 @@ export async function approveInvoice(invoiceId: string) {
       }
 
       // 4. Create Journal Entry Lines
+      const discountAmount = parseFloat(invoice.discountAmount || '0');
+      const shippingAmount = parseFloat(invoice.shippingCharges || '0');
+
+      // Fetch Discount Allowed account (expense — debit side)
+      const [discountAllowed] = await tx
+        .select()
+        .from(chartOfAccounts)
+        .where(and(
+          eq(chartOfAccounts.orgId, orgId),
+          eq(chartOfAccounts.name, 'Discount Allowed')
+        ))
+        .limit(1);
+
+      // Fetch Shipping Revenue account (income — credit side)
+      const [shippingRevenue] = await tx
+        .select()
+        .from(chartOfAccounts)
+        .where(and(
+          eq(chartOfAccounts.orgId, orgId),
+          eq(chartOfAccounts.name, 'Shipping Revenue')
+        ))
+        .limit(1);
+
       // Debit: Accounts Receivable (Net Amount)
       await tx.insert(journalEntryLines).values({
         orgId,
@@ -622,18 +645,33 @@ export async function approveInvoice(invoiceId: string) {
         creditAmount: '0',
       });
 
-      // Credit: Sales Revenue (Gross Amount)
+      // Debit: Discount Allowed (if discount > 0)
+      if (discountAmount > 0) {
+        if (!discountAllowed) {
+          throw new Error('Discount Allowed account not found. Please seed Chart of Accounts first.');
+        }
+        await tx.insert(journalEntryLines).values({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: discountAllowed.id,
+          description: `Debit - Discount Allowed (Invoice ${invoice.invoiceNumber})`,
+          debitAmount: invoice.discountAmount,
+          creditAmount: '0',
+        });
+      }
+
+      // Credit: Sales Revenue (grossAmount - discountAmount)
+      const salesRevenueAmount = (parseFloat(invoice.grossAmount || '0') - discountAmount).toFixed(2);
       await tx.insert(journalEntryLines).values({
         orgId,
         journalEntryId: journalEntry.id,
         accountId: salesRevenue.id,
         description: `Credit - Sales Revenue (Invoice ${invoice.invoiceNumber})`,
         debitAmount: '0',
-        creditAmount: invoice.grossAmount || '0',
+        creditAmount: salesRevenueAmount,
       });
 
       // Credit: Sales Tax Payable (if tax > 0)
-      const taxAmount = parseFloat(invoice.taxAmount || '0');
       if (taxAmount > 0 && salesTaxPayable) {
         await tx.insert(journalEntryLines).values({
           orgId,
@@ -642,6 +680,21 @@ export async function approveInvoice(invoiceId: string) {
           description: `Credit - Sales Tax Payable (Invoice ${invoice.invoiceNumber})`,
           debitAmount: '0',
           creditAmount: invoice.taxAmount,
+        });
+      }
+
+      // Credit: Shipping Revenue (if shipping > 0)
+      if (shippingAmount > 0) {
+        if (!shippingRevenue) {
+          throw new Error('Shipping Revenue account not found. Please seed Chart of Accounts first.');
+        }
+        await tx.insert(journalEntryLines).values({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: shippingRevenue.id,
+          description: `Credit - Shipping Revenue (Invoice ${invoice.invoiceNumber})`,
+          debitAmount: '0',
+          creditAmount: invoice.shippingCharges,
         });
       }
 
