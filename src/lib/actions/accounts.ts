@@ -2,7 +2,7 @@
 
 import { db } from "@/db";
 import { chartOfAccounts, organizations, profiles, journalEntries, journalEntryLines, auditLogs } from "@/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
@@ -481,5 +481,146 @@ export async function updateCompanySettings(data: {
     return { success: true, message: "Settings saved successfully" };
   } catch (error) {
     return { success: false, error: "Failed to update company settings" };
+  }
+}
+
+// Get all accounts for dropdown
+export async function getAllAccounts() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    const accounts = await db
+      .select({
+        id: chartOfAccounts.id,
+        code: chartOfAccounts.code,
+        name: chartOfAccounts.name,
+        type: chartOfAccounts.type,
+      })
+      .from(chartOfAccounts)
+      .where(and(
+        eq(chartOfAccounts.orgId, orgId),
+        eq(chartOfAccounts.isActive, true)
+      ))
+      .orderBy(chartOfAccounts.code);
+
+    return { success: true, data: accounts };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch accounts" };
+  }
+}
+
+export interface LedgerTransaction {
+  date: Date;
+  entryNumber: string;
+  description: string;
+  debit: string;
+  credit: string;
+  balance: string;
+}
+
+export interface LedgerReportResult {
+  account: {
+    id: string;
+    code: string;
+    name: string;
+    type: string;
+  };
+  transactions: LedgerTransaction[];
+  totalDebit: string;
+  totalCredit: string;
+  closingBalance: string;
+}
+
+export async function getLedgerReport(
+  accountId: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<{ success: boolean; data?: LedgerReportResult; error?: string }> {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    // Fetch account details
+    const [account] = await db
+      .select({
+        id: chartOfAccounts.id,
+        code: chartOfAccounts.code,
+        name: chartOfAccounts.name,
+        type: chartOfAccounts.type,
+      })
+      .from(chartOfAccounts)
+      .where(eq(chartOfAccounts.id, accountId))
+      .limit(1);
+
+    if (!account) {
+      return { success: false, error: "Account not found" };
+    }
+
+    // Build date filter
+    const from = dateFrom ? new Date(dateFrom) : new Date('2000-01-01');
+    const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date('2099-12-31');
+
+    // Fetch journal entry lines for this account within date range
+    const rows = await db
+      .select({
+        date: journalEntries.entryDate,
+        entryNumber: journalEntries.entryNumber,
+        description: journalEntryLines.description,
+        debitAmount: journalEntryLines.debitAmount,
+        creditAmount: journalEntryLines.creditAmount,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(and(
+        eq(journalEntryLines.orgId, orgId),
+        eq(journalEntryLines.accountId, accountId),
+        sql`${journalEntries.entryDate} >= ${from}`,
+        sql`${journalEntries.entryDate} <= ${to}`
+      ))
+      .orderBy(journalEntries.entryDate, journalEntries.entryNumber);
+
+    // Calculate running balance
+    let runningBalance = 0;
+    let totalDebit = 0;
+    let totalCredit = 0;
+    const transactions: LedgerTransaction[] = [];
+
+    for (const row of rows) {
+      const debit = parseFloat(row.debitAmount || '0');
+      const credit = parseFloat(row.creditAmount || '0');
+
+      totalDebit += debit;
+      totalCredit += credit;
+
+      // Running balance: positive = debit balance, negative = credit balance
+      runningBalance += debit - credit;
+
+      transactions.push({
+        date: row.date,
+        entryNumber: row.entryNumber,
+        description: row.description || '',
+        debit: debit.toFixed(2),
+        credit: credit.toFixed(2),
+        balance: runningBalance.toFixed(2),
+      });
+    }
+
+    return {
+      success: true,
+      data: {
+        account,
+        transactions,
+        totalDebit: totalDebit.toFixed(2),
+        totalCredit: totalCredit.toFixed(2),
+        closingBalance: runningBalance.toFixed(2),
+      },
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to generate ledger report" };
   }
 }
