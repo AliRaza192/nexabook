@@ -483,31 +483,26 @@ export async function approvePurchaseInvoice(invoiceId: string) {
       }
 
       // 5. Create Journal Entry Lines
-      // Debit: Inventory (Asset) - Net Amount
+      const taxAmount = parseFloat(invoice.taxTotal || '0');
+      const discountAmount = parseFloat(invoice.discountAmount || '0');
+
+      // Debit: Inventory (Asset) — grossAmount minus any discount
+      // Purchase discounts reduce the cost of inventory
+      const inventoryDebitAmount = (parseFloat(invoice.grossAmount || '0') - discountAmount).toFixed(2);
       await tx.insert(journalEntryLines).values({
         orgId,
         journalEntryId: journalEntry.id,
         accountId: inventoryAccount.id,
         description: `Debit - Inventory Asset (Purchase ${invoice.billNumber})`,
-        debitAmount: invoice.netAmount,
+        debitAmount: inventoryDebitAmount,
         creditAmount: '0',
       });
 
-      // Credit: Vendor Payable (Liability) - Net Amount
-      await tx.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: vendorPayable.id,
-        description: `Credit - Vendor Payable (Purchase ${invoice.billNumber})`,
-        debitAmount: '0',
-        creditAmount: invoice.netAmount,
-      });
-
-      // If tax > 0, add tax entry
-      const taxAmount = parseFloat(invoice.taxTotal || '0');
-      if (taxAmount > 0 && purchaseTax) {
-        // Adjust: Debit Inventory for gross, Credit Payable for gross
-        // Already done above, now add tax split
+      // Debit: Input Tax (if tax > 0)
+      if (taxAmount > 0) {
+        if (!purchaseTax) {
+          throw new Error('Input Tax account not found. Please seed Chart of Accounts first.');
+        }
         await tx.insert(journalEntryLines).values({
           orgId,
           journalEntryId: journalEntry.id,
@@ -516,10 +511,17 @@ export async function approvePurchaseInvoice(invoiceId: string) {
           debitAmount: invoice.taxTotal,
           creditAmount: '0',
         });
-
-        // Reduce inventory debit by tax amount (net effect)
-        // This is handled in the main inventory debit above
       }
+
+      // Credit: Vendor Payable (Liability) — Net Amount (total payable)
+      await tx.insert(journalEntryLines).values({
+        orgId,
+        journalEntryId: journalEntry.id,
+        accountId: vendorPayable.id,
+        description: `Credit - Vendor Payable (Purchase ${invoice.billNumber})`,
+        debitAmount: '0',
+        creditAmount: invoice.netAmount,
+      });
 
       // 6. Create audit log
       await tx.insert(auditLogs).values({
