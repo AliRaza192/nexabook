@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { chartOfAccounts, organizations, profiles, journalEntries, journalEntryLines, auditLogs } from "@/db/schema";
+import { chartOfAccounts, organizations, profiles, journalEntries, journalEntryLines, auditLogs, invoices, purchaseInvoices } from "@/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
@@ -622,5 +622,131 @@ export async function getLedgerReport(
     };
   } catch (error) {
     return { success: false, error: "Failed to generate ledger report" };
+  }
+}
+
+// ==================== TAX SUMMARY ====================
+
+export interface MonthlyTaxBreakdown {
+  month: string;
+  outputTax: string;
+  input_tax: string;
+  net_tax: string;
+}
+
+export async function getTaxSummary(
+  dateFrom: string,
+  dateTo: string
+): Promise<{
+  success: boolean;
+  data?: {
+    outputTax: string;
+    inputTax: string;
+    netTaxPayable: string;
+    monthlyBreakdown: MonthlyTaxBreakdown[];
+  };
+  error?: string;
+}> {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    const from = dateFrom ? new Date(dateFrom) : new Date('2000-01-01');
+    const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date('2099-12-31');
+
+    // Output Tax: sales invoices (excluding draft/cancelled)
+    const [outputResult] = await db
+      .select({ total: sql<string>`SUM(COALESCE(${invoices.taxAmount}, 0))` })
+      .from(invoices)
+      .where(and(
+        eq(invoices.orgId, orgId),
+        sql`${invoices.issueDate} >= ${from}`,
+        sql`${invoices.issueDate} <= ${to}`,
+        sql`${invoices.status} NOT IN ('draft', 'cancelled')`
+      ));
+
+    const outputTax = parseFloat(outputResult?.total || '0');
+
+    // Input Tax: purchase invoices (excluding draft/revised)
+    const [inputResult] = await db
+      .select({ total: sql<string>`SUM(COALESCE(${purchaseInvoices.taxTotal}, 0))` })
+      .from(purchaseInvoices)
+      .where(and(
+        eq(purchaseInvoices.orgId, orgId),
+        sql`${purchaseInvoices.date} >= ${from}`,
+        sql`${purchaseInvoices.date} <= ${to}`,
+        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+      ));
+
+    const inputTax = parseFloat(inputResult?.total || '0');
+
+    const netTaxPayable = outputTax - inputTax;
+
+    // Monthly breakdown — fetch all relevant invoices and group by month
+    const salesRows = await db
+      .select({
+        issueDate: invoices.issueDate,
+        taxAmount: invoices.taxAmount,
+      })
+      .from(invoices)
+      .where(and(
+        eq(invoices.orgId, orgId),
+        sql`${invoices.issueDate} >= ${from}`,
+        sql`${invoices.issueDate} <= ${to}`,
+        sql`${invoices.status} NOT IN ('draft', 'cancelled')`
+      ));
+
+    const purchaseRows = await db
+      .select({
+        date: purchaseInvoices.date,
+        taxTotal: purchaseInvoices.taxTotal,
+      })
+      .from(purchaseInvoices)
+      .where(and(
+        eq(purchaseInvoices.orgId, orgId),
+        sql`${purchaseInvoices.date} >= ${from}`,
+        sql`${purchaseInvoices.date} <= ${to}`,
+        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+      ));
+
+    // Group by YYYY-MM
+    const monthMap = new Map<string, { output: number; input: number }>();
+
+    for (const row of salesRows) {
+      const key = `${row.issueDate.getFullYear()}-${String(row.issueDate.getMonth() + 1).padStart(2, '0')}`;
+      const entry = monthMap.get(key) || { output: 0, input: 0 };
+      entry.output += parseFloat(row.taxAmount || '0');
+      monthMap.set(key, entry);
+    }
+
+    for (const row of purchaseRows) {
+      const key = `${row.date.getFullYear()}-${String(row.date.getMonth() + 1).padStart(2, '0')}`;
+      const entry = monthMap.get(key) || { output: 0, input: 0 };
+      entry.input += parseFloat(row.taxTotal || '0');
+      monthMap.set(key, entry);
+    }
+
+    const monthlyBreakdown: MonthlyTaxBreakdown[] = Array.from(monthMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, v]) => ({
+        month,
+        outputTax: v.output.toFixed(2),
+        input_tax: v.input.toFixed(2),
+        net_tax: (v.output - v.input).toFixed(2),
+      }));
+
+    return {
+      success: true,
+      data: {
+        outputTax: outputTax.toFixed(2),
+        inputTax: inputTax.toFixed(2),
+        netTaxPayable: netTaxPayable.toFixed(2),
+        monthlyBreakdown,
+      },
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to generate tax summary" };
   }
 }
