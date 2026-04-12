@@ -6,7 +6,7 @@ import {
   organizations, profiles, auditLogs, journalEntries, journalEntryLines,
   chartOfAccounts,
 } from "@/db/schema";
-import { eq, and, desc, ilike, or } from "drizzle-orm";
+import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
@@ -688,4 +688,137 @@ async function findAccountByType(orgId: string, type: string, keyword: string): 
     .limit(1);
 
   return account?.id || "";
+}
+
+// ==========================================
+// BANK RECONCILIATION
+// ==========================================
+
+export interface ReconciliationTransaction {
+  id: string;
+  date: Date;
+  entryNumber: string;
+  description: string;
+  debit: string;
+  credit: string;
+  referenceType: string;
+  referenceNumber: string | null;
+}
+
+export async function getBankReconciliation(
+  bankAccountId: string,
+  statementDate: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<{
+  success: boolean;
+  data?: {
+    bankAccount: {
+      id: string;
+      name: string;
+      accountNumber: string;
+      currentBalance: string;
+    };
+    transactions: ReconciliationTransaction[];
+    systemBookBalance: string;
+    totalDebits: string;
+    totalCredits: string;
+  };
+  error?: string;
+}> {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    // Fetch bank account details
+    const [bankAccount] = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.id, bankAccountId), eq(bankAccounts.orgId, orgId)))
+      .limit(1);
+
+    if (!bankAccount) return { success: false, error: "Bank account not found" };
+
+    // Find the corresponding chartOfAccounts entry for this bank account
+    // Match by account name — bank account names usually match COA names
+    const [coaAccount] = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(
+        eq(chartOfAccounts.orgId, orgId),
+        eq(chartOfAccounts.type, "asset"),
+        ilike(chartOfAccounts.name, `%${bankAccount.accountName}%`)
+      ))
+      .limit(1);
+
+    const accountId = coaAccount?.id || null;
+
+    // If no COA account found, fall back to searching by bank name pattern
+    let transactions: ReconciliationTransaction[] = [];
+    let totalDebits = 0;
+    let totalCredits = 0;
+
+    if (accountId) {
+      const from = dateFrom ? new Date(dateFrom) : new Date('2000-01-01');
+      const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date('2099-12-31');
+
+      const rows = await db
+        .select({
+          id: journalEntryLines.id,
+          date: journalEntries.entryDate,
+          entryNumber: journalEntries.entryNumber,
+          description: journalEntryLines.description,
+          debitAmount: journalEntryLines.debitAmount,
+          creditAmount: journalEntryLines.creditAmount,
+          referenceType: journalEntries.referenceType,
+        })
+        .from(journalEntryLines)
+        .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+        .where(and(
+          eq(journalEntryLines.orgId, orgId),
+          eq(journalEntryLines.accountId, accountId),
+          sql`${journalEntries.entryDate} >= ${from}`,
+          sql`${journalEntries.entryDate} <= ${to}`
+        ))
+        .orderBy(journalEntries.entryDate, journalEntries.entryNumber);
+
+      transactions = rows.map(row => {
+        const debit = parseFloat(row.debitAmount || '0');
+        const credit = parseFloat(row.creditAmount || '0');
+        totalDebits += debit;
+        totalCredits += credit;
+
+        return {
+          id: row.id,
+          date: row.date,
+          entryNumber: row.entryNumber,
+          description: row.description || '',
+          debit: debit.toFixed(2),
+          credit: credit.toFixed(2),
+          referenceType: row.referenceType || '',
+          referenceNumber: null,
+        };
+      });
+    }
+
+    const systemBookBalance = totalDebits - totalCredits;
+
+    return {
+      success: true,
+      data: {
+        bankAccount: {
+          id: bankAccount.id,
+          name: bankAccount.accountName,
+          accountNumber: bankAccount.accountNumber,
+          currentBalance: bankAccount.currentBalance || '0',
+        },
+        transactions,
+        systemBookBalance: systemBookBalance.toFixed(2),
+        totalDebits: totalDebits.toFixed(2),
+        totalCredits: totalCredits.toFixed(2),
+      },
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch bank reconciliation data" };
+  }
 }
