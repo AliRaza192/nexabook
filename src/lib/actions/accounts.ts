@@ -412,3 +412,74 @@ export async function getAccountById(accountId: string) {
     return { success: false, error: "Failed to fetch account" };
   }
 }
+
+// ==================== COMPANY SETTINGS ====================
+
+export async function getCompanySettings() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    const [org] = await db
+      .select()
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+
+    if (!org) {
+      return { success: false, error: "Organization not found" };
+    }
+
+    return { success: true, data: org };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch company settings" };
+  }
+}
+
+export async function updateCompanySettings(data: {
+  name: string;
+  ntn?: string;
+  strn?: string;
+  address?: string;
+  city?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  fiscalYearStart?: string;
+  currency?: string;
+}) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    if (!data.name?.trim()) {
+      return { success: false, error: "Company name is required" };
+    }
+
+    const updateData: Record<string, string> = { name: data.name.trim() };
+    if (data.ntn !== undefined) updateData.ntn = data.ntn;
+    if (data.strn !== undefined) updateData.strn = data.strn;
+    if (data.address !== undefined) updateData.address = data.address;
+    if (data.city !== undefined) updateData.city = data.city;
+    if (data.phone !== undefined) updateData.phone = data.phone;
+    if (data.email !== undefined) updateData.email = data.email;
+    if (data.website !== undefined) updateData.website = data.website;
+    if (data.fiscalYearStart !== undefined) updateData.fiscalYearStart = data.fiscalYearStart;
+    if (data.currency !== undefined) updateData.currency = data.currency;
+
+    await db
+      .update(organizations)
+      .set({ ...updateData, updatedAt: new Date() })
+      .where(eq(organizations.id, orgId));
+
+    revalidatePath("/settings");
+
+    return { success: true, message: "Settings saved successfully" };
+  } catch (error) {
+    return { success: false, error: "Failed to update company settings" };
+  }
+}

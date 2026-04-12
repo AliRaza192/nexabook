@@ -502,7 +502,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
 
       // 5. Create Journal Entry Lines
       const taxAmount = parseFloat(invoice.taxTotal || '0');
-      const discountAmount = parseFloat(invoice.discountAmount || '0');
+      const discountAmount = parseFloat(invoice.discountTotal || '0');
 
       // Debit: Inventory (Asset) — grossAmount minus any discount
       // Purchase discounts reduce the cost of inventory

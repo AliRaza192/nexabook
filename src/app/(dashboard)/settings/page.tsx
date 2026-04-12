@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,16 +14,100 @@ import { Separator } from "@/components/ui/separator";
 import {
   Building2, Hash, Percent, Users, Save, Upload, Plus, Trash2, CheckCircle,
 } from "lucide-react";
+import { getCompanySettings, updateCompanySettings } from "@/lib/actions/accounts";
 
 export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
+  const [saveMessage, setSaveMessage] = useState("");
+
+  const [form, setForm] = useState({
+    name: "",
+    slug: "",
+    ntn: "",
+    strn: "",
+    address: "",
+    city: "",
+    country: "Pakistan",
+    phone: "",
+    email: "",
+    website: "",
+    currency: "PKR",
+    fiscalYearStart: "07-01",
+  });
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await getCompanySettings();
+      if (res.success && res.data) {
+        const d = res.data as any;
+        setForm({
+          name: d.name || "",
+          slug: d.slug || "",
+          ntn: d.ntn || "",
+          strn: d.strn || "",
+          address: d.address || "",
+          city: d.city || "",
+          country: d.country || "Pakistan",
+          phone: d.phone || "",
+          email: d.email || "",
+          website: d.website || "",
+          currency: d.currency || "PKR",
+          fiscalYearStart: d.fiscalYearStart || "07-01",
+        });
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setForm(prev => ({ ...prev, [key]: e.target.value }));
+  };
 
   const handleSave = async () => {
     setSaving(true);
-    // TODO: Implement server action
-    await new Promise(r => setTimeout(r, 1000));
+    setSaveStatus("idle");
+    setSaveMessage("");
+    try {
+      const res = await updateCompanySettings({
+        name: form.name,
+        ntn: form.ntn,
+        strn: form.strn,
+        address: form.address,
+        city: form.city,
+        phone: form.phone,
+        email: form.email,
+        website: form.website,
+        fiscalYearStart: form.fiscalYearStart,
+        currency: form.currency,
+      });
+      if (res.success) {
+        setSaveStatus("success");
+        setSaveMessage(res.message || "Settings saved successfully!");
+      } else {
+        setSaveStatus("error");
+        setSaveMessage(res.error || "Failed to save settings");
+      }
+    } catch {
+      setSaveStatus("error");
+      setSaveMessage("An unexpected error occurred");
+    }
     setSaving(false);
+    setTimeout(() => setSaveStatus("idle"), 4000);
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-center py-20">
+          <p className="text-nexabook-500">Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -31,6 +115,18 @@ export default function SettingsPage() {
         <h1 className="text-3xl font-bold text-nexabook-900">System Settings</h1>
         <p className="text-nexabook-600 mt-1">Configure company profile, numbering, tax, and user access</p>
       </motion.div>
+
+      {/* Save feedback */}
+      {saveStatus === "success" && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
+          <CheckCircle className="h-4 w-4" />{saveMessage}
+        </div>
+      )}
+      {saveStatus === "error" && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">
+          {saveMessage}
+        </div>
+      )}
 
       <Tabs defaultValue="company">
         <TabsList className="grid w-full grid-cols-4">
@@ -45,7 +141,7 @@ export default function SettingsPage() {
           <Card>
             <CardHeader><CardTitle>Company Information</CardTitle><CardDescription>Update your business details and branding</CardDescription></CardHeader>
             <CardContent className="space-y-6">
-              {/* Logo Upload */}
+              {/* LogoUpload */}
               <div className="flex items-center gap-6">
                 <div className="h-24 w-24 rounded-lg bg-nexabook-100 flex items-center justify-center border-2 border-dashed border-nexabook-300">
                   <Building2 className="h-10 w-10 text-nexabook-400" />
@@ -63,15 +159,15 @@ export default function SettingsPage() {
               <Separator />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Company Name*</Label><Input defaultValue="Acme Corporation" /></div>
-                <div className="space-y-2"><Label>Slug</Label><Input defaultValue="acme-corporation" disabled className="bg-nexabook-50" /></div>
-                <div className="space-y-2"><Label>NTN (National Tax Number)</Label><Input placeholder="1234567-8" /></div>
-                <div className="space-y-2"><Label>STRN (Sales Tax Registration)</Label><Input placeholder="1234567890123" /></div>
-                <div className="space-y-2"><Label>Phone</Label><Input placeholder="+92-XXX-XXXXXXX" /></div>
-                <div className="space-y-2"><Label>Email</Label><Input type="email" placeholder="info@company.com" /></div>
-                <div className="space-y-2"><Label>Website</Label><Input placeholder="https://company.com" /></div>
+                <div className="space-y-2"><Label>Company Name*</Label><Input value={form.name} onChange={set("name")} /></div>
+                <div className="space-y-2"><Label>Slug</Label><Input value={form.slug} disabled className="bg-nexabook-50" /></div>
+                <div className="space-y-2"><Label>NTN (National Tax Number)</Label><Input value={form.ntn} onChange={set("ntn")} placeholder="1234567-8" /></div>
+                <div className="space-y-2"><Label>STRN (Sales Tax Registration)</Label><Input value={form.strn} onChange={set("strn")} placeholder="1234567890123" /></div>
+                <div className="space-y-2"><Label>Phone</Label><Input value={form.phone} onChange={set("phone")} placeholder="+92-XXX-XXXXXXX" /></div>
+                <div className="space-y-2"><Label>Email</Label><Input type="email" value={form.email} onChange={set("email")} placeholder="info@company.com" /></div>
+                <div className="space-y-2"><Label>Website</Label><Input value={form.website} onChange={set("website")} placeholder="https://company.com" /></div>
                 <div className="space-y-2"><Label>Currency</Label>
-                  <select className="w-full rounded-md border border-nexabook-200 px-3 py-2" defaultValue="PKR">
+                  <select className="w-full rounded-md border border-nexabook-200 px-3 py-2" value={form.currency} onChange={set("currency")}>
                     <option value="PKR">PKR - Pakistani Rupee</option>
                     <option value="USD">USD - US Dollar</option>
                     <option value="EUR">EUR - Euro</option>
@@ -80,13 +176,13 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="space-y-2"><Label>Address</Label><Textarea rows={3} placeholder="Street, City, Province" /></div>
+              <div className="space-y-2"><Label>Address</Label><Textarea rows={3} value={form.address} onChange={set("address")} placeholder="Street, City, Province" /></div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2"><Label>City</Label><Input placeholder="Karachi" /></div>
-                <div className="space-y-2"><Label>Country</Label><Input defaultValue="Pakistan" /></div>
+                <div className="space-y-2"><Label>City</Label><Input value={form.city} onChange={set("city")} placeholder="Karachi" /></div>
+                <div className="space-y-2"><Label>Country</Label><Input value={form.country} onChange={set("country")} /></div>
                 <div className="space-y-2"><Label>Fiscal Year Start</Label>
-                  <select className="w-full rounded-md border border-nexabook-200 px-3 py-2" defaultValue="07-01">
+                  <select className="w-full rounded-md border border-nexabook-200 px-3 py-2" value={form.fiscalYearStart} onChange={set("fiscalYearStart")}>
                     <option value="01-01">January 1</option>
                     <option value="04-01">April 1</option>
                     <option value="07-01">July 1</option>
@@ -95,7 +191,7 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <Button onClick={handleSave} className="bg-nexabook-900 hover:bg-nexabook-800">
+              <Button onClick={handleSave} disabled={saving} className="bg-nexabook-900 hover:bg-nexabook-800">
                 <Save className="h-4 w-4 mr-2" />{saving ? "Saving..." : "Save Changes"}
               </Button>
             </CardContent>
@@ -126,7 +222,7 @@ export default function SettingsPage() {
                 </div>
               ))}
 
-              <Button onClick={handleSave} className="bg-nexabook-900 hover:bg-nexabook-800 mt-4">
+              <Button onClick={handleSave} disabled={saving} className="bg-nexabook-900 hover:bg-nexabook-800 mt-4">
                 <Save className="h-4 w-4 mr-2" />Save Numbering Series
               </Button>
             </CardContent>
@@ -183,7 +279,7 @@ export default function SettingsPage() {
                 ))}
               </div>
 
-              <Button onClick={handleSave} className="bg-nexabook-900 hover:bg-nexabook-800">
+              <Button onClick={handleSave} disabled={saving} className="bg-nexabook-900 hover:bg-nexabook-800">
                 <Save className="h-4 w-4 mr-2" />Save Tax Configuration
               </Button>
             </CardContent>
@@ -227,7 +323,7 @@ export default function SettingsPage() {
 
               <Separator className="my-6" />
 
-              {/* Active Users Table */}
+              {/* Active Users Table — Placeholder */}
               <Label className="text-base font-semibold mb-4 block">Active Users</Label>
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full">
@@ -235,22 +331,11 @@ export default function SettingsPage() {
                     <tr><th className="text-left px-4 py-3 text-sm font-medium text-nexabook-600">User</th><th className="text-left px-4 py-3 text-sm font-medium text-nexabook-600">Email</th><th className="text-left px-4 py-3 text-sm font-medium text-nexabook-600">Role</th><th className="text-left px-4 py-3 text-sm font-medium text-nexabook-600">Status</th><th className="text-right px-4 py-3 text-sm font-medium text-nexabook-600">Actions</th></tr>
                   </thead>
                   <tbody className="divide-y">
-                    {[
-                      { name: "John Doe", email: "john@acme.com", role: "Admin", status: "Active" },
-                      { name: "Jane Smith", email: "jane@acme.com", role: "Manager", status: "Active" },
-                      { name: "Mike Johnson", email: "mike@acme.com", role: "Accountant", status: "Active" },
-                      { name: "Sarah Wilson", email: "sarah@acme.com", role: "Staff", status: "Pending" },
-                    ].map((user, idx) => (
-                      <tr key={idx} className="hover:bg-nexabook-50/50">
-                        <td className="px-4 py-3 font-medium">{user.name}</td>
-                        <td className="px-4 py-3 text-sm text-nexabook-600">{user.email}</td>
-                        <td className="px-4 py-3"><Badge variant="outline">{user.role}</Badge></td>
-                        <td className="px-4 py-3"><Badge variant={user.status === "Active" ? "default" : "outline"} className="gap-1"><CheckCircle className="h-3 w-3" />{user.status}</Badge></td>
-                        <td className="px-4 py-3 text-right">
-                          <Button variant="ghost" size="sm" className="h-7">Edit Role</Button>
-                        </td>
-                      </tr>
-                    ))}
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-sm text-nexabook-500">
+                        User management via Clerk Dashboard. Connect your Clerk instance to manage users, roles, and invitations.
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>

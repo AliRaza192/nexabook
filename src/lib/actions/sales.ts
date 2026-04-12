@@ -658,6 +658,8 @@ export async function approveInvoice(invoiceId: string) {
         ))
         .limit(1);
 
+      const taxAmount = parseFloat(invoice.taxAmount || '0');
+
       // Debit: Accounts Receivable (Net Amount)
       await tx.insert(journalEntryLines).values({
         orgId,
