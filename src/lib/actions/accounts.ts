@@ -20,6 +20,54 @@ export interface JournalEntryData {
   lines: JournalEntryLine[];
 }
 
+// Seed default Chart of Accounts for a specific organization
+async function seedDefaultChartOfAccounts(orgId: string): Promise<void> {
+  const defaultAccounts = [
+    // Assets
+    { code: "1010", name: "Cash", type: "asset", description: "Cash on hand" },
+    { code: "1020", name: "Bank", type: "asset", description: "Bank account" },
+    { code: "1100", name: "Accounts Receivable", type: "asset", description: "Money owed by customers" },
+    { code: "1200", name: "Inventory", type: "asset", description: "Goods available for sale" },
+    { code: "1210", name: "Input Tax", type: "asset", description: "Recoverable input tax" },
+    { code: "1300", name: "Prepaid Expenses", type: "asset", description: "Expenses paid in advance" },
+
+    // Liabilities
+    { code: "2100", name: "Accounts Payable", type: "liability", description: "Money owed to suppliers" },
+    { code: "2200", name: "Sales Tax Payable", type: "liability", description: "Sales tax collected but not remitted" },
+    { code: "2210", name: "Income Tax Payable", type: "liability", description: "Income tax owed" },
+    { code: "2300", name: "Salaries Payable", type: "liability", description: "Salaries owed to employees" },
+    { code: "2310", name: "EOBI Payable", type: "liability", description: "EOBI contributions payable" },
+
+    // Equity
+    { code: "3000", name: "Owner's Equity", type: "equity", description: "Owner's investment in the business" },
+    { code: "3100", name: "Retained Earnings", type: "equity", description: "Accumulated profits/losses" },
+
+    // Income
+    { code: "4000", name: "Sales Revenue", type: "income", description: "Revenue from sales" },
+    { code: "4100", name: "Other Income", type: "income", description: "Miscellaneous income" },
+    { code: "4200", name: "Shipping Revenue", type: "income", description: "Revenue from shipping charges" },
+
+    // Expense
+    { code: "5000", name: "Cost of Goods Sold", type: "expense", description: "Direct cost of goods sold" },
+    { code: "6100", name: "Salaries & Wages Expense", type: "expense", description: "Employee compensation" },
+    { code: "6200", name: "Rent Expense", type: "expense", description: "Office/warehouse rent" },
+    { code: "6300", name: "Utilities Expense", type: "expense", description: "Electricity, water, gas" },
+    { code: "6400", name: "Depreciation Expense", type: "expense", description: "Asset depreciation" },
+    { code: "6500", name: "Discount Allowed", type: "expense", description: "Discounts given to customers" },
+  ];
+
+  const accountsToInsert = defaultAccounts.map((account) => ({
+    orgId,
+    code: account.code,
+    name: account.name,
+    type: account.type,
+    description: account.description,
+    isActive: true,
+  }));
+
+  await db.insert(chartOfAccounts).values(accountsToInsert);
+}
+
 // Helper function to get current user's orgId with auto-onboarding
 async function getCurrentOrgId(): Promise<string | null> {
   try {
@@ -52,7 +100,7 @@ async function getCurrentOrgId(): Promise<string | null> {
     // Create a default organization for the user
     const timestamp = Date.now();
     const orgSlug = `my-business-${timestamp}`;
-    
+
     const newOrg = await db
       .insert(organizations)
       .values({
@@ -81,6 +129,9 @@ async function getCurrentOrgId(): Promise<string | null> {
       fullName: userFullName,
       email: userEmail,
     });
+
+    // Seed default Chart of Accounts for the new organization
+    await seedDefaultChartOfAccounts(newOrgId);
 
     return newOrgId;
   } catch (error) {
