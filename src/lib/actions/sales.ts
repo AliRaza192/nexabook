@@ -12,6 +12,7 @@ import {
   auditLogs,
   journalEntries,
   journalEntryLines,
+  stockMovements,
   saleOrders,
   orderItems,
   quotations,
@@ -545,21 +546,43 @@ export async function approveInvoice(invoiceId: string) {
         .set({ status: 'approved' })
         .where(eq(invoices.id, invoiceId));
 
-      // 2. Update inventory (subtract stock)
+      // 2. Update inventory (subtract stock) & log stock movements
       for (const item of items) {
         if (item.productId) {
           const [product] = await tx
-            .select({ currentStock: products.currentStock })
+            .select({ currentStock: products.currentStock, costPrice: products.costPrice, name: products.name })
             .from(products)
             .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
             .limit(1);
 
           if (product) {
-            const newStock = Math.max(0, (product.currentStock || 0) - parseFloat(item.quantity));
+            const available = product.currentStock || 0;
+            const required = parseFloat(item.quantity);
+            if (required > available) {
+              throw new Error(`Insufficient stock for ${product.name || 'product'}. Required: ${required}, Available: ${available}`);
+            }
+            const newStock = available - required;
             await tx
               .update(products)
               .set({ currentStock: newStock })
               .where(eq(products.id, item.productId));
+
+            // Log stock movement
+            const unitCost = product.costPrice || '0';
+            const totalValue = (required * parseFloat(unitCost)).toFixed(2);
+            await tx.insert(stockMovements).values({
+              orgId,
+              productId: item.productId,
+              movementType: 'out',
+              reason: 'sale',
+              quantity: item.quantity,
+              unitCost,
+              totalValue,
+              referenceType: 'invoice',
+              referenceId: invoiceId,
+              referenceNumber: invoice.invoiceNumber,
+              runningBalance: String(newStock),
+            });
           }
         }
       }

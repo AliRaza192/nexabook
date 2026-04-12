@@ -13,6 +13,7 @@ import {
   auditLogs,
   journalEntries,
   journalEntryLines,
+  stockMovements,
   purchaseOrders,
   purchaseOrderItems,
   goodReceivingNotes,
@@ -410,7 +411,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         .set({ status: 'Approved' })
         .where(eq(purchaseInvoices.id, invoiceId));
 
-      // 2. Update inventory (ADD stock for purchases)
+      // 2. Update inventory (ADD stock for purchases) & log stock movements
       for (const item of items) {
         if (item.productId) {
           const [product] = await tx
@@ -425,6 +426,23 @@ export async function approvePurchaseInvoice(invoiceId: string) {
               .update(products)
               .set({ currentStock: newStock, costPrice: item.unitPrice })
               .where(eq(products.id, item.productId));
+
+            // Log stock movement
+            const unitCost = item.unitPrice;
+            const totalValue = (parseFloat(item.quantity) * parseFloat(unitCost)).toFixed(2);
+            await tx.insert(stockMovements).values({
+              orgId,
+              productId: item.productId,
+              movementType: 'in',
+              reason: 'purchase',
+              quantity: item.quantity,
+              unitCost,
+              totalValue,
+              referenceType: 'purchase_invoice',
+              referenceId: invoiceId,
+              referenceNumber: invoice.billNumber,
+              runningBalance: String(newStock),
+            });
           }
         }
       }
