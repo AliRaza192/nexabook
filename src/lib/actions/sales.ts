@@ -276,10 +276,12 @@ export async function getInvoices(searchQuery?: string, statusFilter?: string) {
         grossAmount: invoices.grossAmount,
         taxAmount: invoices.taxAmount,
         balanceAmount: invoices.balanceAmount,
+        emailSentAt: invoices.emailSentAt,
         createdAt: invoices.createdAt,
         customer: {
           id: customers.id,
           name: customers.name,
+          email: customers.email,
         },
       })
       .from(invoices)

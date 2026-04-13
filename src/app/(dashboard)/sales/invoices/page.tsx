@@ -16,6 +16,8 @@ import {
   CheckCircle,
   Clock,
   Download,
+  Mail,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +30,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   getInvoices,
   getInvoiceStats,
@@ -45,10 +55,12 @@ interface Invoice {
   taxAmount: string | null;
   netAmount: string | null;
   balanceAmount: string | null;
+  emailSentAt: Date | null;
   createdAt: Date;
   customer: {
     id: string;
     name: string;
+    email: string | null;
   } | null;
 }
 
@@ -146,6 +158,12 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  
+  // Email dialog state
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailSent, setEmailSent] = useState<Set<string>>(new Set());
 
   // Load invoices and stats
   const loadData = async () => {
@@ -241,6 +259,47 @@ export default function InvoicesPage() {
       }
     } catch (error) {
       console.error("Failed to generate PDF:", error);
+    }
+  };
+
+  // Send invoice email
+  const handleSendEmail = (invoice: Invoice) => {
+    if (!invoice.customer?.email) {
+      alert("Please add customer email first.");
+      return;
+    }
+    setSelectedInvoice(invoice);
+    setEmailDialogOpen(true);
+  };
+
+  const confirmSendEmail = async () => {
+    if (!selectedInvoice || !selectedInvoice.customer?.email) return;
+    
+    setSendingEmail(true);
+    try {
+      const response = await fetch('/api/send-invoice-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceId: selectedInvoice.id,
+          customerEmail: selectedInvoice.customer.email,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setEmailSent(prev => new Set(prev).add(selectedInvoice.id));
+        setEmailDialogOpen(false);
+        alert("Invoice email sent successfully!");
+      } else {
+        alert(`Failed to send email: ${result.error}`);
+      }
+    } catch (error) {
+      console.error("Error sending email:", error);
+      alert("Failed to send email. Please try again.");
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -458,15 +517,43 @@ export default function InvoicesPage() {
                           </Badge>
                         </td>
                         <td className="py-3 px-4">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDownloadPDF(invoice.id)}
-                            className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
-                            title="Download PDF"
-                          >
-                            <Download className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            {/* Email Sent Badge */}
+                            {(invoice.emailSentAt || emailSent.has(invoice.id)) && (
+                              <Badge
+                                variant="success"
+                                className="text-xs gap-1 bg-green-100 text-green-700 border-green-200"
+                              >
+                                <CheckCircle className="h-3 w-3" />
+                                Sent ✓
+                              </Badge>
+                            )}
+                            
+                            <div className="flex items-center gap-1">
+                            {/* Email Button */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleSendEmail(invoice)}
+                              className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
+                              title="Send Email"
+                              disabled={!invoice.customer?.email}
+                            >
+                              <Mail className="h-4 w-4" />
+                            </Button>
+                            
+                            {/* Download PDF Button */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDownloadPDF(invoice.id)}
+                              className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
+                              title="Download PDF"
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          </div>
                         </td>
                       </motion.tr>
                     );
@@ -477,6 +564,45 @@ export default function InvoicesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Email Confirmation Dialog */}
+      <Dialog open={emailDialogOpen} onOpenChange={setEmailDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send Invoice Email</DialogTitle>
+            <DialogDescription>
+              Send invoice #{selectedInvoice?.invoiceNumber} to{' '}
+              <strong className="text-nexabook-900">{selectedInvoice?.customer?.email}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEmailDialogOpen(false)}
+              disabled={sendingEmail}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSendEmail}
+              disabled={sendingEmail}
+              className="bg-nexabook-900 hover:bg-nexabook-800"
+            >
+              {sendingEmail ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Send Email
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

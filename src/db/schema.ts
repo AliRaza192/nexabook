@@ -189,6 +189,7 @@ export const invoices = pgTable('invoices', {
   cashBankAccountId: uuid('cash_bank_account_id').references(() => chartOfAccounts.id),
   notes: text('notes'),
   terms: text('terms'),
+  emailSentAt: timestamp('email_sent_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
