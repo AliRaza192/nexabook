@@ -15,6 +15,7 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
+  Download,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,9 @@ import {
 import {
   getInvoices,
   getInvoiceStats,
+  getInvoiceWithDetails,
 } from "@/lib/actions/sales";
+import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
 
 interface Invoice {
   id: string;
@@ -191,6 +194,56 @@ export default function InvoicesPage() {
     });
   };
 
+  // Download PDF for an invoice
+  const handleDownloadPDF = async (invoiceId: string) => {
+    try {
+      const result = await getInvoiceWithDetails(invoiceId);
+      if (result.success && result.data) {
+        const data = result.data;
+        const pdfData: InvoicePDFData = {
+          orgName: data.orgName,
+          orgNtn: data.orgNtn,
+          orgStrn: data.orgStrn,
+          orgAddress: data.orgAddress,
+          orgCity: data.orgCity,
+          orgCountry: data.orgCountry,
+          orgPhone: data.orgPhone,
+          orgEmail: data.orgEmail,
+          orgLogo: data.orgLogo,
+          invoiceNumber: data.invoiceNumber,
+          invoiceSubject: data.subject,
+          invoiceReference: data.reference,
+          issueDate: data.issueDate,
+          dueDate: data.dueDate,
+          status: data.status,
+          customerName: data.customerName,
+          customerNtn: data.customerNtn,
+          customerAddress: data.customerAddress,
+          customerCity: data.customerCity,
+          customerPhone: data.customerPhone,
+          items: data.items.map(item => ({
+            ...item,
+            productName: item.productName || undefined,
+          })),
+          grossAmount: data.grossAmount,
+          discountAmount: data.discountAmount,
+          discountPercentage: data.discountPercentage,
+          taxAmount: data.taxAmount,
+          shippingCharges: data.shippingCharges,
+          roundOff: data.roundOff,
+          netAmount: data.netAmount,
+          receivedAmount: data.receivedAmount,
+          balanceAmount: data.balanceAmount,
+          notes: data.notes,
+          orderBooker: data.orderBooker,
+        };
+        await downloadInvoicePDF(pdfData);
+      }
+    } catch (error) {
+      console.error("Failed to generate PDF:", error);
+    }
+  };
+
   if (loading && !invoices.length) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -349,6 +402,9 @@ export default function InvoicesPage() {
                     <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
                       Status
                     </th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -400,6 +456,17 @@ export default function InvoicesPage() {
                             <StatusIcon className="h-3 w-3" />
                             {statusConfig.label}
                           </Badge>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDownloadPDF(invoice.id)}
+                            className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
+                            title="Download PDF"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
                         </td>
                       </motion.tr>
                     );

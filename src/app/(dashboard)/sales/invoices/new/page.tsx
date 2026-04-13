@@ -20,6 +20,7 @@ import {
   Calendar,
   Search,
   ArrowUpDown,
+  Download,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -51,6 +52,8 @@ import {
   type InvoiceLineItem,
 } from "@/lib/actions/sales";
 import { getProducts } from "@/lib/actions/inventory";
+import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
+import { getInvoiceWithDetails } from "@/lib/actions/sales";
 
 interface Customer {
   id: string;
@@ -291,7 +294,7 @@ export default function NewInvoicePage() {
     return new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   };
 
-  const handleSave = async (action: "continue" | "close" | "approve" | "approve-print") => {
+  const handleSave = async (action: "continue" | "close" | "approve" | "approve-print" | "approve-download") => {
     if (!customerId) { alert("Please select a customer"); return; }
     if (lineItems.some((item) => !item.productId || parseFloat(item.unitPrice) <= 0)) { alert("Please select products and enter valid prices"); return; }
     setSubmitting(true);
@@ -309,13 +312,64 @@ export default function NewInvoicePage() {
       const result = await createInvoice(data);
       if (result.success && result.data) {
         const id = (result.data as any).id;
-        if (action === "approve" || action === "approve-print") {
+        if (action === "approve" || action === "approve-print" || action === "approve-download") {
           const ar = await approveInvoice(id);
           if (!ar.success) { alert(`Created but approval failed: ${(ar as any).error}`); router.push("/sales/invoices"); return; }
         }
-        if (action === "approve-print") window.print();
-        if (action === "close" || action === "approve" || action === "approve-print") router.push("/sales/invoices");
-        else { alert(`Invoice ${result.invoiceNumber} saved!`); router.refresh(); }
+        if (action === "approve-print") {
+          window.print();
+          router.push("/sales/invoices");
+        } else if (action === "approve-download") {
+          // Download PDF with full details
+          const invoiceResult = await getInvoiceWithDetails(id);
+          if (invoiceResult.success && invoiceResult.data) {
+            const invData = invoiceResult.data;
+            const pdfData: InvoicePDFData = {
+              orgName: invData.orgName,
+              orgNtn: invData.orgNtn,
+              orgStrn: invData.orgStrn,
+              orgAddress: invData.orgAddress,
+              orgCity: invData.orgCity,
+              orgCountry: invData.orgCountry,
+              orgPhone: invData.orgPhone,
+              orgEmail: invData.orgEmail,
+              orgLogo: invData.orgLogo,
+              invoiceNumber: invData.invoiceNumber,
+              invoiceSubject: invData.subject,
+              invoiceReference: invData.reference,
+              issueDate: invData.issueDate,
+              dueDate: invData.dueDate,
+              status: invData.status,
+              customerName: invData.customerName,
+              customerNtn: invData.customerNtn,
+              customerAddress: invData.customerAddress,
+              customerCity: invData.customerCity,
+              customerPhone: invData.customerPhone,
+              items: invData.items.map(item => ({
+                ...item,
+                productName: item.productName || undefined,
+              })),
+              grossAmount: invData.grossAmount,
+              discountAmount: invData.discountAmount,
+              discountPercentage: invData.discountPercentage,
+              taxAmount: invData.taxAmount,
+              shippingCharges: invData.shippingCharges,
+              roundOff: invData.roundOff,
+              netAmount: invData.netAmount,
+              receivedAmount: invData.receivedAmount,
+              balanceAmount: invData.balanceAmount,
+              notes: invData.notes,
+              orderBooker: invData.orderBooker,
+            };
+            await downloadInvoicePDF(pdfData);
+          }
+          router.push("/sales/invoices");
+        } else if (action === "close" || action === "approve") {
+          router.push("/sales/invoices");
+        } else {
+          alert(`Invoice ${result.invoiceNumber} saved!`);
+          router.refresh();
+        }
       } else { alert(result.error || "Failed"); }
     } catch (error) { alert("Failed"); } finally { setSubmitting(false); }
   };
@@ -445,6 +499,10 @@ export default function NewInvoicePage() {
                   <DropdownMenuItem onClick={() => handleSave("close")}>Save & Close</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleSave("approve")}>Save & Approve</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleSave("approve-print")}>Approve & Print</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSave("approve-download")} className="text-blue-600 font-medium">
+                    <Download className="h-4 w-4 mr-2" />
+                    Approve & Download PDF
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button variant="outline" className="w-full h-10 border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400 font-semibold" onClick={() => router.push("/sales/invoices")}><X className="mr-2 h-4 w-4" />CLOSE</Button>

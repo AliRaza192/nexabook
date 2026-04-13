@@ -24,7 +24,8 @@ import {
   customerPayments,
   customerPaymentAllocations,
   settlements,
-  settlementLines
+  settlementLines,
+  organizations
 } from "@/db/schema";
 import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -326,6 +327,181 @@ export async function getInvoiceById(invoiceId: string) {
     return { success: true, data: { ...invoice, items } };
   } catch (error) {
     return { success: false, error: "Failed to fetch invoice" };
+  }
+}
+
+// Get invoice with full details for PDF generation (joins invoices, invoiceItems, products, customers, organizations)
+export interface InvoiceWithDetails {
+  // Invoice fields
+  id: string;
+  invoiceNumber: string;
+  subject: string | null;
+  reference: string | null;
+  issueDate: Date;
+  dueDate: Date | null;
+  status: string;
+  grossAmount: string;
+  discountPercentage: string;
+  discountAmount: string;
+  taxAmount: string;
+  shippingCharges: string;
+  roundOff: string;
+  netAmount: string;
+  receivedAmount: string;
+  balanceAmount: string;
+  notes: string | null;
+  orderBooker: string | null;
+  
+  // Customer details
+  customerName: string;
+  customerNtn: string | null;
+  customerAddress: string | null;
+  customerCity: string | null;
+  customerPhone: string | null;
+  
+  // Organization details
+  orgName: string;
+  orgNtn: string | null;
+  orgStrn: string | null;
+  orgAddress: string | null;
+  orgCity: string | null;
+  orgCountry: string | null;
+  orgPhone: string | null;
+  orgEmail: string | null;
+  orgLogo: string | null;
+  
+  // Line items with product details
+  items: {
+    id: string;
+    description: string;
+    quantity: string;
+    unitPrice: string;
+    taxRate: string;
+    discountPercentage: string;
+    lineTotal: string;
+    productName: string | undefined;
+  }[];
+}
+
+export async function getInvoiceWithDetails(invoiceId: string): Promise<{ success: boolean; data?: InvoiceWithDetails; error?: string }> {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    // Get invoice with customer and organization details
+    const result = await db
+      .select({
+        // Invoice fields
+        id: invoices.id,
+        invoiceNumber: invoices.invoiceNumber,
+        subject: invoices.subject,
+        reference: invoices.reference,
+        issueDate: invoices.issueDate,
+        dueDate: invoices.dueDate,
+        status: invoices.status,
+        grossAmount: invoices.grossAmount,
+        discountPercentage: invoices.discountPercentage,
+        discountAmount: invoices.discountAmount,
+        taxAmount: invoices.taxAmount,
+        shippingCharges: invoices.shippingCharges,
+        roundOff: invoices.roundOff,
+        netAmount: invoices.netAmount,
+        receivedAmount: invoices.receivedAmount,
+        balanceAmount: invoices.balanceAmount,
+        notes: invoices.notes,
+        orderBooker: invoices.orderBooker,
+        
+        // Customer details
+        customerName: customers.name,
+        customerNtn: customers.ntn,
+        customerAddress: customers.address,
+        customerCity: customers.city,
+        customerPhone: customers.phone,
+        
+        // Organization details
+        orgName: organizations.name,
+        orgNtn: organizations.ntn,
+        orgStrn: organizations.strn,
+        orgAddress: organizations.address,
+        orgCity: organizations.city,
+        orgCountry: organizations.country,
+        orgPhone: organizations.phone,
+        orgEmail: organizations.email,
+        orgLogo: organizations.logo,
+      })
+      .from(invoices)
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .leftJoin(organizations, eq(invoices.orgId, organizations.id))
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
+      .limit(1);
+
+    if (result.length === 0) {
+      return { success: false, error: "Invoice not found" };
+    }
+
+    const invoice = result[0];
+
+    // Get invoice items with product details
+    const itemsResult = await db
+      .select({
+        id: invoiceItems.id,
+        description: invoiceItems.description,
+        quantity: invoiceItems.quantity,
+        unitPrice: invoiceItems.unitPrice,
+        taxRate: invoiceItems.taxRate,
+        discountPercentage: invoiceItems.discountPercentage,
+        lineTotal: invoiceItems.lineTotal,
+        productName: products.name,
+      })
+      .from(invoiceItems)
+      .leftJoin(products, eq(invoiceItems.productId, products.id))
+      .where(eq(invoiceItems.invoiceId, invoiceId));
+
+    return {
+      success: true,
+      data: {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        subject: invoice.subject,
+        reference: invoice.reference,
+        issueDate: invoice.issueDate,
+        dueDate: invoice.dueDate,
+        status: invoice.status,
+        grossAmount: invoice.grossAmount,
+        discountPercentage: invoice.discountPercentage,
+        discountAmount: invoice.discountAmount,
+        taxAmount: invoice.taxAmount,
+        shippingCharges: invoice.shippingCharges,
+        roundOff: invoice.roundOff,
+        netAmount: invoice.netAmount,
+        receivedAmount: invoice.receivedAmount,
+        balanceAmount: invoice.balanceAmount,
+        notes: invoice.notes,
+        orderBooker: invoice.orderBooker,
+        customerName: invoice.customerName || 'Unknown Customer',
+        customerNtn: invoice.customerNtn,
+        customerAddress: invoice.customerAddress,
+        customerCity: invoice.customerCity,
+        customerPhone: invoice.customerPhone,
+        orgName: invoice.orgName || 'My Business',
+        orgNtn: invoice.orgNtn,
+        orgStrn: invoice.orgStrn,
+        orgAddress: invoice.orgAddress,
+        orgCity: invoice.orgCity,
+        orgCountry: invoice.orgCountry,
+        orgPhone: invoice.orgPhone,
+        orgEmail: invoice.orgEmail,
+        orgLogo: invoice.orgLogo,
+        items: itemsResult.map(item => ({
+          ...item,
+          productName: item.productName || undefined,
+        })),
+      },
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch invoice details" };
   }
 }
 
