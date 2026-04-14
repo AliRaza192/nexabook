@@ -2219,3 +2219,211 @@ export async function createCustomerSettlement(data: SettlementFormData) {
     return { success: false, error: "Failed to create settlement" };
   }
 }
+
+// ==================== DUPLICATE ACTIONS ====================
+
+/**
+ * Duplicate an invoice with all its line items
+ * Creates a new draft invoice with the same customer, items, and prices
+ */
+export async function duplicateInvoice(invoiceId: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    // Get original invoice with items
+    const [originalInvoice] = await db
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
+      .limit(1);
+
+    if (!originalInvoice) {
+      return { success: false, error: "Invoice not found" };
+    }
+
+    const originalItems = await db
+      .select()
+      .from(invoiceItems)
+      .where(eq(invoiceItems.invoiceId, invoiceId));
+
+    // Generate new invoice number
+    const newInvoiceNumber = await generateInvoiceNumber(orgId);
+
+    // Get current date
+    const currentDate = new Date();
+
+    // Create new invoice (draft) with reset fields
+    const [newInvoice] = await db
+      .insert(invoices)
+      .values({
+        orgId,
+        invoiceNumber: newInvoiceNumber,
+        customerId: originalInvoice.customerId,
+        orderBooker: originalInvoice.orderBooker,
+        subject: originalInvoice.subject ? `[Copy] ${originalInvoice.subject}` : null,
+        reference: originalInvoice.reference,
+        issueDate: currentDate,
+        dueDate: originalInvoice.dueDate ? currentDate : null,
+        status: 'draft', // Always create as draft
+        grossAmount: originalInvoice.grossAmount,
+        discountPercentage: originalInvoice.discountPercentage,
+        discountAmount: originalInvoice.discountAmount,
+        taxAmount: originalInvoice.taxAmount,
+        shippingCharges: originalInvoice.shippingCharges,
+        roundOff: originalInvoice.roundOff,
+        netAmount: originalInvoice.netAmount,
+        receivedAmount: '0', // Reset to 0
+        balanceAmount: originalInvoice.netAmount, // Set to net amount
+        cashBankAccountId: originalInvoice.cashBankAccountId,
+        notes: originalInvoice.notes,
+        terms: originalInvoice.terms,
+      })
+      .returning();
+
+    // Create invoice items (copy from original)
+    for (const item of originalItems) {
+      await db.insert(invoiceItems).values({
+        orgId,
+        invoiceId: newInvoice.id,
+        productId: item.productId,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountPercentage: item.discountPercentage,
+        taxRate: item.taxRate,
+        lineTotal: item.lineTotal,
+      });
+    }
+
+    // Create audit log
+    await db.insert(auditLogs).values({
+      orgId,
+      userId: (await auth()).userId || 'system',
+      action: 'INVOICE_DUPLICATED',
+      entityType: 'invoice',
+      entityId: newInvoice.id,
+      changes: JSON.stringify({
+        originalInvoiceNumber: originalInvoice.invoiceNumber,
+        newInvoiceNumber: newInvoice.invoiceNumber,
+        duplicatedFrom: invoiceId,
+      }),
+    });
+
+    revalidatePath('/sales/invoices');
+
+    return {
+      success: true,
+      data: newInvoice,
+      invoiceNumber: newInvoiceNumber,
+      message: `Invoice duplicated as ${newInvoiceNumber}`,
+    };
+  } catch (error) {
+    console.error('Failed to duplicate invoice:', error);
+    return { success: false, error: "Failed to duplicate invoice" };
+  }
+}
+
+/**
+ * Duplicate a sale order with all its line items
+ * Creates a new draft order with the same customer, items, and prices
+ */
+export async function duplicateSaleOrder(orderId: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    // Get original order with items
+    const [originalOrder] = await db
+      .select()
+      .from(saleOrders)
+      .where(and(eq(saleOrders.id, orderId), eq(saleOrders.orgId, orgId)))
+      .limit(1);
+
+    if (!originalOrder) {
+      return { success: false, error: "Sale order not found" };
+    }
+
+    const originalItems = await db
+      .select()
+      .from(orderItems)
+      .where(eq(orderItems.orderId, orderId));
+
+    // Generate new order number
+    const newOrderNumber = await generateSaleOrderNumber(orgId);
+
+    // Get current date
+    const currentDate = new Date();
+
+    // Create new sale order (draft) with reset fields
+    const [newOrder] = await db
+      .insert(saleOrders)
+      .values({
+        orgId,
+        orderNumber: newOrderNumber,
+        customerId: originalOrder.customerId,
+        orderBooker: originalOrder.orderBooker,
+        subject: originalOrder.subject ? `[Copy] ${originalOrder.subject}` : null,
+        reference: originalOrder.reference,
+        orderDate: currentDate,
+        deliveryDate: originalOrder.deliveryDate ? currentDate : null,
+        status: 'draft', // Always create as draft
+        grossAmount: originalOrder.grossAmount,
+        discountPercentage: originalOrder.discountPercentage,
+        discountAmount: originalOrder.discountAmount,
+        taxAmount: originalOrder.taxAmount,
+        shippingCharges: originalOrder.shippingCharges,
+        roundOff: originalOrder.roundOff,
+        netAmount: originalOrder.netAmount,
+        notes: originalOrder.notes,
+        terms: originalOrder.terms,
+      })
+      .returning();
+
+    // Create order items (copy from original)
+    for (const item of originalItems) {
+      await db.insert(orderItems).values({
+        orgId,
+        orderId: newOrder.id,
+        productId: item.productId,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountPercentage: item.discountPercentage,
+        taxRate: item.taxRate,
+        lineTotal: item.lineTotal,
+      });
+    }
+
+    // Create audit log
+    await db.insert(auditLogs).values({
+      orgId,
+      userId: (await auth()).userId || 'system',
+      action: 'SALE_ORDER_DUPLICATED',
+      entityType: 'sale_order',
+      entityId: newOrder.id,
+      changes: JSON.stringify({
+        originalOrderNumber: originalOrder.orderNumber,
+        newOrderNumber: newOrder.orderNumber,
+        duplicatedFrom: orderId,
+      }),
+    });
+
+    revalidatePath('/sales/orders');
+
+    return {
+      success: true,
+      data: newOrder,
+      orderNumber: newOrderNumber,
+      message: `Sale order duplicated as ${newOrderNumber}`,
+    };
+  } catch (error) {
+    console.error('Failed to duplicate sale order:', error);
+    return { success: false, error: "Failed to duplicate sale order" };
+  }
+}
+

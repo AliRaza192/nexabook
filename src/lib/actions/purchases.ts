@@ -1861,3 +1861,101 @@ export async function createVendorSettlement(data: {
     return { success: false, error: "Failed to create vendor settlement" };
   }
 }
+
+// ==================== DUPLICATE ACTIONS ====================
+
+/**
+ * Duplicate a purchase invoice with all its line items
+ * Creates a new draft invoice with the same vendor, items, and prices
+ */
+export async function duplicatePurchaseInvoice(invoiceId: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    // Get original invoice with items
+    const [originalInvoice] = await db
+      .select()
+      .from(purchaseInvoices)
+      .where(and(eq(purchaseInvoices.id, invoiceId), eq(purchaseInvoices.orgId, orgId)))
+      .limit(1);
+
+    if (!originalInvoice) {
+      return { success: false, error: "Purchase invoice not found" };
+    }
+
+    const originalItems = await db
+      .select()
+      .from(purchaseItems)
+      .where(eq(purchaseItems.purchaseInvoiceId, invoiceId));
+
+    // Generate new bill number
+    const newBillNumber = await generateBillNumber(orgId);
+
+    // Get current date
+    const currentDate = new Date();
+
+    // Create new purchase invoice (draft) with reset fields
+    const [newInvoice] = await db
+      .insert(purchaseInvoices)
+      .values({
+        orgId,
+        vendorId: originalInvoice.vendorId,
+        billNumber: newBillNumber,
+        date: currentDate,
+        dueDate: originalInvoice.dueDate ? currentDate : null,
+        reference: originalInvoice.reference,
+        subject: originalInvoice.subject ? `[Copy] ${originalInvoice.subject}` : null,
+        grossAmount: originalInvoice.grossAmount,
+        discountTotal: originalInvoice.discountTotal,
+        taxTotal: originalInvoice.taxTotal,
+        netAmount: originalInvoice.netAmount,
+        status: 'Draft', // Always create as Draft
+        notes: originalInvoice.notes,
+      })
+      .returning();
+
+    // Create purchase items (copy from original)
+    for (const item of originalItems) {
+      await db.insert(purchaseItems).values({
+        orgId,
+        purchaseInvoiceId: newInvoice.id,
+        productId: item.productId,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountPercentage: item.discountPercentage,
+        taxRate: item.taxRate,
+        lineTotal: item.lineTotal,
+      });
+    }
+
+    // Create audit log
+    await db.insert(auditLogs).values({
+      orgId,
+      userId: (await auth()).userId || 'system',
+      action: 'PURCHASE_INVOICE_DUPLICATED',
+      entityType: 'purchase_invoice',
+      entityId: newInvoice.id,
+      changes: JSON.stringify({
+        originalBillNumber: originalInvoice.billNumber,
+        newBillNumber: newInvoice.billNumber,
+        duplicatedFrom: invoiceId,
+      }),
+    });
+
+    revalidatePath('/purchases/invoices');
+
+    return {
+      success: true,
+      data: newInvoice,
+      billNumber: newBillNumber,
+      message: `Purchase invoice duplicated as ${newBillNumber}`,
+    };
+  } catch (error) {
+    console.error('Failed to duplicate purchase invoice:', error);
+    return { success: false, error: "Failed to duplicate purchase invoice" };
+  }
+}

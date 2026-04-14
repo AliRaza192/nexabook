@@ -18,6 +18,7 @@ import {
   Download,
   Mail,
   X,
+  Copy,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ import {
   getInvoices,
   getInvoiceStats,
   getInvoiceWithDetails,
+  duplicateInvoice,
 } from "@/lib/actions/sales";
 import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
 import { formatPKR } from "@/lib/utils/number-format";
@@ -298,6 +300,24 @@ export default function InvoicesPage() {
     }
   };
 
+  // Duplicate invoice
+  const handleDuplicate = async (invoiceId: string) => {
+    try {
+      const result = await duplicateInvoice(invoiceId);
+      if (result.success && result.data) {
+        // Show success message
+        alert(`Document duplicated as ${result.invoiceNumber}. You are now editing the copy.`);
+        // Redirect to edit the new invoice
+        window.location.href = `/sales/invoices/new?id=${result.data.id}`;
+      } else {
+        alert(result.error || "Failed to duplicate invoice");
+      }
+    } catch (error) {
+      console.error("Failed to duplicate invoice:", error);
+      alert("Failed to duplicate invoice. Please try again.");
+    }
+  };
+
   if (loading && !invoices.length) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -536,7 +556,7 @@ export default function InvoicesPage() {
                             >
                               <Mail className="h-4 w-4" />
                             </Button>
-                            
+
                             {/* Download PDF Button */}
                             <Button
                               variant="ghost"
@@ -546,6 +566,17 @@ export default function InvoicesPage() {
                               title="Download PDF"
                             >
                               <Download className="h-4 w-4" />
+                            </Button>
+
+                            {/* Duplicate Button */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDuplicate(invoice.id)}
+                              className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
+                              title="Duplicate Invoice"
+                            >
+                              <Copy className="h-4 w-4" />
                             </Button>
                           </div>
                           </div>

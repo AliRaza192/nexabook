@@ -14,6 +14,7 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
+  Copy,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import {
   getSaleOrders,
+  duplicateSaleOrder,
 } from "@/lib/actions/sales";
 import { formatPKR } from "@/lib/utils/number-format";
 
@@ -144,6 +146,22 @@ export default function SaleOrdersPage() {
     });
   };
 
+  // Duplicate order
+  const handleDuplicate = async (orderId: string) => {
+    try {
+      const result = await duplicateSaleOrder(orderId);
+      if (result.success && result.data) {
+        alert(`Document duplicated as ${result.orderNumber}. You are now editing the copy.`);
+        window.location.href = `/sales/orders/new?id=${result.data.id}`;
+      } else {
+        alert(result.error || "Failed to duplicate order");
+      }
+    } catch (error) {
+      console.error("Failed to duplicate order:", error);
+      alert("Failed to duplicate order. Please try again.");
+    }
+  };
+
   const stats = {
     totalOrders: orders.length,
     totalValue: orders.reduce((sum, o) => sum + parseFloat(o.netAmount || "0"), 0),
@@ -245,6 +263,7 @@ export default function SaleOrdersPage() {
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Delivery Date</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Amount</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Status</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -265,6 +284,17 @@ export default function SaleOrdersPage() {
                             <StatusIcon className="h-3 w-3" />
                             {statusConfig.label}
                           </Badge>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDuplicate(order.id)}
+                            className="h-8 w-8 p-0 text-gray-600 hover:bg-gray-100"
+                            title="Duplicate Order"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
                         </td>
                       </motion.tr>
                     );

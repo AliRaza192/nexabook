@@ -15,6 +15,7 @@ import {
   Clock,
   Eye,
   RotateCcw,
+  Copy,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ import {
   getPurchaseInvoices,
   approvePurchaseInvoice,
   revisePurchaseInvoice,
+  duplicatePurchaseInvoice,
 } from "@/lib/actions/purchases";
 
 interface PurchaseInvoice {
@@ -192,6 +194,22 @@ export default function PurchaseInvoicesPage() {
       loadData();
     } else {
       alert((result as any).error || "Failed to revise invoice");
+    }
+  };
+
+  // Duplicate purchase invoice
+  const handleDuplicate = async (invoiceId: string) => {
+    try {
+      const result = await duplicatePurchaseInvoice(invoiceId);
+      if (result.success && result.data) {
+        alert(`Document duplicated as ${result.billNumber}. You are now editing the copy.`);
+        window.location.href = `/purchases/invoices/new?id=${result.data.id}`;
+      } else {
+        alert(result.error || "Failed to duplicate invoice");
+      }
+    } catch (error) {
+      console.error("Failed to duplicate invoice:", error);
+      alert("Failed to duplicate invoice. Please try again.");
     }
   };
 
@@ -433,6 +451,15 @@ export default function PurchaseInvoicesPage() {
                                 Revise
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDuplicate(invoice.id)}
+                              className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
+                              title="Duplicate Invoice"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
                           </div>
                         </td>
                       </motion.tr>
