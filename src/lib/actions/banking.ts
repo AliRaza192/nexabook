@@ -772,3 +772,160 @@ export async function getBankReconciliation(
     return { success: false, error: "Failed to fetch bank reconciliation data" };
   }
 }
+
+// ==========================================
+// CONTRA ENTRIES (Cash <-> Bank Transfers)
+// ==========================================
+
+export interface ContraEntryFormData {
+  entryDate: string;
+  fromAccountId: string;
+  toAccountId: string;
+  amount: string;
+  reference?: string;
+  description?: string;
+}
+
+/**
+ * Generate a unique journal entry number for contra entries
+ */
+async function generateContraEntryNumber(orgId: string): Promise<string> {
+  const result = await db
+    .select({ entryNumber: journalEntries.entryNumber })
+    .from(journalEntries)
+    .where(and(
+      eq(journalEntries.orgId, orgId),
+      eq(journalEntries.referenceType, 'contra_entry')
+    ))
+    .orderBy(desc(journalEntries.createdAt))
+    .limit(1);
+
+  let nextNumber = 1;
+  if (result.length > 0 && result[0].entryNumber) {
+    const match = result[0].entryNumber.match(/\d+$/);
+    if (match) {
+      const lastNumber = parseInt(match[0]);
+      nextNumber = lastNumber + 1;
+    }
+  }
+
+  return `CE-${String(nextNumber).padStart(5, '0')}`;
+}
+
+/**
+ * Create a contra entry for Cash <-> Bank transfers
+ * Creates a journal entry with:
+ * - Debit: To Account (receiving account)
+ * - Credit: From Account (sending account)
+ */
+export async function createContraEntry(data: ContraEntryFormData) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    // Validate required fields
+    if (!data.fromAccountId || !data.toAccountId) {
+      return { success: false, error: "From and To accounts are required" };
+    }
+
+    if (!data.amount || parseFloat(data.amount) <= 0) {
+      return { success: false, error: "Valid amount is required" };
+    }
+
+    // Validate From and To are not the same
+    if (data.fromAccountId === data.toAccountId) {
+      return { success: false, error: "From and To accounts cannot be the same" };
+    }
+
+    // Get account details
+    const [fromAccount] = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(
+        eq(chartOfAccounts.id, data.fromAccountId),
+        eq(chartOfAccounts.orgId, orgId)
+      ))
+      .limit(1);
+
+    const [toAccount] = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(
+        eq(chartOfAccounts.id, data.toAccountId),
+        eq(chartOfAccounts.orgId, orgId)
+      ))
+      .limit(1);
+
+    if (!fromAccount || !toAccount) {
+      return { success: false, error: "One or both accounts not found" };
+    }
+
+    // Generate entry number
+    const entryNumber = await generateContraEntryNumber(orgId);
+
+    // Create journal entry
+    const entryDate = new Date(data.entryDate);
+
+    const [journalEntry] = await db
+      .insert(journalEntries)
+      .values({
+        orgId,
+        entryNumber,
+        entryDate,
+        referenceType: 'contra_entry',
+        description: data.description || `Contra transfer: ${fromAccount.name} → ${toAccount.name}`,
+      })
+      .returning();
+
+    // Create journal entry lines
+    // Debit: To Account (receiving)
+    // Credit: From Account (sending)
+    await db.insert(journalEntryLines).values({
+      orgId,
+      journalEntryId: journalEntry.id,
+      accountId: data.toAccountId,
+      debitAmount: data.amount,
+      creditAmount: '0',
+      description: `Transfer from ${fromAccount.name}`,
+    });
+
+    await db.insert(journalEntryLines).values({
+      orgId,
+      journalEntryId: journalEntry.id,
+      accountId: data.fromAccountId,
+      debitAmount: '0',
+      creditAmount: data.amount,
+      description: `Transfer to ${toAccount.name}`,
+    });
+
+    // Create audit log
+    await db.insert(auditLogs).values({
+      orgId,
+      userId: (await auth()).userId || 'system',
+      action: 'CONTRA_ENTRY_CREATED',
+      entityType: 'journal_entry',
+      entityId: journalEntry.id,
+      changes: JSON.stringify({
+        entryNumber,
+        fromAccount: fromAccount.name,
+        toAccount: toAccount.name,
+        amount: data.amount,
+      }),
+    });
+
+    revalidatePath('/accounts/banking');
+    revalidatePath('/reports/cash-book');
+
+    return {
+      success: true,
+      data: journalEntry,
+      entryNumber,
+      message: `Contra entry ${entryNumber} created successfully`,
+    };
+  } catch (error) {
+    console.error('Failed to create contra entry:', error);
+    return { success: false, error: "Failed to create contra entry" };
+  }
+}

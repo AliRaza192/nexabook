@@ -45,6 +45,7 @@ const reportCategories: ReportCategory[] = [
       { name: "Profit & Loss", href: "/reports/profit-and-loss", description: "Revenue, expenses, and net profit analysis" },
       { name: "Balance Sheet", href: "/reports/balance-sheet", description: "Assets, liabilities, and equity snapshot" },
       { name: "Trial Balance", href: "/reports/trial-balance", description: "Debit and credit balance verification" },
+      { name: "Cash Book", href: "/reports/cash-book", description: "Cash transactions with running balance" },
       { name: "Cash Flow Statement", href: "/reports/cash-flow", description: "Cash inflows and outflows" },
       { name: "Audit Log", href: "/reports/audit-log", description: "Complete system activity trail" },
     ],

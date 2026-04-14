@@ -159,6 +159,141 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
   }
 }
 
+// ============= Cash Book Report =============
+
+export interface CashBookTransaction {
+  id: string;
+  date: Date;
+  entryNumber: string;
+  description: string;
+  cashIn: number;
+  cashOut: number;
+  runningBalance: number;
+  referenceType: string;
+}
+
+export interface CashBookReport {
+  openingBalance: number;
+  totalCashIn: number;
+  totalCashOut: number;
+  closingBalance: number;
+  transactions: CashBookTransaction[];
+  cashAccount: {
+    id: string;
+    name: string;
+    code: string;
+  } | null;
+}
+
+export async function getCashBookReport(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const fromDate = new Date(dateFrom);
+    const toDate = new Date(dateTo);
+    toDate.setHours(23, 59, 59, 999);
+
+    // Find Cash account
+    const cashAccount = await db
+      .select({ id: chartOfAccounts.id, name: chartOfAccounts.name, code: chartOfAccounts.code })
+      .from(chartOfAccounts)
+      .where(and(
+        eq(chartOfAccounts.orgId, orgId),
+        sql`LOWER(${chartOfAccounts.name}) LIKE '%cash%'`,
+        eq(chartOfAccounts.type, 'asset')
+      ))
+      .limit(1);
+
+    if (!cashAccount || cashAccount.length === 0) {
+      return { success: false, error: "Cash account not found. Please create a 'Cash' account in Chart of Accounts." };
+    }
+
+    const cashAccountId = cashAccount[0].id;
+
+    // Calculate opening balance (before dateFrom)
+    const openingBalanceResult = await db
+      .select({
+        totalDebit: sql<string>`SUM(${journalEntryLines.debitAmount})`,
+        totalCredit: sql<string>`SUM(${journalEntryLines.creditAmount})`,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(and(
+        eq(journalEntryLines.orgId, orgId),
+        eq(journalEntryLines.accountId, cashAccountId),
+        sql`${journalEntries.entryDate} < ${fromDate}`
+      ));
+
+    const openingDebit = openingBalanceResult[0]?.totalDebit ? parseFloat(openingBalanceResult[0].totalDebit) : 0;
+    const openingCredit = openingBalanceResult[0]?.totalCredit ? parseFloat(openingBalanceResult[0].totalCredit) : 0;
+    const openingBalance = openingDebit - openingCredit;
+
+    // Get transactions within date range
+    const transactionsResult = await db
+      .select({
+        id: journalEntryLines.id,
+        date: journalEntries.entryDate,
+        entryNumber: journalEntries.entryNumber,
+        description: journalEntryLines.description,
+        debitAmount: journalEntryLines.debitAmount,
+        creditAmount: journalEntryLines.creditAmount,
+        referenceType: journalEntries.referenceType,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(and(
+        eq(journalEntryLines.orgId, orgId),
+        eq(journalEntryLines.accountId, cashAccountId),
+        sql`${journalEntries.entryDate} >= ${fromDate}`,
+        sql`${journalEntries.entryDate} <= ${toDate}`
+      ))
+      .orderBy(journalEntries.entryDate, journalEntries.entryNumber);
+
+    // Calculate running balance and format transactions
+    let runningBalance = openingBalance;
+    let totalCashIn = 0;
+    let totalCashOut = 0;
+
+    const transactions: CashBookTransaction[] = transactionsResult.map(row => {
+      const cashIn = parseFloat(row.debitAmount || '0');
+      const cashOut = parseFloat(row.creditAmount || '0');
+      
+      runningBalance += cashIn - cashOut;
+      totalCashIn += cashIn;
+      totalCashOut += cashOut;
+
+      return {
+        id: row.id,
+        date: row.date,
+        entryNumber: row.entryNumber,
+        description: row.description || '',
+        cashIn,
+        cashOut,
+        runningBalance,
+        referenceType: row.referenceType || '',
+      };
+    });
+
+    const closingBalance = runningBalance;
+
+    return {
+      success: true,
+      data: {
+        openingBalance,
+        totalCashIn,
+        totalCashOut,
+        closingBalance,
+        transactions,
+        cashAccount: cashAccount[0],
+      }
+    };
+  } catch (error) {
+    console.error('Failed to generate cash book report:', error);
+    return { success: false, error: "Failed to generate Cash Book report" };
+  }
+}
+
 // ============= Balance Sheet Report =============
 
 export async function getBalanceSheetReport(asOfDate: string) {

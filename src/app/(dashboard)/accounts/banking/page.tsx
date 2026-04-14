@@ -19,6 +19,7 @@ import {
   getBankAccounts, addBankAccount, approveBankAccount, getBankDeposits, addBankDeposit, approveBankDeposit,
   getFundsTransfers, addFundsTransfer, approveFundsTransfer,
   getMiscContacts, addMiscContact, approveMiscContact,
+  createContraEntry,
   type BankAccountFormData, type BankDepositFormData, type FundsTransferFormData, type MiscContactFormData,
 } from "@/lib/actions/banking";
 import { getBankAccounts as getAccountsForDropdown } from "@/lib/actions/banking";
@@ -28,6 +29,7 @@ export default function BankingPage() {
   const [deposits, setDeposits] = useState<any[]>([]);
   const [transfers, setTransfers] = useState<any[]>([]);
   const [miscContacts, setMiscContacts] = useState<any[]>([]);
+  const [cashAccounts, setCashAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -35,16 +37,21 @@ export default function BankingPage() {
 
   const loadData = async () => {
     setLoading(true);
-    const [accRes, depRes, transRes, miscRes] = await Promise.all([
+    const [accRes, depRes, transRes, miscRes, cashRes] = await Promise.all([
       getBankAccounts(searchQuery),
       getBankDeposits(searchQuery),
       getFundsTransfers(searchQuery),
       getMiscContacts(searchQuery),
+      getAccountsForDropdown(searchQuery),
     ]);
     if (accRes.success) setBankAccounts(accRes.data || []);
     if (depRes.success) setDeposits(depRes.data || []);
     if (transRes.success) setTransfers(transRes.data || []);
     if (miscRes.success) setMiscContacts(miscRes.data || []);
+    if (cashRes.success) {
+      // Filter to get only cash accounts
+      setCashAccounts((cashRes.data || []).filter((a: any) => a.accountType === 'cash'));
+    }
     setLoading(false);
   };
 
@@ -126,6 +133,29 @@ export default function BankingPage() {
     setSubmitting(false);
   };
 
+  // Contra Entry Form (Cash <-> Bank Transfer)
+  const handleAddContraEntry = async (formData: FormData) => {
+    setSubmitting(true);
+    const data = {
+      entryDate: formData.get("entryDate") as string,
+      fromAccountId: formData.get("fromAccountId") as string,
+      toAccountId: formData.get("toAccountId") as string,
+      amount: formData.get("amount") as string,
+      reference: formData.get("reference") as string,
+      description: formData.get("description") as string,
+    };
+    const res = await createContraEntry(data);
+    if (res.success) {
+      alert(res.message);
+      closeDialog("contraCashToBank");
+      closeDialog("contraBankToCash");
+      loadData();
+    } else {
+      alert(res.error || "Failed to create contra entry");
+    }
+    setSubmitting(false);
+  };
+
   const getStatusBadge = (status: string) => {
     const config: Record<string, { variant: "default" | "secondary" | "destructive" | "outline", label: string, icon: any }> = {
       approved: { variant: "default", label: "Approved", icon: CheckCircle },
@@ -196,6 +226,99 @@ export default function BankingPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Contra Entry Quick Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Quick Transfers</CardTitle>
+          <p className="text-sm text-nexabook-600">Transfer funds between Cash and Bank accounts</p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Cash to Bank */}
+            <Dialog open={dialogOpen.contraCashToBank} onOpenChange={(v) => setDialogOpen(prev => ({ ...prev, contraCashToBank: v }))}>
+              <DialogTrigger asChild>
+                <Button className="bg-green-600 hover:bg-green-700 h-auto py-4 px-6 flex flex-col items-start">
+                  <ArrowUpRight className="h-5 w-5 mb-2" />
+                  <span className="font-semibold">Cash to Bank Transfer</span>
+                  <span className="text-xs text-green-100">Deposit cash into bank account</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Cash to Bank Transfer</DialogTitle>
+                  <DialogDescription>Transfer funds from cash account to bank account</DialogDescription>
+                </DialogHeader>
+                <form action={handleAddContraEntry} className="space-y-4">
+                  <div className="space-y-2"><Label>Date*</Label><Input name="entryDate" type="date" defaultValue={new Date().toISOString().split('T')[0]} required /></div>
+                  <div className="space-y-2"><Label>From Cash Account*</Label>
+                    <select name="fromAccountId" className="w-full rounded-md border border-nexabook-200 px-3 py-2" required>
+                      <option value="">Select cash account</option>
+                      {cashAccounts.map(a => <option key={a.id} value={a.id}>{a.accountName}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-2"><Label>To Bank Account*</Label>
+                    <select name="toAccountId" className="w-full rounded-md border border-nexabook-200 px-3 py-2" required>
+                      <option value="">Select bank account</option>
+                      {bankAccounts.filter(a => a.accountType !== 'cash').map(a => <option key={a.id} value={a.id}>{a.accountName}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-2"><Label>Amount*</Label><Input name="amount" type="number" step="0.01" min="0.01" required /></div>
+                  <div className="space-y-2"><Label>Reference</Label><Input name="reference" /></div>
+                  <div className="space-y-2"><Label>Description</Label><Textarea name="description" rows={2} /></div>
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => closeDialog("contraCashToBank")}>Cancel</Button>
+                    <Button type="submit" disabled={submitting} className="bg-nexabook-900 hover:bg-nexabook-800">
+                      {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Transfer"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+
+            {/* Bank to Cash */}
+            <Dialog open={dialogOpen.contraBankToCash} onOpenChange={(v) => setDialogOpen(prev => ({ ...prev, contraBankToCash: v }))}>
+              <DialogTrigger asChild>
+                <Button className="bg-blue-600 hover:bg-blue-700 h-auto py-4 px-6 flex flex-col items-start">
+                  <ArrowDownLeft className="h-5 w-5 mb-2" />
+                  <span className="font-semibold">Bank to Cash Withdrawal</span>
+                  <span className="text-xs text-blue-100">Withdraw cash from bank account</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Bank to Cash Withdrawal</DialogTitle>
+                  <DialogDescription>Withdraw funds from bank account to cash</DialogDescription>
+                </DialogHeader>
+                <form action={handleAddContraEntry} className="space-y-4">
+                  <div className="space-y-2"><Label>Date*</Label><Input name="entryDate" type="date" defaultValue={new Date().toISOString().split('T')[0]} required /></div>
+                  <div className="space-y-2"><Label>From Bank Account*</Label>
+                    <select name="fromAccountId" className="w-full rounded-md border border-nexabook-200 px-3 py-2" required>
+                      <option value="">Select bank account</option>
+                      {bankAccounts.filter(a => a.accountType !== 'cash').map(a => <option key={a.id} value={a.id}>{a.accountName}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-2"><Label>To Cash Account*</Label>
+                    <select name="toAccountId" className="w-full rounded-md border border-nexabook-200 px-3 py-2" required>
+                      <option value="">Select cash account</option>
+                      {cashAccounts.map(a => <option key={a.id} value={a.id}>{a.accountName}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-2"><Label>Amount*</Label><Input name="amount" type="number" step="0.01" min="0.01" required /></div>
+                  <div className="space-y-2"><Label>Reference</Label><Input name="reference" /></div>
+                  <div className="space-y-2"><Label>Description</Label><Textarea name="description" rows={2} /></div>
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => closeDialog("contraBankToCash")}>Cancel</Button>
+                    <Button type="submit" disabled={submitting} className="bg-nexabook-900 hover:bg-nexabook-800">
+                      {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Withdrawal"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="accounts">
         <TabsList className="grid w-full grid-cols-4">
