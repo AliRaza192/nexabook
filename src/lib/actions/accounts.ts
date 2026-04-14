@@ -632,3 +632,313 @@ export async function getTaxSummary(
     return { success: false, error: "Failed to generate tax summary" };
   }
 }
+
+// ==================== VOUCHER SYSTEM ====================
+
+export type VoucherType = 'CPV' | 'CRV' | 'BPV' | 'BRV' | 'JV' | 'CONTRA';
+
+export interface VoucherData {
+  voucherType: VoucherType;
+  date: string;
+  description: string;
+  amount: string;
+  // For CPV/BPV: expense account being debited
+  expenseAccountId?: string;
+  // For CRV/BRV: receipt account being credited
+  receiptAccountId?: string;
+  // For CONTRA: from and to accounts
+  fromAccountId?: string;
+  toAccountId?: string;
+  // For JV: multiple lines
+  lines?: JournalEntryLine[];
+  // Bank account for BPV/BRV
+  bankAccountId?: string;
+  // Reference
+  reference?: string;
+  // Payee/Payer
+  payeeName?: string;
+  // Payment mode
+  paymentMode?: string;
+}
+
+// Get next voucher number
+async function getNextVoucherNumber(orgId: string, voucherType: VoucherType): Promise<string> {
+  // Count existing vouchers of this type
+  const result = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(journalEntries)
+    .where(sql`${journalEntries.orgId} = ${orgId} AND ${journalEntries.entryNumber} LIKE '${voucherType}-%'`);
+
+  const count = (result[0]?.count as number) || 0;
+  return `${voucherType}-${String(count + 1).padStart(5, '0')}`;
+}
+
+// Create voucher with auto Dr/Cr logic
+export async function createVoucher(data: VoucherData) {
+  const orgId = await getCurrentOrgId();
+
+  if (!orgId) {
+    return { success: false, error: "No organization found" };
+  }
+
+  try {
+    const voucherNumber = await getNextVoucherNumber(orgId, data.voucherType);
+    const amount = parseFloat(data.amount);
+
+    if (isNaN(amount) || amount <= 0) {
+      return { success: false, error: "Invalid amount" };
+    }
+
+    let linesToInsert: JournalEntryLine[] = [];
+
+    // Auto-generate Dr/Cr lines based on voucher type
+    switch (data.voucherType) {
+      case 'CPV': // Cash Payment Voucher - Dr Expense, Cr Cash
+        if (!data.expenseAccountId) {
+          return { success: false, error: "Expense account is required for CPV" };
+        }
+        linesToInsert = [
+          {
+            accountId: data.expenseAccountId,
+            description: data.description || `Payment for ${data.payeeName || 'expense'}`,
+            debit: data.amount,
+            credit: '0',
+          },
+          {
+            accountId: '1000', // Cash account code
+            description: 'Cash payment',
+            debit: '0',
+            credit: data.amount,
+          },
+        ];
+        break;
+
+      case 'CRV': // Cash Receipt Voucher - Dr Cash, Cr Receipt Account
+        if (!data.receiptAccountId) {
+          return { success: false, error: "Receipt account is required for CRV" };
+        }
+        linesToInsert = [
+          {
+            accountId: '1000', // Cash account code
+            description: `Cash received from ${data.payeeName || 'customer'}`,
+            debit: data.amount,
+            credit: '0',
+          },
+          {
+            accountId: data.receiptAccountId,
+            description: data.description || 'Receipt',
+            debit: '0',
+            credit: data.amount,
+          },
+        ];
+        break;
+
+      case 'BPV': // Bank Payment Voucher - Dr Expense, Cr Bank
+        if (!data.expenseAccountId || !data.bankAccountId) {
+          return { success: false, error: "Expense and Bank accounts are required for BPV" };
+        }
+        linesToInsert = [
+          {
+            accountId: data.expenseAccountId,
+            description: data.description || `Bank payment for ${data.payeeName || 'expense'}`,
+            debit: data.amount,
+            credit: '0',
+          },
+          {
+            accountId: data.bankAccountId,
+            description: 'Bank payment',
+            debit: '0',
+            credit: data.amount,
+          },
+        ];
+        break;
+
+      case 'BRV': // Bank Receipt Voucher - Dr Bank, Cr Receipt Account
+        if (!data.receiptAccountId || !data.bankAccountId) {
+          return { success: false, error: "Receipt and Bank accounts are required for BRV" };
+        }
+        linesToInsert = [
+          {
+            accountId: data.bankAccountId,
+            description: `Bank receipt from ${data.payeeName || 'customer'}`,
+            debit: data.amount,
+            credit: '0',
+          },
+          {
+            accountId: data.receiptAccountId,
+            description: data.description || 'Receipt',
+            debit: '0',
+            credit: data.amount,
+          },
+        ];
+        break;
+
+      case 'CONTRA': // Contra - Transfer between Cash and Bank
+        if (!data.fromAccountId || !data.toAccountId) {
+          return { success: false, error: "From and To accounts are required for CONTRA" };
+        }
+        if (data.fromAccountId === data.toAccountId) {
+          return { success: false, error: "From and To accounts must be different for CONTRA" };
+        }
+        linesToInsert = [
+          {
+            accountId: data.toAccountId,
+            description: data.description || `Transfer from ${data.payeeName || 'account'}`,
+            debit: data.amount,
+            credit: '0',
+          },
+          {
+            accountId: data.fromAccountId,
+            description: 'Transfer',
+            debit: '0',
+            credit: data.amount,
+          },
+        ];
+        break;
+
+      case 'JV': // Journal Voucher - Manual lines
+        if (!data.lines || data.lines.length === 0) {
+          return { success: false, error: "At least one line is required for JV" };
+        }
+        linesToInsert = data.lines;
+        break;
+
+      default:
+        return { success: false, error: "Invalid voucher type" };
+    }
+
+    // Validate lines
+    const totalDebit = linesToInsert.reduce((sum, line) => sum + parseFloat(line.debit || '0'), 0);
+    const totalCredit = linesToInsert.reduce((sum, line) => sum + parseFloat(line.credit || '0'), 0);
+
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      return {
+        success: false,
+        error: `Voucher is not balanced. Total Debit: ${totalDebit.toFixed(2)}, Total Credit: ${totalCredit.toFixed(2)}`
+      };
+    }
+
+    // Create journal entry
+    const [journalEntry] = await db
+      .insert(journalEntries)
+      .values({
+        orgId,
+        entryNumber: voucherNumber,
+        entryDate: new Date(data.date),
+        referenceType: data.voucherType.toLowerCase(),
+        description: data.description,
+      })
+      .returning();
+
+    // Create lines
+    for (const line of linesToInsert) {
+      if (!line.accountId) {
+        return { success: false, error: "All lines must have an account" };
+      }
+
+      await db.insert(journalEntryLines).values({
+        orgId,
+        journalEntryId: journalEntry.id,
+        accountId: line.accountId,
+        description: line.description,
+        debitAmount: line.debit || '0',
+        creditAmount: line.credit || '0',
+      });
+    }
+
+    // Create audit log
+    await db.insert(auditLogs).values({
+      orgId,
+      userId: (await auth()).userId || 'system',
+      action: 'VOUCHER_CREATED',
+      entityType: 'voucher',
+      entityId: journalEntry.id,
+      changes: JSON.stringify({
+        voucherNumber,
+        voucherType: data.voucherType,
+        amount,
+        description: data.description,
+      }),
+    });
+
+    revalidatePath("/dashboard/accounts/journal-entries");
+
+    return {
+      success: true,
+      message: `${data.voucherType} voucher created successfully`,
+      voucherNumber,
+      entryId: journalEntry.id,
+    };
+  } catch (error) {
+    console.error('Failed to create voucher:', error);
+    return { success: false, error: "Failed to create voucher" };
+  }
+}
+
+// Get vouchers by type
+export async function getVouchersByType(voucherType: VoucherType, limit: number = 50) {
+  const orgId = await getCurrentOrgId();
+
+  if (!orgId) {
+    return { success: false, error: "No organization found" };
+  }
+
+  try {
+    const vouchers = await db
+      .select({
+        id: journalEntries.id,
+        entryNumber: journalEntries.entryNumber,
+        entryDate: journalEntries.entryDate,
+        description: journalEntries.description,
+      })
+      .from(journalEntries)
+      .where(sql`${journalEntries.orgId} = ${orgId} AND ${journalEntries.entryNumber} LIKE '${voucherType}-%'`)
+      .orderBy(desc(journalEntries.entryDate))
+      .limit(limit);
+
+    return { success: true, data: vouchers };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch vouchers" };
+  }
+}
+
+// Get single voucher with lines
+export async function getVoucherWithLines(entryId: string) {
+  const orgId = await getCurrentOrgId();
+
+  if (!orgId) {
+    return { success: false, error: "No organization found" };
+  }
+
+  try {
+    // Get entry
+    const [entry] = await db
+      .select()
+      .from(journalEntries)
+      .where(sql`${journalEntries.id} = ${entryId} AND ${journalEntries.orgId} = ${orgId}`)
+      .limit(1);
+
+    if (!entry) {
+      return { success: false, error: "Voucher not found" };
+    }
+
+    // Get lines
+    const lines = await db
+      .select({
+        id: journalEntryLines.id,
+        accountId: journalEntryLines.accountId,
+        accountCode: chartOfAccounts.code,
+        accountName: chartOfAccounts.name,
+        description: journalEntryLines.description,
+        debitAmount: journalEntryLines.debitAmount,
+        creditAmount: journalEntryLines.creditAmount,
+      })
+      .from(journalEntryLines)
+      .leftJoin(chartOfAccounts, eq(journalEntryLines.accountId, chartOfAccounts.id))
+      .where(eq(journalEntryLines.journalEntryId, entryId));
+
+    return { success: true, data: { entry, lines } };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch voucher" };
+  }
+}
