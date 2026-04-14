@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatPKR } from "@/lib/utils/number-format";
 import { getVendors, createVendorPayment, getVendorOutstandingInvoices, type VendorPaymentFormData } from "@/lib/actions/purchases";
 
 interface Vendor { id: string; name: string; }
@@ -54,7 +55,7 @@ export default function VendorPaymentsPage() {
   const totalAllocated = Object.values(allocations).reduce((s, a) => s + parseFloat(a || "0"), 0);
   const paymentAmount = parseFloat(amount || "0");
   const unallocated = paymentAmount - totalAllocated;
-  const formatCurrency = (v: string | null) => v ? new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(parseFloat(v)) : "Rs. 0";
+  const formatCurrency = (v: string | null) => v ? formatPKR(parseFloat(v), 'south-asian') : formatPKR(0, 'south-asian');
   const formatDate = (d: Date | null) => d ? new Date(d).toLocaleDateString("en-PK", { year: "numeric", month: "short", day: "numeric" }) : "N/A";
 
   const handleSave = async () => {

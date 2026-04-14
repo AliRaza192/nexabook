@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { getCustomers, getCustomerOutstandingInvoices, createCustomerSettlement, type SettlementFormData } from "@/lib/actions/sales";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer { id: string; name: string; }
 interface OutstandingInvoice {
@@ -74,7 +75,7 @@ export default function SettlementPage() {
   const totalOutstanding = settlementDocs.reduce((s, d) => s + parseFloat(d.balanceAmount || "0"), 0);
   const totalDiscount = settlementDocs.reduce((s, d) => s + parseFloat(d.discountAmount || "0"), 0);
   const totalSettlement = settlementDocs.reduce((s, d) => s + parseFloat(d.settlementAmount || "0"), 0);
-  const formatCurrency = (v: string | number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(typeof v === "string" ? parseFloat(v) : v);
+  const formatCurrency = (v: number) => formatPKR(v, 'south-asian');
 
   const handleSave = async () => {
     if (!customerId) { alert("Please select a customer"); return; }
@@ -132,11 +133,11 @@ export default function SettlementPage() {
                       <td className="py-2 px-3"><Badge variant="outline" className="text-xs capitalize">{doc.documentType}</Badge></td>
                       <td className="py-2 px-3 text-sm font-medium">{doc.documentNumber}</td>
                       <td className="py-2 px-3 text-sm text-gray-600">{doc.date}</td>
-                      <td className="py-2 px-3 text-sm text-right">{formatCurrency(doc.originalAmount)}</td>
-                      <td className="py-2 px-3 text-sm font-semibold text-right text-orange-600">{formatCurrency(doc.balanceAmount)}</td>
+                      <td className="py-2 px-3 text-sm text-right">{formatCurrency(parseFloat(doc.originalAmount))}</td>
+                      <td className="py-2 px-3 text-sm font-semibold text-right text-orange-600">{formatCurrency(parseFloat(doc.balanceAmount))}</td>
                       <td className="py-2 px-3 text-right"><Input type="number" min="0" step="0.01" value={doc.discountAmount} onChange={e => updateSettlementDoc(i, "discountAmount", e.target.value)} className="h-7 text-xs w-20 text-right" /></td>
                       <td className="py-2 px-3 text-right"><Input type="number" min="0" step="0.01" value={doc.adjustment} onChange={e => updateSettlementDoc(i, "adjustment", e.target.value)} className="h-7 text-xs w-20 text-right" /></td>
-                      <td className="py-2 px-3 text-sm font-semibold text-right text-green-600">{formatCurrency(doc.settlementAmount)}</td>
+                      <td className="py-2 px-3 text-sm font-semibold text-right text-green-600">{formatCurrency(parseFloat(doc.settlementAmount))}</td>
                     </tr>
                   ))}
                 </tbody></table>

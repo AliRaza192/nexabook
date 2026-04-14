@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getCustomers, createRecurringInvoice, type RecurringInvoiceFormData } from "@/lib/actions/sales";
 import { getProducts } from "@/lib/actions/inventory";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer { id: string; name: string; }
 interface Product { id: string; name: string; salePrice: string | null; taxRate: string | null; description: string | null; }
@@ -69,7 +70,7 @@ export default function NewRecurringPage() {
   const globalDisc = simpleGross * parseFloat(globalDiscountPct || "0") / 100;
   const shipping = parseFloat(shippingCharges || "0");
   const netAmount = Math.round(simpleGross - globalDisc + totalTax + shipping);
-  const formatCurrency = (v: number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2 }).format(v);
+  const formatCurrency = (v: number) => formatPKR(v, 'south-asian');
 
   const handleSave = async () => {
     if (!customerId || !templateName) { alert("Customer and template name are required"); return; }

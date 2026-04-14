@@ -331,6 +331,7 @@ export async function updateCompanySettings(data: {
   website?: string;
   fiscalYearStart?: string;
   currency?: string;
+  numberFormat?: string;
 }) {
   try {
     const orgId = await getCurrentOrgId();
@@ -352,6 +353,7 @@ export async function updateCompanySettings(data: {
     if (data.website !== undefined) updateData.website = data.website;
     if (data.fiscalYearStart !== undefined) updateData.fiscalYearStart = data.fiscalYearStart;
     if (data.currency !== undefined) updateData.currency = data.currency;
+    if (data.numberFormat !== undefined) updateData.numberFormat = data.numberFormat;
 
     await db
       .update(organizations)

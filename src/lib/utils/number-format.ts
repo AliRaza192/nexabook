@@ -5,20 +5,20 @@
 export function formatPakistaniNumber(num: number): string {
   const isNegative = num < 0;
   const absNum = Math.abs(num);
-  
+
   // Convert to string with 2 decimal places
   const numStr = absNum.toFixed(2);
   const [intPart, decPart] = numStr.split('.');
-  
+
   // Handle Indian/Pakistani numbering system
   let result = '';
   let count = 0;
-  
+
   // Process from right to left
   for (let i = intPart.length - 1; i >= 0; i--) {
     result = intPart[i] + result;
     count++;
-    
+
     // Add comma after 3 digits from right, then every 2 digits
     if (count === 3 && i > 0) {
       result = ',' + result;
@@ -26,15 +26,62 @@ export function formatPakistaniNumber(num: number): string {
       result = ',' + result;
     }
   }
-  
+
   return (isNegative ? '-' : '') + result + '.' + decPart;
 }
 
 /**
- * Format currency in Pakistani style with Rs. prefix
+ * Format number in International style
+ * Example: 1000 -> 1,000 | 100000 -> 100,000 | 10000000 -> 10,000,000
+ */
+export function formatInternationalNumber(num: number): string {
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/**
+ * Format number in Pakistani or International style based on preference
+ * Default is South Asian (Pakistani) format
+ */
+export function formatPKR(amount: number, format: 'south-asian' | 'international' = 'south-asian'): string {
+  const formatted = format === 'south-asian' 
+    ? formatPakistaniNumber(amount) 
+    : formatInternationalNumber(amount);
+  return `Rs. ${formatted}`;
+}
+
+/**
+ * Format currency in Pakistani style with Rs. prefix (alias for formatPKR)
  */
 export function formatPakistaniCurrency(amount: number): string {
-  return `Rs. ${formatPakistaniNumber(amount)}`;
+  return formatPKR(amount, 'south-asian');
+}
+
+/**
+ * Format large amounts in short form for dashboard display
+ * Examples: 150000 -> 1.5L, 10000000 -> 1Cr, 2500000 -> 25L
+ */
+export function formatPKRShort(amount: number): string {
+  const absAmount = Math.abs(amount);
+  const sign = amount < 0 ? '-' : '';
+  
+  if (absAmount >= 10000000) {
+    // Crore
+    const crores = (absAmount / 10000000).toFixed(1);
+    return `${sign}${parseFloat(crores)}Cr`;
+  } else if (absAmount >= 100000) {
+    // Lakh
+    const lakhs = (absAmount / 100000).toFixed(1);
+    return `${sign}${parseFloat(lakhs)}L`;
+  } else if (absAmount >= 1000) {
+    // Thousand
+    const thousands = (absAmount / 1000).toFixed(1);
+    return `${sign}${parseFloat(thousands)}K`;
+  }
+  
+  return `${sign}${absAmount.toFixed(0)}`;
 }
 
 /**
@@ -103,17 +150,17 @@ export function formatAmountWords(amount: number): string {
     return result;
   }
   
-  let words = 'Rs. ' + convertToWords(rupees).trim();
-  
+  let words = 'Rs. ' + convertToWords(rupees).trim().replace(/\s+/g, ' ');
+
   if (paisa > 0) {
-    words += ' and ' + convertToWords(paisa).trim() + ' Paisa';
+    words += ' and ' + convertToWords(paisa).trim().replace(/\s+/g, ' ') + ' Paisa';
   }
-  
+
   words += ' Only';
-  
+
   if (isNegative) {
     words = 'Negative ' + words;
   }
-  
+
   return words;
 }

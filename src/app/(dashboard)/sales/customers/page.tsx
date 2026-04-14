@@ -31,6 +31,7 @@ import {
   createCustomer,
   type CustomerFormData,
 } from "@/lib/actions/sales";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer {
   id: string;
@@ -241,14 +242,8 @@ export default function CustomersPage() {
   };
 
   // Format currency
-  const formatCurrency = (value: string | null) => {
-    if (!value) return "Rs. 0";
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(parseFloat(value));
+  const formatCurrency = (value: number) => {
+    return formatPKR(value, 'south-asian');
   };
 
   if (loading && !customers.length) {
@@ -445,11 +440,11 @@ export default function CustomersPage() {
                                 : "text-nexabook-900"
                             }`}
                           >
-                            {formatCurrency(customer.balance)}
+                            {formatCurrency(parseFloat(customer.balance || "0"))}
                           </p>
                           {customer.creditLimit && (
                             <p className="text-xs text-nexabook-500">
-                              Limit: {formatCurrency(customer.creditLimit)}
+                              Limit: {formatCurrency(parseFloat(customer.creditLimit))}
                             </p>
                           )}
                         </div>

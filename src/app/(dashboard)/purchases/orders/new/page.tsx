@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { formatPKR } from "@/lib/utils/number-format";
 import { getVendors, createPurchaseOrder, approvePurchaseOrder, getNextPurchaseOrderNumber, type PurchaseOrderFormData } from "@/lib/actions/purchases";
 import { getProducts } from "@/lib/actions/inventory";
 
@@ -136,7 +137,7 @@ export default function NewPurchaseOrderPage() {
   const netBeforeRound = grossAmount + totalTax;
   const netAmount = Math.round(netBeforeRound);
 
-  const formatCurrency = (value: number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  const formatCurrency = (value: number) => formatPKR(value, 'south-asian');
 
   const handleSave = async (action: "close" | "approve") => {
     if (!vendorId) { alert("Please select a vendor"); return; }

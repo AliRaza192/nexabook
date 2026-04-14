@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getCustomers, createSalesReturn, approveSalesReturn, getInvoices, type SalesReturnFormData } from "@/lib/actions/sales";
 import { getProducts } from "@/lib/actions/inventory";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer { id: string; name: string; }
 interface Product { id: string; name: string; salePrice: string | null; description: string | null; }
@@ -76,7 +77,7 @@ export default function NewReturnPage() {
   const removeLine = (i: number) => { if (lineItems.length > 1) setLineItems(lineItems.filter((_, idx) => idx !== i)); };
 
   const grossAmount = lineItems.reduce((s, item) => s + (parseFloat(item.quantity || "0") * parseFloat(item.unitPrice || "0")), 0);
-  const formatCurrency = (v: number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2 }).format(v);
+  const formatCurrency = (v: number) => formatPKR(v, 'south-asian');
 
   const handleSave = async (approve: boolean) => {
     if (!customerId) { alert("Please select a customer"); return; }

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getQuotations, deleteQuotation, convertQuotationToOrder } from "@/lib/actions/sales";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Quotation {
   id: string;
@@ -99,10 +100,7 @@ export default function QuotationsPage() {
     else alert(res.error || "Failed to convert");
   };
 
-  const formatCurrency = (val: string | null) => {
-    if (!val) return "Rs. 0";
-    return new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(parseFloat(val));
-  };
+  const formatCurrency = (val: number) => formatPKR(val, 'south-asian');
 
   const formatDate = (d: Date | null) => {
     if (!d) return "N/A";
@@ -164,7 +162,7 @@ export default function QuotationsPage() {
                         <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{q.subject || "-"}</span></td>
                         <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{formatDate(q.issueDate)}</span></td>
                         <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{formatDate(q.expiryDate)}</span></td>
-                        <td className="py-3 px-4"><span className="text-sm font-semibold">{formatCurrency(q.netAmount)}</span></td>
+                        <td className="py-3 px-4"><span className="text-sm font-semibold">{formatCurrency(parseFloat(q.netAmount || "0"))}</span></td>
                         <td className="py-3 px-4"><Badge variant={badge.variant as any} className="text-xs">{badge.label}</Badge></td>
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-1">

@@ -33,6 +33,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { formatPKR } from "@/lib/utils/number-format";
 import {
   getProducts,
   getCategories,
@@ -443,12 +444,7 @@ export default function InventoryPage() {
 
   // Format currency
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   if (loading && !products.length) {

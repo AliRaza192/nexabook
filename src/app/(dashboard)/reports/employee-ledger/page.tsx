@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { getEmployeeLedgerReport } from "@/lib/actions/reports";
 import { getEmployees } from "@/lib/actions/hr-payroll";
+import { formatPKR } from "@/lib/utils/number-format";
 
 export default function EmployeeLedgerPage() {
   const [loading, setLoading] = useState(true);
@@ -60,7 +61,7 @@ export default function EmployeeLedgerPage() {
   }, [selectedEmployee, selectedMonth, selectedYear]);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", { minimumFractionDigits: 2 }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   const handleApply = () => {

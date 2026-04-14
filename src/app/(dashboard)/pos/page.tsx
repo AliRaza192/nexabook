@@ -19,6 +19,7 @@ import {
   Calculator,
   Receipt,
 } from "lucide-react";
+import { formatPKR } from "@/lib/utils/number-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -237,12 +238,7 @@ export default function PosPage() {
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   if (loading) {

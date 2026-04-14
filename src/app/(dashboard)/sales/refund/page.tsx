@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getCustomers, getSalesReturns } from "@/lib/actions/sales";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer { id: string; name: string; }
 interface ReturnItem {
@@ -55,7 +56,7 @@ export default function RefundPage() {
     }
   };
 
-  const formatCurrency = (v: string | null) => v ? new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(parseFloat(v)) : "Rs. 0";
+  const formatCurrency = (v: number) => formatPKR(v, 'south-asian');
 
   const handleProcess = async () => {
     if (!customerId || !amount) { alert("Customer and amount are required"); return; }
@@ -88,7 +89,7 @@ export default function RefundPage() {
           <Card className="border-gray-200 shadow-sm"><CardContent className="p-4 space-y-3">
             <div className="grid grid-cols-4 gap-3">
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Customer*</Label><Select value={customerId} onValueChange={setCustomerId}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Linked Return</Label><Select value={returnId} onValueChange={handleReturnSelect}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{returns.map(r => <SelectItem key={r.id} value={r.id}>{r.returnNumber} - {formatCurrency(r.refundAmount)}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Linked Return</Label><Select value={returnId} onValueChange={handleReturnSelect}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{returns.map(r => <SelectItem key={r.id} value={r.id}>{r.returnNumber} - {formatCurrency(parseFloat(r.refundAmount || "0"))}</SelectItem>)}</SelectContent></Select></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Refund Date*</Label><Input type="date" value={refundDate} onChange={e => setRefundDate(e.target.value)} className="h-9 text-xs" /></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Refund Method</Label><Select value={refundMethod} onValueChange={setRefundMethod}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="bank_transfer">Bank Transfer</SelectItem><SelectItem value="cheque">Cheque</SelectItem><SelectItem value="online">Online</SelectItem><SelectItem value="credit_card">Credit Card</SelectItem></SelectContent></Select></div>
             </div>
@@ -105,7 +106,7 @@ export default function RefundPage() {
           <Card className="border-gray-200 shadow-sm"><CardContent className="p-4">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Refund Details</h3>
             <div className="space-y-2">
-              <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Refund Amount</span><span className="text-lg font-bold text-orange-600">{formatCurrency(amount || "0")}</span></div>
+              <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Refund Amount</span><span className="text-lg font-bold text-orange-600">{formatCurrency(parseFloat(amount || "0"))}</span></div>
               <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Method</span><span className="text-sm font-semibold capitalize">{refundMethod.replace('_', ' ')}</span></div>
             </div>
           </CardContent></Card>

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import ReportLayout from "@/components/reports/ReportLayout";
 import ReportFilterBar, { ReportFilters } from "@/components/reports/ReportFilterBar";
 import { getProfitAndLossReport } from "@/lib/actions/reports";
+import { formatPKR } from "@/lib/utils/number-format";
 
 export default function ProfitAndLossReportPage() {
   const [loading, setLoading] = useState(true);
@@ -38,12 +39,7 @@ export default function ProfitAndLossReportPage() {
   }, []);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   return (

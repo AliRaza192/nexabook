@@ -57,6 +57,7 @@ import { getInvoiceWithDetails } from "@/lib/actions/sales";
 import { getCompanySettings } from "@/lib/actions/accounts";
 import { generateFBRQRCode, isFBREligible } from "@/lib/utils/fbr-qr";
 import { Shield, ShieldCheck, QrCode } from "lucide-react";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer {
   id: string;
@@ -303,7 +304,7 @@ export default function NewInvoicePage() {
   const balance = netAmount - received;
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   // Generate QR code when org data or invoice details change

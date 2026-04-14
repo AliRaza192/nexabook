@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import ReportLayout from "@/components/reports/ReportLayout";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { getBomCostReport } from "@/lib/actions/reports";
+import { formatPKR } from "@/lib/utils/number-format";
 
 export default function BomCostPage() {
   const [loading, setLoading] = useState(true);
@@ -31,7 +32,7 @@ export default function BomCostPage() {
   }, []);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", { minimumFractionDigits: 2 }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   const totalCost = reportData?.reduce((sum: number, b: any) => sum + (b.totalCost || 0), 0) || 0;

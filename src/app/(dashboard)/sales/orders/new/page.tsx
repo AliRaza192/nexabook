@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { getCustomers, createSaleOrder, approveSaleOrder, getNextSaleOrderNumber, type SaleOrderFormData, type InvoiceLineItem } from "@/lib/actions/sales";
 import { getProducts } from "@/lib/actions/inventory";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer { id: string; name: string; }
 interface Product { id: string; name: string; sku: string; salePrice: string | null; currentStock: number | null; taxRate: string | null; description: string | null; }
@@ -124,7 +125,7 @@ export default function NewSaleOrderPage() {
   const roundOffVal = parseFloat(roundOff || "0");
   const netBeforeRound = grossAmount - effectiveGlobalDisc + totalTax + shipping;
   const netAmount = Math.round(netBeforeRound + roundOffVal);
-  const formatCurrency = (value: number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  const formatCurrency = (value: number) => formatPKR(value, 'south-asian');
 
   const handleSave = async (action: "continue" | "close" | "approve" | "approve-print") => {
     if (!customerId) { alert("Please select a customer"); return; }

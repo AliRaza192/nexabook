@@ -9,6 +9,7 @@ import ReportLayout from "@/components/reports/ReportLayout";
 import ReportFilterBar, { ReportFilters } from "@/components/reports/ReportFilterBar";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { getPurchaseDetailsReport } from "@/lib/actions/reports";
+import { formatPKR } from "@/lib/utils/number-format";
 
 export default function PurchaseDetailsPage() {
   const [loading, setLoading] = useState(true);
@@ -37,7 +38,7 @@ export default function PurchaseDetailsPage() {
   }, []);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", { minimumFractionDigits: 2 }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   const totalGross = reportData?.reduce((sum: number, p: any) => sum + (p.grossAmount ? parseFloat(p.grossAmount) : 0), 0) || 0;

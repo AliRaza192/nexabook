@@ -29,6 +29,7 @@ import {
 import {
   getSaleOrders,
 } from "@/lib/actions/sales";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface SaleOrder {
   id: string;
@@ -130,14 +131,8 @@ export default function SaleOrdersPage() {
     loadData();
   }, [searchQuery, statusFilter]);
 
-  const formatCurrency = (value: string | null) => {
-    if (!value) return "Rs. 0";
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(parseFloat(value));
+  const formatCurrency = (value: number) => {
+    return formatPKR(value, 'south-asian');
   };
 
   const formatDate = (date: Date | null) => {
@@ -186,7 +181,7 @@ export default function SaleOrdersPage() {
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard title="Total Orders" value={stats.totalOrders} icon={FileText} description="All orders" color="blue" />
-        <StatCard title="Total Value" value={formatCurrency(stats.totalValue.toFixed(2))} icon={DollarSign} description="Order value" color="green" />
+        <StatCard title="Total Value" value={formatCurrency(stats.totalValue)} icon={DollarSign} description="Order value" color="green" />
         <StatCard title="Approved" value={stats.approvedOrders} icon={CheckCircle} description="Confirmed orders" color="orange" />
         <StatCard title="Pending" value={stats.pendingOrders} icon={Clock} description="Awaiting approval" color="red" />
       </div>
@@ -264,7 +259,7 @@ export default function SaleOrdersPage() {
                         <td className="py-3 px-4"><p className="text-sm font-medium text-gray-900">{order.customer?.name || "Unknown Customer"}</p></td>
                         <td className="py-3 px-4"><p className="text-sm text-gray-600">{formatDate(order.orderDate)}</p></td>
                         <td className="py-3 px-4"><p className="text-sm text-gray-600">{formatDate(order.deliveryDate)}</p></td>
-                        <td className="py-3 px-4"><p className="text-sm font-semibold text-gray-900">{formatCurrency(order.netAmount)}</p></td>
+                        <td className="py-3 px-4"><p className="text-sm font-semibold text-gray-900">{formatCurrency(parseFloat(order.netAmount || "0"))}</p></td>
                         <td className="py-3 px-4">
                           <Badge variant={statusConfig.variant} className="text-xs gap-1">
                             <StatusIcon className="h-3 w-3" />

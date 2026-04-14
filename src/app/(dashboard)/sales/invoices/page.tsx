@@ -44,6 +44,7 @@ import {
   getInvoiceWithDetails,
 } from "@/lib/actions/sales";
 import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Invoice {
   id: string;
@@ -192,14 +193,8 @@ export default function InvoicesPage() {
   }, [searchQuery, statusFilter]);
 
   // Format currency
-  const formatCurrency = (value: string | null) => {
-    if (!value) return "Rs. 0";
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(parseFloat(value));
+  const formatCurrency = (value: number) => {
+    return formatPKR(value, 'south-asian');
   };
 
   // Format date
@@ -349,7 +344,7 @@ export default function InvoicesPage() {
           />
           <StatCard
             title="Total Revenue"
-            value={formatCurrency(stats.totalRevenue.toString())}
+            value={formatCurrency(stats.totalRevenue)}
             icon={TrendingUp}
             description="From all invoices"
             color="green"
@@ -504,7 +499,7 @@ export default function InvoicesPage() {
                         </td>
                         <td className="py-3 px-4">
                           <p className="text-sm font-semibold text-nexabook-900">
-                            {formatCurrency(invoice.netAmount)}
+                            {formatCurrency(parseFloat(invoice.netAmount || "0"))}
                           </p>
                         </td>
                         <td className="py-3 px-4">

@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { getCompanySettings, updateCompanySettings } from "@/lib/actions/accounts";
 
+const NUMBER_FORMAT_KEY = 'nexabook-number-format';
+
 export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -36,6 +38,7 @@ export default function SettingsPage() {
     website: "",
     currency: "PKR",
     fiscalYearStart: "07-01",
+    numberFormat: "south-asian" as "south-asian" | "international",
   });
 
   // Check FBR compliance
@@ -60,6 +63,7 @@ export default function SettingsPage() {
           website: d.website || "",
           currency: d.currency || "PKR",
           fiscalYearStart: d.fiscalYearStart || "07-01",
+          numberFormat: ((typeof window !== 'undefined' ? localStorage.getItem(NUMBER_FORMAT_KEY) : null) || "south-asian") as "south-asian" | "international",
         });
       }
       setLoading(false);
@@ -68,7 +72,13 @@ export default function SettingsPage() {
   }, []);
 
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setForm(prev => ({ ...prev, [key]: e.target.value }));
+    const value = e.target.value;
+    setForm(prev => ({ ...prev, [key]: value }));
+    
+    // Save number format to localStorage immediately
+    if (key === 'numberFormat' && typeof window !== 'undefined') {
+      localStorage.setItem(NUMBER_FORMAT_KEY, value);
+    }
   };
 
   const handleSave = async () => {
@@ -207,6 +217,22 @@ export default function SettingsPage() {
                     <option value="EUR">EUR - Euro</option>
                     <option value="GBP">GBP - British Pound</option>
                   </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Number Format</Label>
+                  <select 
+                    className="w-full rounded-md border border-nexabook-200 px-3 py-2" 
+                    value={form.numberFormat} 
+                    onChange={set("numberFormat")}
+                  >
+                    <option value="south-asian">South Asian (10,00,000) - Default for Pakistan</option>
+                    <option value="international">International (1,000,000)</option>
+                  </select>
+                  <p className="text-xs text-nexabook-500">
+                    {form.numberFormat === 'south-asian' 
+                      ? 'Example: Rs. 1,50,000.00 (1.5 Lakh)' 
+                      : 'Example: Rs. 150,000.00 (150 Thousand)'}
+                  </p>
                 </div>
               </div>
 

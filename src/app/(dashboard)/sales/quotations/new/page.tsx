@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getCustomers, createQuotation, getNextQuotationNumber, type QuotationFormData } from "@/lib/actions/sales";
 import { getProducts } from "@/lib/actions/inventory";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer { id: string; name: string; }
 interface Product { id: string; name: string; sku: string; salePrice: string | null; currentStock: number | null; taxRate: string | null; description: string | null; }
@@ -76,7 +77,7 @@ export default function NewQuotationPage() {
   const shipping = parseFloat(shippingCharges || "0");
   const netAmount = Math.round(grossAmount - globalDisc + totalTax + shipping);
 
-  const formatCurrency = (v: number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2 }).format(v);
+  const formatCurrency = (v: number) => formatPKR(v, 'south-asian');
 
   const handleSave = async () => {
     if (!customerId) { alert("Please select a customer"); return; }

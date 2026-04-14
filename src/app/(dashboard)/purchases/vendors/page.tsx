@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { formatPKR } from "@/lib/utils/number-format";
 import { getVendors, createVendor, type VendorFormData } from "@/lib/actions/purchases";
 
 interface Vendor {
@@ -275,13 +276,8 @@ export default function VendorsPage() {
   }, [searchQuery]);
 
   const formatCurrency = (value: string | null) => {
-    if (!value) return "Rs. 0";
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(parseFloat(value));
+    if (!value) return formatPKR(0, 'south-asian');
+    return formatPKR(parseFloat(value), 'south-asian');
   };
 
   if (loading && !vendors.length) {

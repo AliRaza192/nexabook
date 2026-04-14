@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatPKR } from "@/lib/utils/number-format";
 import { getPurchaseReturns, approvePurchaseReturn } from "@/lib/actions/purchases";
 
 interface PurchaseReturn {
@@ -66,7 +67,7 @@ export default function PurchaseReturnsPage() {
     else alert(res.error || "Failed");
   };
 
-  const formatCurrency = (v: string | null) => v ? new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(parseFloat(v)) : "Rs. 0";
+  const formatCurrency = (v: string | null) => v ? formatPKR(parseFloat(v), 'south-asian') : formatPKR(0, 'south-asian');
   const formatDate = (d: Date | null) => d ? new Date(d).toLocaleDateString("en-PK", { year: "numeric", month: "short", day: "numeric" }) : "N/A";
 
   if (loading && !returns.length) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-12 w-12 animate-spin text-nexabook-600 mx-auto" /><p className="text-nexabook-600 ml-3">Loading...</p></div>;

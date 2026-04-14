@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatPKR } from "@/lib/utils/number-format";
 import { getVendors, getPurchaseInvoices, createPurchaseReturn, approvePurchaseReturn, getNextPurchaseReturnNumber, type PurchaseReturnFormData } from "@/lib/actions/purchases";
 import { getProducts } from "@/lib/actions/inventory";
 
@@ -77,7 +78,7 @@ export default function NewPurchaseReturnPage() {
   const lineAmounts = items.map(item => parseFloat(item.quantity || "0") * parseFloat(item.unitPrice || "0"));
   const grossAmount = lineAmounts.reduce((sum, a) => sum + a, 0);
 
-  const formatCurrency = (v: number) => new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2 }).format(v);
+  const formatCurrency = (v: number) => formatPKR(v, 'south-asian');
 
   const handleSave = async (action: "save" | "approve") => {
     if (!vendorId) { alert("Please select a vendor"); return; }

@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { getVendorLedgerReport } from "@/lib/actions/reports";
 import { getVendors } from "@/lib/actions/purchases";
+import { formatPKR } from "@/lib/utils/number-format";
 
 export default function VendorLedgerPage() {
   const [loading, setLoading] = useState(true);
@@ -63,7 +64,7 @@ export default function VendorLedgerPage() {
   }, [selectedVendor]);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", { minimumFractionDigits: 2 }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   const handleApply = () => {

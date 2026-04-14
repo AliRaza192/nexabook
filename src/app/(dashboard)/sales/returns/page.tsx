@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getSalesReturns, approveSalesReturn } from "@/lib/actions/sales";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface SalesReturn {
   id: string;
@@ -65,7 +66,7 @@ export default function ReturnsPage() {
     else alert(res.error || "Failed");
   };
 
-  const formatCurrency = (v: string | null) => v ? new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(parseFloat(v)) : "Rs. 0";
+  const formatCurrency = (v: number) => formatPKR(v, 'south-asian');
   const formatDate = (d: Date | null) => d ? new Date(d).toLocaleDateString("en-PK", { year: "numeric", month: "short", day: "numeric" }) : "N/A";
 
   if (loading && !returns.length) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-12 w-12 animate-spin text-nexabook-600 mx-auto" /><p className="text-nexabook-600 ml-3">Loading...</p></div>;
@@ -79,7 +80,7 @@ export default function ReturnsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard title="Returns This Month" value={stats.thisMonth} icon={RotateCcw} color="blue" />
-        <StatCard title="Total Refund" value={formatCurrency(stats.totalRefund)} icon={DollarSign} color="green" />
+        <StatCard title="Total Refund" value={formatCurrency(parseFloat(stats.totalRefund))} icon={DollarSign} color="green" />
         <StatCard title="Pending Approvals" value={stats.pending} icon={Clock} color="orange" />
       </div>
 
@@ -112,8 +113,8 @@ export default function ReturnsPage() {
                     <td className="py-3 px-4"><span className="text-sm">{r.customer?.name || "Unknown"}</span></td>
                     <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{formatDate(r.returnDate)}</span></td>
                     <td className="py-3 px-4"><Badge variant="outline" className="text-xs">{getReasonLabel(r.reason)}</Badge></td>
-                    <td className="py-3 px-4"><span className="text-sm font-semibold">{formatCurrency(r.netAmount)}</span></td>
-                    <td className="py-3 px-4"><span className="text-sm font-semibold text-green-600">{formatCurrency(r.refundAmount)}</span></td>
+                    <td className="py-3 px-4"><span className="text-sm font-semibold">{formatCurrency(parseFloat(r.netAmount || "0"))}</span></td>
+                    <td className="py-3 px-4"><span className="text-sm font-semibold text-green-600">{formatCurrency(parseFloat(r.refundAmount || "0"))}</span></td>
                     <td className="py-3 px-4"><Badge variant={r.status === 'approved' || r.status === 'refunded' ? 'success' as any : r.status === 'pending' ? 'secondary' as any : 'outline' as any} className="text-xs capitalize">{r.status}</Badge></td>
                     <td className="py-3 px-4"><div className="flex items-center gap-1">
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Eye className="h-3.5 w-3.5" /></Button>

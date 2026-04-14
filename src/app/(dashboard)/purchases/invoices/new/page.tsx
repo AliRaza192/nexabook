@@ -38,6 +38,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { formatPKR } from "@/lib/utils/number-format";
 import {
   getVendors,
   createPurchaseInvoice,
@@ -322,12 +323,7 @@ export default function NewPurchaseInvoicePage() {
   const netAmount = Math.round(netBeforeRound);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   const handleSave = async (action: "continue" | "close" | "approve") => {

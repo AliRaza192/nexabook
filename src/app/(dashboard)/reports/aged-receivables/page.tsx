@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import ReportLayout from "@/components/reports/ReportLayout";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { getAgedReceivablesReport } from "@/lib/actions/reports";
+import { formatPKR } from "@/lib/utils/number-format";
 
 export default function AgedReceivablesPage() {
   const [loading, setLoading] = useState(true);
@@ -31,7 +32,7 @@ export default function AgedReceivablesPage() {
   }, []);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", { minimumFractionDigits: 2 }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   const totalBalance = reportData?.reduce((sum: number, c: any) => sum + c.balance, 0) || 0;

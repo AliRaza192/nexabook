@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getCustomers, createCustomerPayment, getCustomerOutstandingInvoices, type CustomerPaymentFormData } from "@/lib/actions/sales";
+import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer { id: string; name: string; }
 interface OutstandingInvoice {
@@ -53,7 +54,7 @@ export default function ReceivePaymentPage() {
   const totalAllocated = Object.values(allocations).reduce((s, a) => s + parseFloat(a || "0"), 0);
   const paymentAmount = parseFloat(amount || "0");
   const unallocated = paymentAmount - totalAllocated;
-  const formatCurrency = (v: string | null) => v ? new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(parseFloat(v)) : "Rs. 0";
+  const formatCurrency = (v: number) => formatPKR(v, 'south-asian');
   const formatDate = (d: Date | null) => d ? new Date(d).toLocaleDateString("en-PK", { year: "numeric", month: "short", day: "numeric" }) : "N/A";
 
   const handleSave = async () => {
@@ -110,16 +111,16 @@ export default function ReceivePaymentPage() {
                       <td className="py-2 px-3 text-sm font-medium">{inv.invoiceNumber}</td>
                       <td className="py-2 px-3 text-sm text-gray-600">{formatDate(inv.issueDate)}</td>
                       <td className="py-2 px-3 text-sm text-gray-600">{formatDate(inv.dueDate)}</td>
-                      <td className="py-2 px-3 text-sm font-semibold">{formatCurrency(inv.netAmount)}</td>
-                      <td className="py-2 px-3 text-sm font-semibold text-orange-600">{formatCurrency(inv.balanceAmount)}</td>
+                      <td className="py-2 px-3 text-sm font-semibold">{formatCurrency(parseFloat(inv.netAmount || "0"))}</td>
+                      <td className="py-2 px-3 text-sm font-semibold text-orange-600">{formatCurrency(parseFloat(inv.balanceAmount || "0"))}</td>
                       <td className="py-2 px-3"><Input type="number" min="0" max={inv.balanceAmount || "0"} step="0.01" value={allocations[inv.id] || "0"} onChange={e => setAllocations(prev => ({ ...prev, [inv.id]: e.target.value }))} className="h-7 text-xs w-28" /></td>
                     </tr>
                   ))}
                 </tbody></table>
               </div>
               <div className="p-3 bg-gray-50 border-t border-gray-200 flex justify-between items-center">
-                <span className="text-sm font-semibold">Total Allocated: <span className="text-blue-600">{formatCurrency(totalAllocated.toFixed(2))}</span></span>
-                {unallocated !== 0 && <span className={`text-xs flex items-center gap-1 ${unallocated > 0 ? "text-orange-600" : "text-red-600"}`}><AlertTriangle className="h-3 w-3" />{unallocated > 0 ? `${formatCurrency(unallocated.toFixed(2))} unallocated` : "Over-allocated"}</span>}
+                <span className="text-sm font-semibold">Total Allocated: <span className="text-blue-600">{formatCurrency(totalAllocated)}</span></span>
+                {unallocated !== 0 && <span className={`text-xs flex items-center gap-1 ${unallocated > 0 ? "text-orange-600" : "text-red-600"}`}><AlertTriangle className="h-3 w-3" />{unallocated > 0 ? `${formatCurrency(unallocated)} unallocated` : "Over-allocated"}</span>}
               </div>
             </Card>
           )}
@@ -131,10 +132,10 @@ export default function ReceivePaymentPage() {
           <Card className="border-gray-200 shadow-sm"><CardContent className="p-4">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Payment Summary</h3>
             <div className="space-y-2">
-              <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Payment Amount</span><span className="text-sm font-semibold">{formatCurrency(amount || "0")}</span></div>
-              <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Total Allocated</span><span className="text-sm font-semibold">{formatCurrency(totalAllocated.toFixed(2))}</span></div>
+              <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Payment Amount</span><span className="text-sm font-semibold">{formatCurrency(parseFloat(amount || "0"))}</span></div>
+              <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Total Allocated</span><span className="text-sm font-semibold">{formatCurrency(totalAllocated)}</span></div>
               <div className={`flex justify-between py-3 px-3 rounded-lg border mt-3 ${unallocated === 0 ? "bg-green-50 border-green-200" : "bg-orange-50 border-orange-200"}`}>
-                <span className="text-sm font-bold">Unallocated</span><span className={`text-xl font-bold ${unallocated === 0 ? "text-green-600" : "text-orange-600"}`}>{formatCurrency(unallocated.toFixed(2))}</span>
+                <span className="text-sm font-bold">Unallocated</span><span className={`text-xl font-bold ${unallocated === 0 ? "text-green-600" : "text-orange-600"}`}>{formatCurrency(unallocated)}</span>
               </div>
             </div>
           </CardContent></Card>

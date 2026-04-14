@@ -34,6 +34,7 @@ import {
   Legend,
 } from "recharts";
 import { getDashboardData, type DashboardData } from "@/lib/actions/dashboard";
+import { formatPKR, formatPKRShort } from "@/lib/utils/number-format";
 
 // Chart colors
 const COLORS = ["#0F172A", "#2563EB", "#64748B", "#94A3B8", "#CBD5E1"];
@@ -49,14 +50,14 @@ const dateRanges = [
   { label: "Last 3 Months", key: "3m" },
 ];
 
-// Format currency
+// Format currency using Pakistani format (Lakh/Crore)
 const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("en-PK", {
-    style: "currency",
-    currency: "PKR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Math.abs(value));
+  return formatPKR(value, 'south-asian');
+};
+
+// Format large amounts in short form (1.2L, 2.5Cr)
+const formatCurrencyShort = (value: number) => {
+  return formatPKRShort(value);
 };
 
 // ============= KPI Card Component =============
@@ -310,7 +311,7 @@ export default function BIDashboard() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="month" stroke="#64748B" fontSize={12} />
-                    <YAxis stroke="#64748B" fontSize={12} tickFormatter={(value) => `Rs. ${(value / 1000).toFixed(0)}k`} />
+                    <YAxis stroke="#64748B" fontSize={12} tickFormatter={(value) => formatCurrencyShort(value)} />
                     <Tooltip
                       formatter={(value: any) => formatCurrency(value as number)}
                       contentStyle={{
@@ -429,7 +430,7 @@ export default function BIDashboard() {
                   <BarChart data={dashboardData?.arAging || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="category" stroke="#64748B" fontSize={12} />
-                    <YAxis stroke="#64748B" fontSize={12} tickFormatter={(value) => `Rs. ${(value / 1000).toFixed(0)}k`} />
+                    <YAxis stroke="#64748B" fontSize={12} tickFormatter={(value) => formatCurrencyShort(value)} />
                     <Tooltip formatter={(value: any) => formatCurrency(value as number)} />
                     <Bar
                       dataKey="amount"

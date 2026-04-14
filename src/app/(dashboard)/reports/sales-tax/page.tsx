@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import ReportLayout from "@/components/reports/ReportLayout";
 import ReportFilterBar, { ReportFilters } from "@/components/reports/ReportFilterBar";
 import { getSalesTaxReport } from "@/lib/actions/reports";
+import { formatPKR } from "@/lib/utils/number-format";
 
 export default function SalesTaxReportPage() {
   const [loading, setLoading] = useState(true);
@@ -37,12 +38,7 @@ export default function SalesTaxReportPage() {
   }, []);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return formatPKR(value, 'south-asian');
   };
 
   return (

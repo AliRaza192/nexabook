@@ -16,6 +16,7 @@ import {
   Wallet,
   Filter,
 } from "lucide-react";
+import { formatPKR } from "@/lib/utils/number-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -226,13 +227,8 @@ export default function EmployeesPage() {
   };
 
   const formatCurrency = (value: string | null) => {
-    if (!value) return "PKR 0";
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(parseFloat(value));
+    if (!value) return formatPKR(0, 'south-asian');
+    return formatPKR(parseFloat(value), 'south-asian');
   };
 
   const getStatusColor = (status: string) => {

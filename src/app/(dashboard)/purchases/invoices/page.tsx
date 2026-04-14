@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatPKR } from "@/lib/utils/number-format";
 import {
   getPurchaseInvoices,
   approvePurchaseInvoice,
@@ -152,13 +153,8 @@ export default function PurchaseInvoicesPage() {
 
   // Format currency
   const formatCurrency = (value: string | null) => {
-    if (!value) return "Rs. 0";
-    return new Intl.NumberFormat("en-PK", {
-      style: "currency",
-      currency: "PKR",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(parseFloat(value));
+    if (!value) return formatPKR(0, 'south-asian');
+    return formatPKR(parseFloat(value), 'south-asian');
   };
 
   // Format date
