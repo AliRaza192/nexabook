@@ -196,11 +196,9 @@ export default function EmployeeLedgerPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="employee-ledger-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Period</TableHead>
                     <TableHead className="text-right">Basic Salary</TableHead>
                     <TableHead className="text-right">Total Earnings</TableHead>
                     <TableHead className="text-right">Total Deductions</TableHead>

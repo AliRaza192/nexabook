@@ -53,8 +53,10 @@ export default function ProfitAndLossReportPage() {
       category="Financial Reports"
       categoryHref="/reports"
     >
-      {/* Filter Bar */}
-      <ReportFilterBar onFilterChange={loadReport} />
+      {/* Filter Bar - Hidden on print */}
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">

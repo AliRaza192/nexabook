@@ -89,12 +89,14 @@ export default function CustomerLedgerReportPage() {
       category="Sales Reports"
       categoryHref="/reports"
     >
-      {/* Filter Bar */}
-      <ReportFilterBar
-        onFilterChange={loadReport}
-        showCustomerFilter
-        customers={customers}
-      />
+      {/* Filter Bar - Hidden on print */}
+      <div className="print-hidden">
+        <ReportFilterBar
+          onFilterChange={loadReport}
+          showCustomerFilter
+          customers={customers}
+        />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -175,7 +177,7 @@ export default function CustomerLedgerReportPage() {
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table id="customer-ledger-table" className="w-full">
                   <thead>
                     <tr className="border-b-2 border-nexabook-200 bg-nexabook-50">
                       <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">

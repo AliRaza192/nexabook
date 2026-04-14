@@ -2,15 +2,20 @@
 
 import { FileDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { exportTableToExcel } from "@/lib/excel-export";
 
 interface ReportExportButtonsProps {
   reportTitle?: string;
+  reportData?: any;
+  tableId?: string;
   onExportPDF?: () => void;
   onExportExcel?: () => void;
 }
 
 export default function ReportExportButtons({
   reportTitle = "Report",
+  reportData,
+  tableId = "report-table",
   onExportPDF,
   onExportExcel,
 }: ReportExportButtonsProps) {
@@ -18,7 +23,7 @@ export default function ReportExportButtons({
     if (onExportPDF) {
       onExportPDF();
     } else {
-      // Placeholder: Print current page
+      // Use window.print() with print CSS
       window.print();
     }
   };
@@ -27,15 +32,28 @@ export default function ReportExportButtons({
     if (onExportExcel) {
       onExportExcel();
     } else {
-      // Placeholder: Show alert
-      alert(
-        `Export to Excel functionality will be available soon. This is a placeholder for ${reportTitle}.`
-      );
+      // Extract data from DOM table
+      const tableElement = document.getElementById(tableId) as HTMLTableElement;
+      if (tableElement) {
+        // Generate filename with date
+        const dateStr = new Date().toISOString().split('T')[0];
+        const fileName = `${reportTitle.replace(/\s+/g, '-')}-${dateStr}`;
+        
+        exportTableToExcel(tableElement, fileName, reportTitle);
+      } else {
+        // Fallback: try to find any table in the main content
+        const tables = document.querySelectorAll('table');
+        if (tables.length > 0) {
+          const dateStr = new Date().toISOString().split('T')[0];
+          const fileName = `${reportTitle.replace(/\s+/g, '-')}-${dateStr}`;
+          exportTableToExcel(tables[0] as HTMLTableElement, fileName, reportTitle);
+        }
+      }
     }
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 print:hidden">
       <Button
         variant="outline"
         size="sm"
@@ -43,7 +61,7 @@ export default function ReportExportButtons({
         className="h-9"
       >
         <FileDown className="mr-2 h-4 w-4" />
-        Export PDF
+        Print / PDF
       </Button>
       <Button
         variant="outline"

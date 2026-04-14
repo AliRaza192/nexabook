@@ -62,7 +62,9 @@ export default function PurchaseDetailsPage() {
       category="Purchase Reports"
       categoryHref="/reports"
     >
-      <ReportFilterBar onFilterChange={loadReport} />
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -135,11 +137,9 @@ export default function PurchaseDetailsPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="purchase-details-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Bill Number</TableHead>
-                    <TableHead>Date</TableHead>
                     <TableHead>Vendor</TableHead>
                     <TableHead className="text-right">Gross Amount</TableHead>
                     <TableHead className="text-right">Discount</TableHead>

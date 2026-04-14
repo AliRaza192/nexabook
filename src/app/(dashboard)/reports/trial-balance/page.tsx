@@ -49,7 +49,10 @@ export default function TrialBalancePage() {
       category="Accounts Reports"
       categoryHref="/reports"
     >
-      <ReportFilterBar onFilterChange={loadReport} />
+      {/* Filter Bar - Hidden on print */}
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -122,7 +125,7 @@ export default function TrialBalancePage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="trial-balance-table">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Account Code</TableHead>

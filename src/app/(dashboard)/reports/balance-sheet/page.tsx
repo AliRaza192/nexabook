@@ -51,8 +51,10 @@ export default function BalanceSheetReportPage() {
       category="Financial Reports"
       categoryHref="/reports"
     >
-      {/* Filter Bar */}
-      <ReportFilterBar onFilterChange={loadReport} />
+      {/* Filter Bar - Hidden on print */}
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -120,7 +122,7 @@ export default function BalanceSheetReportPage() {
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table id="balance-sheet-assets" className="w-full">
                     <thead>
                       <tr className="border-b-2 border-nexabook-200">
                         <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
@@ -171,7 +173,7 @@ export default function BalanceSheetReportPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table id="balance-sheet-liabilities" className="w-full">
                       <thead>
                         <tr className="border-b-2 border-nexabook-200">
                           <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
@@ -220,7 +222,7 @@ export default function BalanceSheetReportPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table id="balance-sheet-equity" className="w-full">
                       <thead>
                         <tr className="border-b-2 border-nexabook-200">
                           <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">

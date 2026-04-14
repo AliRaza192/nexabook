@@ -117,11 +117,9 @@ export default function ProductAgingPage() {
               <p className="text-sm text-nexabook-600">Days products have been in stock</p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="product-aging-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Product</TableHead>
                     <TableHead>SKU</TableHead>
                     <TableHead className="text-right">Current Stock</TableHead>
                     <TableHead className="text-right">Days in Stock</TableHead>

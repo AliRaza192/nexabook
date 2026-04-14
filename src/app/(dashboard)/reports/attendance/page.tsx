@@ -193,11 +193,9 @@ export default function AttendancePage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="attendance-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Employee</TableHead>
                     <TableHead>Code</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Check In</TableHead>

@@ -52,7 +52,9 @@ export default function SalesTaxReportPage() {
       category="Tax Reports"
       categoryHref="/reports"
     >
-      <ReportFilterBar onFilterChange={loadReport} />
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">

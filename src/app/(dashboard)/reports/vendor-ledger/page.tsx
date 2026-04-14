@@ -178,11 +178,9 @@ export default function VendorLedgerPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="vendor-ledger-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Date</TableHead>
                     <TableHead>Reference</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead className="text-right">Debit</TableHead>

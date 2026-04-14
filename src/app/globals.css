@@ -42,37 +42,196 @@
   .enterprise-card {
     @apply bg-white border border-slate-200 rounded-lg shadow-sm;
   }
-  
+
   /* Buttons */
   .btn-primary {
     @apply bg-slate-900 hover:bg-slate-800 text-white font-medium transition-colors;
   }
-  
+
   .btn-accent {
     @apply bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors;
   }
-  
+
   .btn-outline {
     @apply bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400 transition-colors;
   }
-  
+
   /* Inputs */
   .enterprise-input {
     @apply bg-white border border-slate-300 text-slate-900 text-sm rounded-md
            focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 outline-none transition-all;
   }
-  
+
   /* Status Badges */
   .badge-success {
     @apply bg-blue-50 text-blue-700 border border-blue-200;
   }
-  
+
   .badge-warning {
     @apply bg-amber-50 text-amber-700 border border-amber-200;
   }
-  
+
   .badge-danger {
     @apply bg-red-50 text-red-700 border border-red-200;
+  }
+
+  /* Print Hidden Utility */
+  .print-hidden {
+    @apply print:hidden;
+  }
+}
+
+/* Professional Print Styles */
+@media print {
+  /* Hide navigation, header, and UI elements */
+  header,
+  nav,
+  .sidebar,
+  .print-hidden,
+  button,
+  [role="button"],
+  input,
+  select,
+  textarea,
+  .filter-bar,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Reset page margins and background */
+  @page {
+    margin: 0.75in;
+    size: letter;
+  }
+
+  body {
+    background: white !important;
+    color: #000 !important;
+    font-size: 10pt !important;
+    line-height: 1.3 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Ensure tables take full width and don't get cut off */
+  table {
+    width: 100% !important;
+    page-break-inside: auto !important;
+    border-collapse: collapse !important;
+    font-size: 10pt !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+
+  th,
+  td {
+    padding: 4px 8px !important;
+    border: 1px solid #ddd !important;
+    font-size: 10pt !important;
+  }
+
+  th {
+    font-weight: bold !important;
+    background-color: #f0f4f8 !important;
+    color: #0f172a !important;
+  }
+
+  /* Cards should become transparent */
+  .enterprise-card,
+  [class*="card"] {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 0 12px 0 !important;
+  }
+
+  /* Professional font sizes for data */
+  h1, h2, h3, h4, h5, h6 {
+    font-size: 14pt !important;
+    margin: 12px 0 8px 0 !important;
+    color: #000 !important;
+  }
+
+  p, span, div {
+    font-size: 10pt !important;
+  }
+
+  /* Add page header to every printed page */
+  body::before {
+    content: "NexaBook - Report";
+    display: block;
+    font-size: 12pt;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #0f172a;
+  }
+
+  /* Add signature lines at the bottom */
+  body::after {
+    content: "";
+    display: block;
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid #ccc;
+  }
+
+  /* Ensure main content takes full width */
+  main,
+  .main-content,
+  [class*="content"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Grid layouts should stack */
+  [class*="grid"],
+  [class*="flex"] {
+    display: block !important;
+  }
+
+  /* Ensure text is visible */
+  * {
+    color: #000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Signature lines container */
+  .signature-lines {
+    display: block !important;
+    margin-top: 60px;
+    page-break-inside: avoid;
+  }
+
+  .signature-line {
+    display: inline-block;
+    width: 45%;
+    margin: 0 2%;
+    vertical-align: top;
+  }
+
+  .signature-line .line {
+    border-top: 1px solid #000;
+    margin-top: 40px;
+    padding-top: 8px;
+    font-size: 10pt;
+    text-align: center;
   }
 }
 

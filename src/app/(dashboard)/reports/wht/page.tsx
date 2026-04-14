@@ -49,7 +49,9 @@ export default function WHTPage() {
       category="Accounts Reports"
       categoryHref="/reports"
     >
-      <ReportFilterBar onFilterChange={loadReport} />
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -124,10 +126,9 @@ export default function WHTPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="wht-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Description</TableHead>
                     <TableHead className="text-right">Amount (PKR)</TableHead>
                   </TableRow>
                 </TableHeader>

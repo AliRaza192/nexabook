@@ -128,11 +128,9 @@ export default function LowInventoryPage() {
               <p className="text-sm text-nexabook-600">Products that need reordering</p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="low-inventory-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Product</TableHead>
                     <TableHead>SKU</TableHead>
                     <TableHead>Unit</TableHead>
                     <TableHead className="text-right">Current Stock</TableHead>

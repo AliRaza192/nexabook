@@ -177,11 +177,9 @@ export default function PayrollSummaryPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="payroll-summary-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Employee</TableHead>
                     <TableHead>Code</TableHead>
                     <TableHead>Department</TableHead>
                     <TableHead className="text-right">Basic Salary</TableHead>

@@ -47,6 +47,7 @@ export default function AgedReceivablesPage() {
       category="Sales Reports"
       categoryHref="/reports"
     >
+      {/* Loading - Hidden on print */}
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
           <Loader2 className="h-12 w-12 animate-spin text-nexabook-600" />
@@ -127,7 +128,7 @@ export default function AgedReceivablesPage() {
               <p className="text-sm text-nexabook-600">Outstanding balances by aging bucket</p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="aged-receivables-table">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Customer</TableHead>

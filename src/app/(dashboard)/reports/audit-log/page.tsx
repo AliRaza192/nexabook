@@ -172,7 +172,7 @@ export default function AuditTrailPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table id="audit-log-table" className="w-full">
                   <thead>
                     <tr className="border-b-2 border-nexabook-200">
                       <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">

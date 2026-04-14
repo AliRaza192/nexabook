@@ -52,7 +52,10 @@ export default function CashFlowPage() {
       category="Accounts Reports"
       categoryHref="/reports"
     >
-      <ReportFilterBar onFilterChange={loadReport} />
+      {/* Filter Bar - Hidden on print */}
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -133,7 +136,7 @@ export default function CashFlowPage() {
                   <h3 className="text-base font-bold text-nexabook-900 mb-3 pb-2 border-b-2 border-nexabook-200">
                     Operating Activities
                   </h3>
-                  <Table>
+                  <Table id="cash-flow-table">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Description</TableHead>

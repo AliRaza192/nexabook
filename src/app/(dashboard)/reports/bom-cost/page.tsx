@@ -114,11 +114,9 @@ export default function BomCostPage() {
               <p className="text-sm text-nexabook-600">Component costs for each active BOM</p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="bom-cost-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>BOM Name</TableHead>
                     <TableHead>Version</TableHead>
                     <TableHead className="text-right">Components</TableHead>
                     <TableHead className="text-right">Total Cost</TableHead>

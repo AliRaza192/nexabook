@@ -63,7 +63,9 @@ export default function StockMovementPage() {
       category="Inventory Reports"
       categoryHref="/reports"
     >
-      <ReportFilterBar onFilterChange={loadReport} />
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -134,11 +136,9 @@ export default function StockMovementPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="stock-movement-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Date</TableHead>
                     <TableHead>Product</TableHead>
                     <TableHead>SKU</TableHead>
                     <TableHead>Type</TableHead>

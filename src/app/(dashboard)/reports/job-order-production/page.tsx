@@ -170,11 +170,9 @@ export default function JobOrderProductionPage() {
               <p className="text-sm text-nexabook-600">Production order tracking and status overview</p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="job-order-production-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Order Number</TableHead>
                     <TableHead>BOM</TableHead>
                     <TableHead>Finished Good</TableHead>
                     <TableHead className="text-right">Qty to Produce</TableHead>

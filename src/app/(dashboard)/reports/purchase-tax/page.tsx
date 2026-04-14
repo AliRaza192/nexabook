@@ -51,7 +51,9 @@ export default function PurchaseTaxPage() {
       category="Purchase Reports"
       categoryHref="/reports"
     >
-      <ReportFilterBar onFilterChange={loadReport} />
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -122,11 +124,9 @@ export default function PurchaseTaxPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="purchase-tax-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Vendor</TableHead>
                     <TableHead className="text-right">Total Purchase Amount</TableHead>
                     <TableHead className="text-right">Tax Paid</TableHead>
                     <TableHead className="text-right">Effective Tax Rate</TableHead>

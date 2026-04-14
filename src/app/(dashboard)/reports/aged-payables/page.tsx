@@ -127,7 +127,7 @@ export default function AgedPayablesPage() {
               <p className="text-sm text-nexabook-600">Outstanding payables by aging bucket</p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="aged-payables-table">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Vendor</TableHead>

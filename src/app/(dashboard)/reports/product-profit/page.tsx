@@ -49,7 +49,9 @@ export default function ProductProfitPage() {
       category="Sales Reports"
       categoryHref="/reports"
     >
-      <ReportFilterBar onFilterChange={loadReport} />
+      <div className="print-hidden">
+        <ReportFilterBar onFilterChange={loadReport} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
@@ -124,13 +126,9 @@ export default function ProductProfitPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table id="product-profit-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Product</TableHead>
-                    <TableHead>SKU</TableHead>
-                    <TableHead className="text-right">Quantity</TableHead>
                     <TableHead className="text-right">Revenue</TableHead>
                     <TableHead className="text-right">Est. Cost (60%)</TableHead>
                     <TableHead className="text-right">Est. Profit</TableHead>

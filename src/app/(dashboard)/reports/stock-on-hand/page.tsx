@@ -87,7 +87,7 @@ export default function StockOnHandReportPage() {
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table id="stock-on-hand-table" className="w-full">
                   <thead>
                     <tr className="border-b-2 border-nexabook-200">
                       <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
