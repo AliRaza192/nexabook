@@ -14,8 +14,10 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Printer, BookOpen, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { Loader2, Printer, BookOpen, ArrowDownLeft, ArrowUpRight, TrendingUp, TrendingDown, DollarSign } from "lucide-react";
 import { getAllAccounts, getLedgerReport } from "@/lib/actions/accounts";
+import { formatPKR } from "@/lib/utils/number-format";
+import ReportExportButtons from "@/components/reports/ReportExportButtons";
 
 export default function GeneralLedgerPage() {
   const [accounts, setAccounts] = useState<{ id: string; code: string; name: string; type: string }[]>([]);
@@ -57,6 +59,18 @@ export default function GeneralLedgerPage() {
     }
   };
 
+  const formatCurrency = (value: number) => {
+    return formatPKR(value, 'south-asian');
+  };
+
+  const formatDate = (date: Date) => {
+    return new Date(date).toLocaleDateString("en-PK", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
   return (
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
@@ -66,15 +80,18 @@ export default function GeneralLedgerPage() {
             <p className="text-nexabook-600 mt-1">Detailed transaction history for any account</p>
           </div>
           {report?.data && (
-            <Button variant="outline" onClick={handlePrint} className="print:hidden">
-              <Printer className="h-4 w-4 mr-2" />Print
-            </Button>
+            <div className="flex items-center gap-2">
+              <ReportExportButtons reportTitle="General Ledger Report" reportData={report.data} />
+              <Button variant="outline" onClick={handlePrint} className="print-hidden">
+                <Printer className="h-4 w-4 mr-2" />Print
+              </Button>
+            </div>
           )}
         </div>
       </motion.div>
 
-      {/* Filters */}
-      <Card className="print:hidden">
+      {/* Filters - Hidden on print */}
+      <Card className="print-hidden">
         <CardHeader><CardTitle>Filters</CardTitle><CardDescription>Select an account and date range to view the ledger</CardDescription></CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
@@ -141,31 +158,95 @@ export default function GeneralLedgerPage() {
 
           {report.data.transactions.length > 0 && (
             <>
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <Card className="enterprise-card">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-blue-50 rounded-lg">
+                        <DollarSign className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-nexabook-600">Opening Balance</p>
+                        <p className="text-lg font-bold text-blue-700">
+                          {formatCurrency(parseFloat(report.data.closingBalance) - (parseFloat(report.data.totalDebit) - parseFloat(report.data.totalCredit)))}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="enterprise-card">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-green-50 rounded-lg">
+                        <TrendingUp className="h-5 w-5 text-green-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-nexabook-600">Total Debit</p>
+                        <p className="text-lg font-bold text-green-700">{formatCurrency(parseFloat(report.data.totalDebit))}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="enterprise-card">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-red-50 rounded-lg">
+                        <TrendingDown className="h-5 w-5 text-red-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-nexabook-600">Total Credit</p>
+                        <p className="text-lg font-bold text-red-700">{formatCurrency(parseFloat(report.data.totalCredit))}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="enterprise-card">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-nexabook-50 rounded-lg">
+                        <DollarSign className="h-5 w-5 text-nexabook-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-nexabook-600">Closing Balance</p>
+                        <p className={`text-lg font-bold ${parseFloat(report.data.closingBalance) >= 0 ? 'text-nexabook-900' : 'text-red-700'}`}>
+                          {formatCurrency(parseFloat(report.data.closingBalance))}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Transactions Table */}
               <Card>
-                <Table>
+                <Table id="report-table">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Date</TableHead>
                       <TableHead>Entry #</TableHead>
                       <TableHead>Description</TableHead>
-                      <TableHead className="text-right">Debit</TableHead>
-                      <TableHead className="text-right">Credit</TableHead>
-                      <TableHead className="text-right">Balance</TableHead>
+                      <TableHead className="text-right">Debit (Dr)</TableHead>
+                      <TableHead className="text-right">Credit (Cr)</TableHead>
+                      <TableHead className="text-right">Running Balance</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {report.data.transactions.map((tx, i) => (
                       <TableRow key={i}>
                         <TableCell className="text-sm">
-                          {new Date(tx.date).toLocaleDateString("en-PK", { year: "numeric", month: "short", day: "numeric" })}
+                          {formatDate(tx.date)}
                         </TableCell>
-                        <TableCell className="font-mono text-sm">{tx.entryNumber}</TableCell>
+                        <TableCell className="font-mono text-sm font-medium text-nexabook-900">{tx.entryNumber}</TableCell>
                         <TableCell className="text-sm text-nexabook-600 max-w-xs truncate">{tx.description}</TableCell>
                         <TableCell className="text-right">
                           {parseFloat(tx.debit) > 0 ? (
-                            <span className="flex items-center justify-end gap-1 text-green-700">
+                            <span className="flex items-center justify-end gap-1 text-green-700 font-semibold">
                               <ArrowUpRight className="h-3.5 w-3.5" />
-                              {parseFloat(tx.debit).toLocaleString("en-PK", { minimumFractionDigits: 2 })}
+                              {formatCurrency(parseFloat(tx.debit))}
                             </span>
                           ) : (
                             <span className="text-nexabook-300">—</span>
@@ -173,17 +254,17 @@ export default function GeneralLedgerPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           {parseFloat(tx.credit) > 0 ? (
-                            <span className="flex items-center justify-end gap-1 text-red-700">
+                            <span className="flex items-center justify-end gap-1 text-red-700 font-semibold">
                               <ArrowDownLeft className="h-3.5 w-3.5" />
-                              {parseFloat(tx.credit).toLocaleString("en-PK", { minimumFractionDigits: 2 })}
+                              {formatCurrency(parseFloat(tx.credit))}
                             </span>
                           ) : (
                             <span className="text-nexabook-300">—</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-sm font-semibold">
+                        <TableCell className="text-right font-semibold">
                           <span className={parseFloat(tx.balance) >= 0 ? "text-nexabook-900" : "text-red-700"}>
-                            {parseFloat(tx.balance).toLocaleString("en-PK", { minimumFractionDigits: 2 })}
+                            {formatCurrency(parseFloat(tx.balance))}
                           </span>
                         </TableCell>
                       </TableRow>
@@ -200,19 +281,19 @@ export default function GeneralLedgerPage() {
                     <div>
                       <p className="text-xs text-nexabook-500 uppercase tracking-wide">Total Debit</p>
                       <p className="text-lg font-bold text-green-700 mt-1">
-                        {parseFloat(report.data.totalDebit).toLocaleString("en-PK", { minimumFractionDigits: 2 })}
+                        {formatCurrency(parseFloat(report.data.totalDebit))}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-nexabook-500 uppercase tracking-wide">Total Credit</p>
                       <p className="text-lg font-bold text-red-700 mt-1">
-                        {parseFloat(report.data.totalCredit).toLocaleString("en-PK", { minimumFractionDigits: 2 })}
+                        {formatCurrency(parseFloat(report.data.totalCredit))}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-nexabook-500 uppercase tracking-wide">Closing Balance</p>
                       <p className={`text-lg font-bold mt-1 ${parseFloat(report.data.closingBalance) >= 0 ? "text-nexabook-900" : "text-red-700"}`}>
-                        {parseFloat(report.data.closingBalance).toLocaleString("en-PK", { minimumFractionDigits: 2 })}
+                        {formatCurrency(parseFloat(report.data.closingBalance))}
                       </p>
                     </div>
                   </div>
