@@ -14,8 +14,10 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Printer, Calculator, ArrowDownRight, ArrowUpRight, Plus } from "lucide-react";
+import { Loader2, Printer, Calculator, ArrowDownRight, ArrowUpRight, Plus, TrendingUp, TrendingDown, DollarSign } from "lucide-react";
 import { getTaxSummary, MonthlyTaxBreakdown } from "@/lib/actions/accounts";
+import { formatPKR } from "@/lib/utils/number-format";
+import ReportExportButtons from "@/components/reports/ReportExportButtons";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -28,11 +30,11 @@ function formatMonth(ym: string): string {
 }
 
 function fmt(n: string): string {
-  return parseFloat(n).toLocaleString("en-PK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatPKR(parseFloat(n), 'south-asian');
 }
 
 const DEFAULT_TAX_RATES = [
-  { name: "Standard GST Rate", rate: "17", appliedTo: "Most goods and services" },
+  { name: "Standard GST Rate", rate: "18", appliedTo: "Most goods and services" },
   { name: "Reduced Rate", rate: "5", appliedTo: "Essential items and basic goods" },
   { name: "Zero Rated", rate: "0", appliedTo: "Exports and exempt supplies" },
   { name: "Exempt", rate: "—", appliedTo: "Supplies outside tax net" },
@@ -84,15 +86,18 @@ export default function TaxPage() {
             <p className="text-nexabook-600 mt-1">Sales tax, input tax, and tax reporting</p>
           </div>
           {report?.data && (
-            <Button variant="outline" onClick={handlePrint} className="print:hidden">
-              <Printer className="h-4 w-4 mr-2" />Print Report
-            </Button>
+            <div className="flex items-center gap-2">
+              <ReportExportButtons reportTitle="Tax Summary Report" reportData={report.data} />
+              <Button variant="outline" onClick={handlePrint} className="print-hidden">
+                <Printer className="h-4 w-4 mr-2" />Print Report
+              </Button>
+            </div>
           )}
         </div>
       </motion.div>
 
-      {/* Period Selector */}
-      <Card className="print:hidden">
+      {/* Period Selector - Hidden on print */}
+      <Card className="print-hidden">
         <CardHeader><CardTitle>Period Selection</CardTitle><CardDescription>Choose the reporting period for tax summary</CardDescription></CardHeader>
         <CardContent>
           <div className="flex flex-col md:flex-row gap-4 items-end">
@@ -139,46 +144,54 @@ export default function TaxPage() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Output Tax */}
-            <Card>
+            <Card className="enterprise-card">
               <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-nexabook-500">Output Tax (Sales)</p>
-                  <ArrowUpRight className="h-5 w-5 text-green-600" />
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-green-50 rounded-lg">
+                    <TrendingUp className="h-5 w-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-nexabook-600">Output Tax (Sales)</p>
+                    <p className="text-xl font-bold text-green-700">{fmt(report.data.outputTax)}</p>
+                    <p className="text-xs text-nexabook-500 mt-1">Sales tax collected from customers</p>
+                  </div>
                 </div>
-                <p className="text-2xl font-bold text-green-700">{fmt(report.data.outputTax)}</p>
-                <p className="text-xs text-nexabook-500 mt-1">Sales tax collected from customers</p>
               </CardContent>
             </Card>
 
             {/* Input Tax */}
-            <Card>
+            <Card className="enterprise-card">
               <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-nexabook-500">Input Tax (Purchases)</p>
-                  <ArrowDownRight className="h-5 w-5 text-blue-600" />
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-50 rounded-lg">
+                    <TrendingDown className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-nexabook-600">Input Tax (Purchases)</p>
+                    <p className="text-xl font-bold text-blue-700">{fmt(report.data.inputTax)}</p>
+                    <p className="text-xs text-nexabook-500 mt-1">Input tax recoverable from suppliers</p>
+                  </div>
                 </div>
-                <p className="text-2xl font-bold text-blue-700">{fmt(report.data.inputTax)}</p>
-                <p className="text-xs text-nexabook-500 mt-1">Input tax recoverable from suppliers</p>
               </CardContent>
             </Card>
 
             {/* Net Tax Payable */}
-            <Card>
+            <Card className="enterprise-card">
               <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-nexabook-500">Net Tax Payable</p>
-                  {parseFloat(report.data.netTaxPayable) > 0 ? (
-                    <Badge className="bg-red-100 text-red-800">You Owe</Badge>
-                  ) : parseFloat(report.data.netTaxPayable) < 0 ? (
-                    <Badge className="bg-green-100 text-green-800">Refund Due</Badge>
-                  ) : (
-                    <Badge variant="outline">Balanced</Badge>
-                  )}
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${parseFloat(report.data.netTaxPayable) >= 0 ? 'bg-red-50' : 'bg-green-50'}`}>
+                    <DollarSign className={`h-5 w-5 ${parseFloat(report.data.netTaxPayable) >= 0 ? 'text-red-600' : 'text-green-600'}`} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-nexabook-600">Net Tax Payable</p>
+                    <p className={`text-xl font-bold ${parseFloat(report.data.netTaxPayable) >= 0 ? 'text-red-700' : 'text-green-700'}`}>
+                      {fmt(report.data.netTaxPayable)}
+                    </p>
+                    <p className="text-xs text-nexabook-500 mt-1">
+                      {parseFloat(report.data.netTaxPayable) > 0 ? 'Tax payable to FBR' : parseFloat(report.data.netTaxPayable) < 0 ? 'Tax refund due' : 'Balanced'}
+                    </p>
+                  </div>
                 </div>
-                <p className={`text-2xl font-bold ${parseFloat(report.data.netTaxPayable) >= 0 ? "text-red-700" : "text-green-700"}`}>
-                  {fmt(report.data.netTaxPayable)}
-                </p>
-                <p className="text-xs text-nexabook-500 mt-1">Output Tax − Input Tax</p>
               </CardContent>
             </Card>
           </div>
