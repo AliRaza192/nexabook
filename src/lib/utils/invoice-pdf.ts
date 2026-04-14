@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatPakistaniCurrency, formatAmountWords } from '@/lib/utils/number-format';
+import { generateFBRQRCodeBuffer, isFBREligible, FBRQRData } from '@/lib/utils/fbr-qr';
 
 export interface InvoicePDFData {
   // Organization details
@@ -359,6 +360,53 @@ export async function generateInvoicePDF(data: InvoicePDFData): Promise<Blob> {
   }
 
   y = Math.max(y + 60, calcY + 65);
+
+  // ==================== FBR QR CODE ====================
+  // Check if organization has STRN for FBR compliance
+  if (isFBREligible({ ntn: data.orgNtn, strn: data.orgStrn })) {
+    try {
+      // Generate FBR QR code
+      const qrData: FBRQRData = {
+        ntn: data.orgNtn!,
+        strn: data.orgStrn!,
+        invoiceNumber: data.invoiceNumber,
+        invoiceDate: data.issueDate,
+        totalAmount: parseFloat(data.netAmount),
+        taxAmount: parseFloat(data.taxAmount),
+      };
+
+      const qrBuffer = await generateFBRQRCodeBuffer(qrData, {
+        size: 100,
+        margin: 1,
+      });
+
+      // QR code dimensions and position (bottom right corner, near totals)
+      const qrSize = 30; // mm
+      const qrX = pageWidth - margin - qrSize;
+      const qrY = Math.max(y - 10, totalY + 25);
+
+      // Add QR code background box
+      doc.setFillColor(...white);
+      doc.roundedRect(qrX - 3, qrY - 3, qrSize + 6, qrSize + 12, 2, 2, 'F');
+      
+      doc.setDrawColor(...border);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(qrX - 3, qrY - 3, qrSize + 6, qrSize + 12, 2, 2, 'S');
+
+      // Add QR code image
+      const qrImageDataUrl = 'data:image/png;base64,' + qrBuffer.toString('base64');
+      doc.addImage(qrImageDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+
+      // Add label below QR code
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...textLight);
+      doc.text('Verify at FBR Portal', qrX + qrSize / 2, qrY + qrSize + 5, { align: 'center' });
+    } catch (error) {
+      console.error('Failed to generate FBR QR code:', error);
+      // Continue without QR code if generation fails
+    }
+  }
 
   // ==================== AMOUNT IN WORDS ====================
   if (y > pageHeight - 50) {

@@ -54,6 +54,9 @@ import {
 import { getProducts } from "@/lib/actions/inventory";
 import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
 import { getInvoiceWithDetails } from "@/lib/actions/sales";
+import { getCompanySettings } from "@/lib/actions/accounts";
+import { generateFBRQRCode, isFBREligible } from "@/lib/utils/fbr-qr";
+import { Shield, ShieldCheck, QrCode } from "lucide-react";
 
 interface Customer {
   id: string;
@@ -208,6 +211,11 @@ export default function NewInvoicePage() {
   const [globalDiscountPct, setGlobalDiscountPct] = useState("0");
   const [globalDiscountAmt, setGlobalDiscountAmt] = useState("0");
 
+  // Organization & QR code state
+  const [orgData, setOrgData] = useState<{ ntn: string | null; strn: string | null }>({ ntn: null, strn: null });
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+  const [qrLoading, setQrLoading] = useState(false);
+
   // Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
     { productId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" },
@@ -218,13 +226,17 @@ export default function NewInvoicePage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [customersRes, productsRes, invoiceNumRes, cashBankRes] = await Promise.all([
-          getCustomers(), getProducts(), getNextInvoiceNumber(), getCashBankAccounts(),
+        const [customersRes, productsRes, invoiceNumRes, cashBankRes, orgRes] = await Promise.all([
+          getCustomers(), getProducts(), getNextInvoiceNumber(), getCashBankAccounts(), getCompanySettings(),
         ]);
         if (customersRes.success && customersRes.data) setCustomers(customersRes.data as Customer[]);
         if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
         if (invoiceNumRes.success && invoiceNumRes.data) setInvoiceNumber(invoiceNumRes.data as string);
         if (cashBankRes.success && cashBankRes.data) setCashBankAccounts(cashBankRes.data as CashBankAccount[]);
+        if (orgRes.success && orgRes.data) {
+          const org = orgRes.data as any;
+          setOrgData({ ntn: org.ntn || null, strn: org.strn || null });
+        }
       } catch (error) {
       } finally {
         setLoading(false);
@@ -293,6 +305,31 @@ export default function NewInvoicePage() {
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   };
+
+  // Generate QR code when org data or invoice details change
+  useEffect(() => {
+    if (isFBREligible(orgData) && netAmount > 0) {
+      setQrLoading(true);
+      generateFBRQRCode({
+        ntn: orgData.ntn!,
+        strn: orgData.strn!,
+        invoiceNumber: invoiceNumber || "PENDING",
+        invoiceDate: new Date(issueDate),
+        totalAmount: netAmount,
+        taxAmount: totalTax,
+      }, { size: 120 })
+        .then((dataUrl) => {
+          setQrCodeDataUrl(dataUrl);
+          setQrLoading(false);
+        })
+        .catch((error) => {
+          console.error("Failed to generate QR code:", error);
+          setQrLoading(false);
+        });
+    } else {
+      setQrCodeDataUrl("");
+    }
+  }, [orgData, invoiceNumber, issueDate, netAmount, totalTax]);
 
   const handleSave = async (action: "continue" | "close" | "approve" | "approve-print" | "approve-download") => {
     if (!customerId) { alert("Please select a customer"); return; }
@@ -508,6 +545,56 @@ export default function NewInvoicePage() {
               <Button variant="outline" className="w-full h-10 border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400 font-semibold" onClick={() => router.push("/sales/invoices")}><X className="mr-2 h-4 w-4" />CLOSE</Button>
             </CardContent>
           </Card>
+
+          {/* FBR QR Code Preview */}
+          {isFBREligible(orgData) && (
+            <Card className="border-green-200 shadow-sm bg-green-50/30">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-green-600" />
+                    FBR QR Code
+                  </h3>
+                  <Badge className="bg-green-100 text-green-800 border-green-200 text-xs">
+                    Compliant
+                  </Badge>
+                </div>
+                
+                {qrLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-green-600" />
+                  </div>
+                ) : qrCodeDataUrl ? (
+                  <div className="bg-white p-3 rounded-lg border border-green-200">
+                    <img src={qrCodeDataUrl} alt="FBR QR Code" className="w-full h-auto" />
+                    <p className="text-xs text-center text-gray-500 mt-2">Verify at FBR Portal</p>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center py-8 bg-white rounded-lg border border-gray-200">
+                    <div className="text-center">
+                      <QrCode className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                      <p className="text-xs text-gray-500">QR code will appear here</p>
+                      <p className="text-xs text-gray-400 mt-1">when invoice is complete</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-xs text-gray-600 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-600" />
+                    <span>NTN: {orgData.ntn}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-600" />
+                    <span>STRN: {orgData.strn}</span>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 italic">
+                  This QR code will appear on the final PDF invoice
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>

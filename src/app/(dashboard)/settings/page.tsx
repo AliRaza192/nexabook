@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import {
   Building2, Hash, Percent, Users, Save, Upload, Plus, Trash2, CheckCircle,
+  Shield, ShieldCheck,
 } from "lucide-react";
 import { getCompanySettings, updateCompanySettings } from "@/lib/actions/accounts";
 
@@ -36,6 +37,9 @@ export default function SettingsPage() {
     currency: "PKR",
     fiscalYearStart: "07-01",
   });
+
+  // Check FBR compliance
+  const isFBRCompliant = form.ntn.trim() !== "" && form.strn.trim() !== "";
 
   useEffect(() => {
     async function load() {
@@ -112,8 +116,18 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold text-nexabook-900">System Settings</h1>
-        <p className="text-nexabook-600 mt-1">Configure company profile, numbering, tax, and user access</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-nexabook-900">System Settings</h1>
+            <p className="text-nexabook-600 mt-1">Configure company profile, numbering, tax, and user access</p>
+          </div>
+          {isFBRCompliant && (
+            <Badge className="bg-green-100 text-green-800 border-green-200 px-4 py-2">
+              <ShieldCheck className="h-4 w-4 mr-2" />
+              FBR Compliant
+            </Badge>
+          )}
+        </div>
       </motion.div>
 
       {/* Save feedback */}
@@ -159,10 +173,30 @@ export default function SettingsPage() {
               <Separator />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Company Name*</Label><Input value={form.name} onChange={set("name")} /></div>
-                <div className="space-y-2"><Label>Slug</Label><Input value={form.slug} disabled className="bg-nexabook-50" /></div>
-                <div className="space-y-2"><Label>NTN (National Tax Number)</Label><Input value={form.ntn} onChange={set("ntn")} placeholder="1234567-8" /></div>
-                <div className="space-y-2"><Label>STRN (Sales Tax Registration)</Label><Input value={form.strn} onChange={set("strn")} placeholder="1234567890123" /></div>
+                <div className="space-y-2">
+                  <Label>Company Name*</Label>
+                  <Input value={form.name} onChange={set("name")} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Slug</Label>
+                  <Input value={form.slug} disabled className="bg-nexabook-50" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    NT N (National Tax Number)
+                    {form.ntn.trim() && <ShieldCheck className="h-4 w-4 text-green-600" />}
+                  </Label>
+                  <Input value={form.ntn} onChange={set("ntn")} placeholder="1234567-8" />
+                  <p className="text-xs text-nexabook-500">Required for FBR QR Code on invoices</p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    STR N (Sales Tax Registration Number)
+                    {form.strn.trim() && <ShieldCheck className="h-4 w-4 text-green-600" />}
+                  </Label>
+                  <Input value={form.strn} onChange={set("strn")} placeholder="1234567890123" />
+                  <p className="text-xs text-nexabook-500">Required for FBR QR Code on invoices</p>
+                </div>
                 <div className="space-y-2"><Label>Phone</Label><Input value={form.phone} onChange={set("phone")} placeholder="+92-XXX-XXXXXXX" /></div>
                 <div className="space-y-2"><Label>Email</Label><Input type="email" value={form.email} onChange={set("email")} placeholder="info@company.com" /></div>
                 <div className="space-y-2"><Label>Website</Label><Input value={form.website} onChange={set("website")} placeholder="https://company.com" /></div>
@@ -231,6 +265,50 @@ export default function SettingsPage() {
 
         {/* TAX SETTINGS */}
         <TabsContent value="tax" className="space-y-6">
+          {/* FBR Compliance Status */}
+          <Card className={isFBRCompliant ? "border-green-200 bg-green-50/30" : "border-amber-200 bg-amber-50/30"}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                {isFBRCompliant ? (
+                  <>
+                    <ShieldCheck className="h-5 w-5 text-green-600" />
+                    FBR Compliance Status
+                  </>
+                ) : (
+                  <>
+                    <Shield className="h-5 w-5 text-amber-600" />
+                    FBR Compliance Required
+                  </>
+                )}
+              </CardTitle>
+              <CardDescription>
+                {isFBRCompliant 
+                  ? "Your organization is configured for FBR-compliant invoicing with QR codes"
+                  : "Configure NTN and STRN in Company Profile to enable FBR QR codes on invoices"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-6">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`h-3 w-3 rounded-full ${form.ntn.trim() ? "bg-green-600" : "bg-gray-300"}`} />
+                    <span className="text-sm font-medium">NTN: {form.ntn || "Not configured"}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-3 w-3 rounded-full ${form.strn.trim() ? "bg-green-600" : "bg-gray-300"}`} />
+                    <span className="text-sm font-medium">STRN: {form.strn || "Not configured"}</span>
+                  </div>
+                </div>
+                {isFBRCompliant && (
+                  <Badge className="bg-green-600 text-white">
+                    <ShieldCheck className="h-3 w-3 mr-1" />
+                    Compliant
+                  </Badge>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader><CardTitle>Global Tax Configuration</CardTitle><CardDescription>Set default GST and WHT rates applied across the system</CardDescription></CardHeader>
             <CardContent className="space-y-6">
