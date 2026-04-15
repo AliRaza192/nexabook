@@ -27,6 +27,36 @@ export interface BankAccountFormData {
   notes?: string;
 }
 
+/**
+ * Get bank accounts from Chart of Accounts (asset type with Bank/Cash in name or code)
+ */
+export async function getBankCOAAccounts() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const accounts = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(
+        eq(chartOfAccounts.orgId, orgId),
+        eq(chartOfAccounts.type, "asset"),
+        eq(chartOfAccounts.isActive, true),
+        or(
+          ilike(chartOfAccounts.name, "%bank%"),
+          ilike(chartOfAccounts.name, "%cash%"),
+          ilike(chartOfAccounts.code, "%bank%"),
+          ilike(chartOfAccounts.code, "%cash%"),
+        )!
+      ))
+      .orderBy(chartOfAccounts.name);
+
+    return { success: true, data: accounts };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch bank accounts from COA" };
+  }
+}
+
 export async function getBankAccounts(searchQuery?: string) {
   try {
     const orgId = await getCurrentOrgId();
