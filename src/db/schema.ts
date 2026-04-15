@@ -1143,6 +1143,60 @@ export const depreciationLogsRelations = relations(depreciationLogs, ({ one }) =
 }));
 
 // ==========================================
+// LEAVE MANAGEMENT TABLES
+// ==========================================
+
+// Leave Types
+export const leaveTypes = pgTable('leave_types', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 100 }).notNull(), // Annual, Sick, Casual, Unpaid
+  daysAllowed: integer('days_allowed').notNull().default(0), // Annual: 14, Sick: 7, etc.
+  isPaid: boolean('is_paid').notNull().default(true),
+  carryForward: boolean('carry_forward').notNull().default(false),
+  requiresApproval: boolean('requires_approval').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Leave Applications
+export const leaveApplications = pgTable('leave_applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  employeeId: uuid('employee_id').references(() => employees.id).notNull(),
+  leaveTypeId: uuid('leave_type_id').references(() => leaveTypes.id).notNull(),
+  fromDate: timestamp('from_date').notNull(),
+  toDate: timestamp('to_date').notNull(),
+  totalDays: integer('total_days').notNull(),
+  reason: text('reason').notNull(),
+  status: varchar('status', { length: 30 }).notNull().default('pending'), // pending, approved, rejected
+  appliedBy: varchar('applied_by', { length: 255 }),
+  reviewedBy: varchar('reviewed_by', { length: 255 }),
+  reviewedAt: timestamp('reviewed_at'),
+  rejectionReason: text('rejection_reason'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Relations for Leave Types
+export const leaveTypesRelations = relations(leaveTypes, ({ many }) => ({
+  applications: many(leaveApplications),
+}));
+
+// Relations for Leave Applications
+export const leaveApplicationsRelations = relations(leaveApplications, ({ one }) => ({
+  employee: one(employees, {
+    fields: [leaveApplications.employeeId],
+    references: [employees.id],
+  }),
+  leaveType: one(leaveTypes, {
+    fields: [leaveApplications.leaveTypeId],
+    references: [leaveTypes.id],
+  }),
+}));
+
+// ==========================================
 // CREDIT & DEBIT NOTES TABLES
 // ==========================================
 
@@ -1949,6 +2003,11 @@ export const schema = {
   depreciationLogs,
   fixedAssetsRelations,
   depreciationLogsRelations,
+  // Leave Management
+  leaveTypes,
+  leaveApplications,
+  leaveTypesRelations,
+  leaveApplicationsRelations,
   // Inventory Depth
   stockMovements,
   stockAdjustments,

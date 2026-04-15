@@ -13,6 +13,7 @@ import {
   TrendingDown,
   Receipt,
   Eye,
+  FileDown,
 } from "lucide-react";
 import { formatPKR } from "@/lib/utils/number-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,8 +39,11 @@ import {
   getPayrollCalculations,
   generateAndApprovePayroll,
   getPayrollRuns,
+  getPayslips,
+  getEmployees,
   type PayrollCalculation,
 } from "@/lib/actions/hr-payroll";
+import { downloadPayslip } from "@/lib/utils/payslip-pdf";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -57,16 +61,27 @@ export default function RunPayrollPage() {
   const [successDialogOpen, setSuccessDialogOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [payrollRuns, setPayrollRuns] = useState<any[]>([]);
+  const [processedPayrolls, setProcessedPayrolls] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [downloadingPayslip, setDownloadingPayslip] = useState<string | null>(null);
 
   // Load payroll runs
   useEffect(() => {
     loadPayrollRuns();
+    loadEmployees();
   }, []);
 
   const loadPayrollRuns = async () => {
     const result = await getPayrollRuns();
     if (result.success && result.data) {
       setPayrollRuns(result.data);
+    }
+  };
+
+  const loadEmployees = async () => {
+    const result = await getEmployees();
+    if (result.success && result.data) {
+      setEmployees(result.data);
     }
   };
 
@@ -113,6 +128,80 @@ export default function RunPayrollPage() {
   // Format currency
   const formatCurrency = (value: number) => {
     return formatPKR(value, 'south-asian');
+  };
+
+  // Download payslip PDF
+  const handleDownloadPayslip = async (payrollRunId: string, employeeId: string, period: string) => {
+    setDownloadingPayslip(employeeId);
+    try {
+      // If no payrollRunId (still in draft), use current calculations
+      if (!payrollRunId) {
+        const calculation = calculations.find(c => c.employeeId === employeeId);
+        if (calculation) {
+          const employee = employees.find(e => e.id === employeeId);
+          const companyName = "NexaBook";
+          const companyAddress = "Karachi, Pakistan";
+          
+          // Create a payslip-like object from calculation
+          const payslipData = {
+            id: "draft",
+            employeeId: calculation.employeeId,
+            employeeName: calculation.employeeName,
+            employeeCode: calculation.employeeCode,
+            designation: calculation.designation || "",
+            department: calculation.department || "",
+            cnic: employee?.cnic || "",
+            bankName: employee?.bankName || "",
+            accountNumber: employee?.accountNumber || "",
+            basicSalary: calculation.basicSalary.toString(),
+            houseRent: calculation.houseRent.toString(),
+            medicalAllowance: calculation.medicalAllowance.toString(),
+            conveyanceAllowance: calculation.conveyanceAllowance.toString(),
+            otherAllowances: calculation.otherAllowances.toString(),
+            overtimePay: calculation.overtimePay.toString(),
+            bonus: "0",
+            totalEarnings: calculation.totalEarnings.toString(),
+            eobiDeduction: calculation.eobiDeduction.toString(),
+            incomeTax: calculation.incomeTax.toString(),
+            providentFund: "0",
+            otherDeductions: "0",
+            unpaidLeaveDeduction: calculation.unpaidLeaveDeduction.toString(),
+            totalDeductions: calculation.totalDeductions.toString(),
+            netSalary: calculation.netSalary.toString(),
+            presentDays: calculation.presentDays.toString(),
+            absentDays: calculation.absentDays.toString(),
+            leaveDays: "0",
+            unpaidLeaveDays: calculation.unpaidLeaveDays.toString(),
+            totalWorkingDays: calculation.totalWorkingDays.toString(),
+          };
+          
+          downloadPayslip(payslipData, employee, companyName, companyAddress, period);
+        }
+        return;
+      }
+      
+      // Fetch payslips for this payroll run
+      const result = await getPayslips(payrollRunId);
+      if (result.success && result.data) {
+        const payslips = result.data as any[];
+        const payslip = payslips.find((p: any) => p.employeeId === employeeId);
+        
+        if (payslip) {
+          const employee = employees.find(e => e.id === employeeId);
+          const companyName = "NexaBook";
+          const companyAddress = "Karachi, Pakistan";
+          
+          downloadPayslip(payslip, employee, companyName, companyAddress, period);
+        } else {
+          alert("Payslip not found for this employee");
+        }
+      }
+    } catch (error) {
+      console.error("Failed to download payslip:", error);
+      alert("Failed to download payslip");
+    } finally {
+      setDownloadingPayslip(null);
+    }
   };
 
   // Calculate totals
@@ -286,6 +375,7 @@ export default function RunPayrollPage() {
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Deductions</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-slate-700">Net Payable</th>
                     <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Attendance</th>
+                    <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Payslip</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -329,6 +419,29 @@ export default function RunPayrollPage() {
                               <Badge className="bg-red-100 text-red-800">{calc.absentDays}A</Badge>
                             )}
                           </div>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-blue-700 border-blue-300 hover:bg-blue-50"
+                            disabled={downloadingPayslip === calc.employeeId}
+                            onClick={() => {
+                              const period = `${MONTHS[selectedMonth - 1]} ${selectedYear}`;
+                              // For draft calculations, pass empty string
+                              handleDownloadPayslip(
+                                "",
+                                calc.employeeId,
+                                period
+                              );
+                            }}
+                          >
+                            {downloadingPayslip === calc.employeeId ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <FileDown className="h-3 w-3" />
+                            )}
+                          </Button>
                         </td>
                       </motion.tr>
                     );
