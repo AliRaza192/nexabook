@@ -1197,6 +1197,58 @@ export const leaveApplicationsRelations = relations(leaveApplications, ({ one })
 }));
 
 // ==========================================
+// PHYSICAL STOCK COUNT (STOCKTAKE) TABLES
+// ==========================================
+
+// Stock Counts (Header)
+export const stockCounts = pgTable('stock_counts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  countNumber: varchar('count_number', { length: 50 }).notNull(),
+  countDate: timestamp('count_date').notNull(),
+  status: varchar('status', { length: 30 }).notNull().default('draft'), // draft, completed
+  notes: text('notes'),
+  createdBy: varchar('created_by', { length: 255 }),
+  completedAt: timestamp('completed_at'),
+  completedBy: varchar('completed_by', { length: 255 }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Stock Count Items (Lines)
+export const stockCountItems = pgTable('stock_count_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  stockCountId: uuid('stock_count_id').references(() => stockCounts.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  systemQty: decimal('system_qty', { precision: 14, scale: 2 }).notNull().default('0'),
+  countedQty: decimal('counted_qty', { precision: 14, scale: 2 }),
+  variance: decimal('variance', { precision: 14, scale: 2 }),
+  unitCost: decimal('unit_cost', { precision: 12, scale: 2 }).default('0'),
+  varianceValue: decimal('variance_value', { precision: 14, scale: 2 }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Relations for Stock Counts
+export const stockCountsRelations = relations(stockCounts, ({ many }) => ({
+  items: many(stockCountItems),
+}));
+
+// Relations for Stock Count Items
+export const stockCountItemsRelations = relations(stockCountItems, ({ one }) => ({
+  stockCount: one(stockCounts, {
+    fields: [stockCountItems.stockCountId],
+    references: [stockCounts.id],
+  }),
+  product: one(products, {
+    fields: [stockCountItems.productId],
+    references: [products.id],
+  }),
+}));
+
+// ==========================================
 // CREDIT & DEBIT NOTES TABLES
 // ==========================================
 
@@ -1933,6 +1985,10 @@ export type StockAdjustmentLine = typeof stockAdjustmentLines.$inferSelect;
 export type NewStockAdjustmentLine = typeof stockAdjustmentLines.$inferInsert;
 export type StockValuationLog = typeof stockValuationLogs.$inferSelect;
 export type NewStockValuationLog = typeof stockValuationLogs.$inferInsert;
+export type StockCount = typeof stockCounts.$inferSelect;
+export type NewStockCount = typeof stockCounts.$inferInsert;
+export type StockCountItem = typeof stockCountItems.$inferSelect;
+export type NewStockCountItem = typeof stockCountItems.$inferInsert;
 
 // Export complete schema
 export const schema = {
@@ -2008,6 +2064,11 @@ export const schema = {
   leaveApplications,
   leaveTypesRelations,
   leaveApplicationsRelations,
+  // Physical Stock Count
+  stockCounts,
+  stockCountItems,
+  stockCountsRelations,
+  stockCountItemsRelations,
   // Inventory Depth
   stockMovements,
   stockAdjustments,
