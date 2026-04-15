@@ -13,7 +13,7 @@ import {
   invoiceItems,
   productCategories
 } from "@/db/schema";
-import { eq, and, desc, or, ilike } from "drizzle-orm";
+import { eq, and, desc, or, ilike, sum, gte, lte, sql, count as countFn } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
@@ -613,5 +613,405 @@ export async function getPosCategories() {
     return { success: true, data: categories };
   } catch (error) {
     return { success: false, error: "Failed to fetch categories" };
+  }
+}
+
+// ==========================================
+// POS X-REPORT AND Z-REPORT
+// ==========================================
+
+export type PosReportType = 'X' | 'Z';
+
+export interface PosReportData {
+  shiftId: string;
+  reportType: PosReportType;
+  reportNumber: string;
+  generatedAt: Date;
+  cashierName: string;
+  openingTime: Date;
+  closingTime?: Date | null;
+  // Sales Summary
+  totalSales: number;
+  totalTransactions: number;
+  totalReturns: number;
+  totalDiscounts: number;
+  totalTaxCollected: number;
+  netSales: number;
+  // Payment Breakdown
+  cashSales: number;
+  cashTransactions: number;
+  cardSales: number;
+  cardTransactions: number;
+  // Top Products
+  topProducts: {
+    name: string;
+    sku: string;
+    quantity: number;
+    revenue: number;
+  }[];
+  // Shift Financials
+  openingCash: number;
+  expectedCash: number;
+  actualCash?: number;
+  variance?: number;
+}
+
+export async function generatePOSReport(
+  shiftId: string,
+  reportType: PosReportType
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const { userId } = await auth();
+    if (!userId) return { success: false, error: "Not authenticated" };
+
+    // Get the shift details
+    const [shift] = await db
+      .select()
+      .from(journalEntries)
+      .where(and(
+        eq(journalEntries.id, shiftId),
+        eq(journalEntries.orgId, orgId),
+        eq(journalEntries.referenceType, 'pos_shift')
+      ))
+      .limit(1);
+
+    if (!shift) {
+      return { success: false, error: "Shift not found" };
+    }
+
+    // Get cashier name from profile
+    const [profile] = await db
+      .select({
+        fullName: profiles.fullName,
+      })
+      .from(profiles)
+      .where(eq(profiles.id, shift.referenceId as any))
+      .limit(1);
+
+    const cashierName = profile?.fullName || 'Cashier';
+
+    // Determine the time range for this shift
+    const openingTime = shift.createdAt;
+    const closingTime = reportType === 'Z' ? new Date() : shift.createdAt;
+
+    // Get opening cash amount from the opening journal entry
+    const [openingEntry] = await db
+      .select()
+      .from(journalEntries)
+      .where(and(
+        eq(journalEntries.orgId, orgId),
+        eq(journalEntries.referenceType, 'pos_shift_opening'),
+        eq(journalEntries.referenceId, shiftId as any)
+      ))
+      .limit(1);
+
+    let openingCash = 0;
+    if (openingEntry) {
+      const [openingLine] = await db
+        .select({
+          debitAmount: journalEntryLines.debitAmount,
+        })
+        .from(journalEntryLines)
+        .where(eq(journalEntryLines.journalEntryId, openingEntry.id))
+        .limit(1);
+
+      openingCash = openingLine ? parseFloat(openingLine.debitAmount || '0') : 0;
+    }
+
+    // Get all POS invoices for this shift
+    const shiftInvoices = await db
+      .select({
+        id: invoices.id,
+        invoiceNumber: invoices.invoiceNumber,
+        grossAmount: invoices.grossAmount,
+        discountAmount: invoices.discountAmount,
+        taxAmount: invoices.taxAmount,
+        netAmount: invoices.netAmount,
+        balanceAmount: invoices.balanceAmount,
+        createdAt: invoices.createdAt,
+      })
+      .from(invoices)
+      .where(and(
+        eq(invoices.orgId, orgId),
+        gte(invoices.createdAt, openingTime),
+        lte(invoices.createdAt, closingTime),
+        ilike(invoices.invoiceNumber, 'POS-%')
+      ));
+
+    // Calculate totals
+    let totalSales = 0;
+    let totalTransactions = shiftInvoices.length;
+    let totalReturns = 0;
+    let totalDiscounts = 0;
+    let totalTaxCollected = 0;
+    let cashSales = 0;
+    let cashTransactions = 0;
+    let cardSales = 0;
+    let cardTransactions = 0;
+
+    // Track product sales for top products
+    const productSales: Record<string, { name: string; sku: string; quantity: number; revenue: number }> = {};
+
+    for (const invoice of shiftInvoices) {
+      totalSales += parseFloat(invoice.netAmount || '0');
+      totalDiscounts += parseFloat(invoice.discountAmount || '0');
+      totalTaxCollected += parseFloat(invoice.taxAmount || '0');
+
+      // Determine payment method based on balance
+      const balance = parseFloat(invoice.balanceAmount || '0');
+      if (balance <= 0) {
+        // Fully paid - assume cash by default for POS
+        cashSales += parseFloat(invoice.netAmount || '0');
+        cashTransactions++;
+      }
+
+      // Get invoice items for top products
+      const items = await db
+        .select({
+          productId: invoiceItems.productId,
+          productName: invoiceItems.description,
+          quantity: invoiceItems.quantity,
+          lineTotal: invoiceItems.lineTotal,
+          productSku: products.sku,
+          productNameFull: products.name,
+        })
+        .from(invoiceItems)
+        .leftJoin(products, eq(invoiceItems.productId, products.id))
+        .where(eq(invoiceItems.invoiceId, invoice.id));
+
+      for (const item of items) {
+        if (!item.productId) continue;
+        const qty = parseFloat(item.quantity || '0');
+        const rev = parseFloat(item.lineTotal || '0');
+        const name = item.productNameFull || item.productName || 'Unknown';
+        const sku = item.productSku || 'N/A';
+
+        if (productSales[item.productId]) {
+          productSales[item.productId].quantity += qty;
+          productSales[item.productId].revenue += rev;
+        } else {
+          productSales[item.productId] = { name, sku, quantity: qty, revenue: rev };
+        }
+      }
+    }
+
+    // Get top 5 products
+    const topProducts = Object.values(productSales)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+
+    // Calculate net sales
+    const netSales = totalSales - totalReturns - totalDiscounts + totalTaxCollected;
+
+    // Calculate expected cash (opening + cash sales)
+    const expectedCash = openingCash + cashSales;
+
+    // Generate report number
+    const reportNumber = `${reportType}-RPT-${Date.now()}`;
+
+    const reportData: PosReportData = {
+      shiftId,
+      reportType,
+      reportNumber,
+      generatedAt: new Date(),
+      cashierName,
+      openingTime,
+      closingTime: reportType === 'Z' ? new Date() : undefined,
+      totalSales,
+      totalTransactions,
+      totalReturns,
+      totalDiscounts,
+      totalTaxCollected,
+      netSales,
+      cashSales,
+      cashTransactions,
+      cardSales,
+      cardTransactions,
+      topProducts,
+      openingCash,
+      expectedCash,
+    };
+
+    // If Z-Report, close the shift
+    if (reportType === 'Z') {
+      // Update shift to closed
+      await db
+        .update(journalEntries)
+        .set({
+          description: 'closed',
+        })
+        .where(eq(journalEntries.id, shiftId));
+
+      // Create closing journal entry
+      const [posCashAccount] = await db
+        .select()
+        .from(chartOfAccounts)
+        .where(and(
+          eq(chartOfAccounts.orgId, orgId),
+          eq(chartOfAccounts.name, 'Cash')
+        ))
+        .limit(1);
+
+      if (posCashAccount) {
+        const [journalEntry] = await db
+          .insert(journalEntries)
+          .values({
+            orgId,
+            entryNumber: `POS-Z-${Date.now()}`,
+            entryDate: new Date(),
+            referenceType: 'pos_shift_closing',
+            referenceId: shiftId,
+            description: `POS Z-Report Closing - ${reportNumber}`,
+          })
+          .returning();
+      }
+
+      // Audit log
+      await db.insert(auditLogs).values({
+        orgId,
+        userId,
+        action: 'POS_Z_REPORT_GENERATED',
+        entityType: 'pos_shift',
+        entityId: shiftId,
+        changes: JSON.stringify({ reportNumber, totalSales, netSales }),
+      });
+
+      revalidatePath('/pos');
+    }
+
+    return { success: true, data: reportData, message: `${reportType}-Report generated successfully` };
+  } catch (error) {
+    console.error("Error generating POS report:", error);
+    return { success: false, error: "Failed to generate POS report" };
+  }
+}
+
+// Get POS shift history
+export async function getPosShiftHistory() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const { userId } = await auth();
+    if (!userId) return { success: false, error: "Not authenticated" };
+
+    // Get profile ID
+    const userProfile = await db
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(eq(profiles.userId, userId))
+      .limit(1);
+
+    if (userProfile.length === 0) {
+      return { success: false, error: "Profile not found" };
+    }
+
+    const shifts = await db
+      .select()
+      .from(journalEntries)
+      .where(and(
+        eq(journalEntries.orgId, orgId),
+        eq(journalEntries.referenceType, 'pos_shift'),
+        eq(journalEntries.referenceId, userProfile[0].id)
+      ))
+      .orderBy(desc(journalEntries.createdAt))
+      .limit(20);
+
+    return { success: true, data: shifts };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch shift history" };
+  }
+}
+
+// Get current open shift details with summary
+export async function getCurrentShiftDetails() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const { userId } = await auth();
+    if (!userId) return { success: false, error: "Not authenticated" };
+
+    // Get profile ID
+    const userProfile = await db
+      .select({ id: profiles.id })
+      .from(profiles)
+      .where(eq(profiles.userId, userId))
+      .limit(1);
+
+    if (userProfile.length === 0) {
+      return { success: false, error: "Profile not found" };
+    }
+
+    // Get open shift
+    const [openShift] = await db
+      .select()
+      .from(journalEntries)
+      .where(and(
+        eq(journalEntries.orgId, orgId),
+        eq(journalEntries.referenceType, 'pos_shift'),
+        eq(journalEntries.referenceId, userProfile[0].id),
+        eq(journalEntries.description as any, 'open')
+      ))
+      .orderBy(desc(journalEntries.createdAt))
+      .limit(1);
+
+    if (!openShift) {
+      return { success: true, data: null };
+    }
+
+    // Get opening cash
+    const [openingEntry] = await db
+      .select()
+      .from(journalEntries)
+      .where(and(
+        eq(journalEntries.orgId, orgId),
+        eq(journalEntries.referenceType, 'pos_shift_opening'),
+        eq(journalEntries.referenceId, openShift.id as any)
+      ))
+      .limit(1);
+
+    let openingCash = 0;
+    if (openingEntry) {
+      const [openingLine] = await db
+        .select({ debitAmount: journalEntryLines.debitAmount })
+        .from(journalEntryLines)
+        .where(eq(journalEntryLines.journalEntryId, openingEntry.id))
+        .limit(1);
+      openingCash = openingLine ? parseFloat(openingLine.debitAmount || '0') : 0;
+    }
+
+    // Get today's sales for this shift
+    const todayInvoices = await db
+      .select({
+        netAmount: invoices.netAmount,
+      })
+      .from(invoices)
+      .where(and(
+        eq(invoices.orgId, orgId),
+        gte(invoices.createdAt, openShift.createdAt),
+        ilike(invoices.invoiceNumber, 'POS-%')
+      ));
+
+    let totalSalesToday = 0;
+    let transactionCount = todayInvoices.length;
+    for (const inv of todayInvoices) {
+      totalSalesToday += parseFloat(inv.netAmount || '0');
+    }
+
+    return {
+      success: true,
+      data: {
+        shift: openShift,
+        openingCash,
+        totalSalesToday,
+        transactionCount,
+      },
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch shift details" };
   }
 }

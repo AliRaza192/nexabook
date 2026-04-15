@@ -18,6 +18,8 @@ import {
   Package,
   Calculator,
   Receipt,
+  FileText,
+  AlertTriangle,
 } from "lucide-react";
 import { formatPKR } from "@/lib/utils/number-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,7 +42,11 @@ import {
   startShift,
   endShift,
   processPosSale,
+  generatePOSReport,
+  getCurrentShiftDetails,
   type PosSaleItem,
+  type PosReportType,
+  type PosReportData,
 } from "@/lib/actions/pos";
 
 interface Product {
@@ -72,6 +78,7 @@ export default function PosPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [shiftOpen, setShiftOpen] = useState(false);
+  const [currentShiftId, setCurrentShiftId] = useState<string | null>(null);
   const [shiftDialogOpen, setShiftDialogOpen] = useState(false);
   const [shiftType, setShiftType] = useState<'open' | 'close'>('open');
   const [openingAmount, setOpeningAmount] = useState("0");
@@ -80,6 +87,9 @@ export default function PosPage() {
   const [submitting, setSubmitting] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [reportData, setReportData] = useState<PosReportData | null>(null);
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   // Load products and categories
   useEffect(() => {
@@ -88,7 +98,7 @@ export default function PosPage() {
         const [productsRes, categoriesRes, shiftRes] = await Promise.all([
           getPosProducts(),
           getPosCategories(),
-          getCurrentPosShift(),
+          getCurrentShiftDetails(),
         ]);
 
         if (productsRes.success && productsRes.data) {
@@ -99,6 +109,7 @@ export default function PosPage() {
         }
         if (shiftRes.success && shiftRes.data) {
           setShiftOpen(true);
+          setCurrentShiftId(shiftRes.data.shift.id);
         }
       } catch (error) {
       } finally {
@@ -237,6 +248,70 @@ export default function PosPage() {
     }
   };
 
+  // Handle X-Report (Mid-day)
+  const handleXReport = async () => {
+    if (!shiftOpen || !currentShiftId) {
+      alert("No open shift found");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await generatePOSReport(currentShiftId, 'X');
+
+      if (result.success && result.data) {
+        setReportData(result.data);
+        setShowReportDialog(true);
+        // Auto-print after a short delay
+        setTimeout(() => {
+          window.print();
+        }, 500);
+      } else {
+        alert(result.error || "Failed to generate X-Report");
+      }
+    } catch (error) {
+      alert("Failed to generate X-Report");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle Z-Report (End-of-day)
+  const handleZReport = async () => {
+    if (!shiftOpen || !currentShiftId) {
+      alert("No open shift found");
+      return;
+    }
+
+    if (!confirm("Are you sure you want to close your counter? This will generate the Z-Report and close the shift. This action cannot be undone.")) {
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await generatePOSReport(currentShiftId, 'Z');
+
+      if (result.success && result.data) {
+        setReportData(result.data);
+        setShowReportDialog(true);
+        // Auto-print after a short delay
+        setTimeout(() => {
+          window.print();
+        }, 500);
+
+        // Reset shift state after Z-Report
+        setShiftOpen(false);
+        setCurrentShiftId(null);
+      } else {
+        alert(result.error || "Failed to generate Z-Report");
+      }
+    } catch (error) {
+      alert("Failed to generate Z-Report");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const formatCurrency = (value: number) => {
     return formatPKR(value, 'south-asian');
   };
@@ -270,6 +345,30 @@ export default function PosPage() {
                     className="pl-10 border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 h-10"
                   />
                 </div>
+                {shiftOpen && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleXReport}
+                      disabled={submitting}
+                      className="h-10 border-slate-300 text-slate-700 hover:bg-slate-50"
+                    >
+                      <FileText className="h-4 w-4 mr-2" />
+                      Print X-Report
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleZReport}
+                      disabled={submitting}
+                      className="h-10 border-red-300 text-red-700 hover:bg-red-50"
+                    >
+                      <AlertTriangle className="h-4 w-4 mr-2" />
+                      Close Shift (Z)
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant={shiftOpen ? "default" : "outline"}
                   className={shiftOpen ? "bg-blue-600 hover:bg-blue-700" : ""}
@@ -626,6 +725,237 @@ export default function PosPage() {
               )}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* POS X/Z Report Dialog with Thermal Print Layout */}
+      <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              {reportData?.reportType === 'X' ? 'X-Report (Mid-day)' : 'Z-Report (End-of-day)'}
+            </DialogTitle>
+            <DialogDescription>
+              {reportData?.reportType === 'Z'
+                ? 'This report has closed the shift. Print for your records.'
+                : 'Mid-day summary. The shift remains open.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {reportData && (
+            <div className="space-y-4">
+              {/* Thermal Print Layout Container */}
+              <div id="pos-thermal-report" className="bg-white border rounded-lg p-6 font-mono text-sm">
+                {/* Header */}
+                <div className="text-center border-b-2 border-dashed border-slate-300 pb-3 mb-3">
+                  <h2 className="text-xl font-bold text-slate-900">NexaBook POS</h2>
+                  <h3 className="text-lg font-bold text-slate-800 mt-1">
+                    {reportData.reportType === 'X' ? 'X-REPORT' : 'Z-REPORT'}
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1">
+                    {reportData.reportNumber}
+                  </p>
+                </div>
+
+                {/* Cashier & Date Info */}
+                <div className="text-xs text-slate-700 space-y-1 mb-3">
+                  <div className="flex justify-between">
+                    <span>Cashier:</span>
+                    <span className="font-semibold">{reportData.cashierName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Date:</span>
+                    <span className="font-semibold">
+                      {new Date(reportData.openingTime).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Opening Time:</span>
+                    <span className="font-semibold">
+                      {new Date(reportData.openingTime).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  {reportData.closingTime && (
+                    <div className="flex justify-between">
+                      <span>Closing Time:</span>
+                      <span className="font-semibold">
+                        {new Date(reportData.closingTime).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Sales Summary Table */}
+                <div className="border-t-2 border-dashed border-slate-300 pt-3 mb-3">
+                  <h4 className="font-bold text-slate-900 mb-2 text-center">SALES SUMMARY</h4>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-1 text-slate-600">Total Sales</td>
+                        <td className="py-1 text-right font-semibold">
+                          {formatCurrency(reportData.totalSales)}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-1 text-slate-600">(-) Returns</td>
+                        <td className="py-1 text-right text-red-600">
+                          {formatCurrency(reportData.totalReturns)}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-1 text-slate-600">(-) Discounts</td>
+                        <td className="py-1 text-right text-red-600">
+                          {formatCurrency(reportData.totalDiscounts)}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-1 text-slate-600">(+) Tax Collected</td>
+                        <td className="py-1 text-right text-green-600">
+                          {formatCurrency(reportData.totalTaxCollected)}
+                        </td>
+                      </tr>
+                      <tr className="bg-slate-900 text-white font-bold">
+                        <td className="py-2 px-2">(=) Net Sales</td>
+                        <td className="py-2 px-2 text-right">
+                          {formatCurrency(reportData.netSales)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Payment Summary */}
+                <div className="border-t-2 border-dashed border-slate-300 pt-3 mb-3">
+                  <h4 className="font-bold text-slate-900 mb-2 text-center">PAYMENT BREAKDOWN</h4>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-300">
+                        <th className="text-left py-1">Method</th>
+                        <th className="text-right py-1">Txns</th>
+                        <th className="text-right py-1">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-1">Cash</td>
+                        <td className="py-1 text-right">{reportData.cashTransactions}</td>
+                        <td className="py-1 text-right font-semibold">
+                          {formatCurrency(reportData.cashSales)}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-1">Card</td>
+                        <td className="py-1 text-right">{reportData.cardTransactions}</td>
+                        <td className="py-1 text-right font-semibold">
+                          {formatCurrency(reportData.cardSales)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Shift Financials (Z-Report only) */}
+                {reportData.reportType === 'Z' && (
+                  <div className="border-t-2 border-dashed border-slate-300 pt-3 mb-3">
+                    <h4 className="font-bold text-slate-900 mb-2 text-center">SHIFT FINANCIALS</h4>
+                    <table className="w-full text-xs">
+                      <tbody>
+                        <tr className="border-b border-slate-200">
+                          <td className="py-1">Opening Cash</td>
+                          <td className="py-1 text-right font-semibold">
+                            {formatCurrency(reportData.openingCash)}
+                          </td>
+                        </tr>
+                        <tr className="border-b border-slate-200">
+                          <td className="py-1">(+ )Cash Sales</td>
+                          <td className="py-1 text-right text-green-600">
+                            {formatCurrency(reportData.cashSales)}
+                          </td>
+                        </tr>
+                        <tr className="bg-blue-50 font-bold">
+                          <td className="py-2 px-2">(=) Expected Cash</td>
+                          <td className="py-2 px-2 text-right text-blue-700">
+                            {formatCurrency(reportData.expectedCash)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Top 5 Products */}
+                <div className="border-t-2 border-dashed border-slate-300 pt-3 mb-3">
+                  <h4 className="font-bold text-slate-900 mb-2 text-center">TOP 5 PRODUCTS</h4>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-300">
+                        <th className="text-left py-1">#</th>
+                        <th className="text-left py-1">Product</th>
+                        <th className="text-right py-1">Qty</th>
+                        <th className="text-right py-1">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.topProducts.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-2 text-center text-slate-500">
+                            No products sold this shift
+                          </td>
+                        </tr>
+                      ) : (
+                        reportData.topProducts.map((product, index) => (
+                          <tr key={index} className="border-b border-slate-200">
+                            <td className="py-1">{index + 1}</td>
+                            <td className="py-1">
+                              <div className="truncate max-w-[120px]" title={product.name}>
+                                {product.name}
+                              </div>
+                              <div className="text-[10px] text-slate-500">{product.sku}</div>
+                            </td>
+                            <td className="py-1 text-right">{product.quantity}</td>
+                            <td className="py-1 text-right font-semibold">
+                              {formatCurrency(product.revenue)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Footer */}
+                <div className="text-center border-t-2 border-dashed border-slate-300 pt-3 mt-3">
+                  <p className="text-sm font-bold text-slate-900">*** THANK YOU ***</p>
+                  <p className="text-xs text-slate-600 mt-2">
+                    Generated: {new Date(reportData.generatedAt).toLocaleString()}
+                  </p>
+                  {reportData.reportType === 'Z' && (
+                    <div className="mt-4 pt-3 border-t border-slate-300">
+                      <p className="text-xs text-slate-600 mb-8">
+                        Cashier Signature: ________________________
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        Manager Signature: ________________________
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Print Button */}
+              <div className="flex justify-center gap-2 print:hidden">
+                <Button
+                  onClick={() => window.print()}
+                  disabled={printing}
+                  className="bg-slate-900 hover:bg-slate-800"
+                >
+                  <Printer className="h-4 w-4 mr-2" />
+                  Print Report
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
