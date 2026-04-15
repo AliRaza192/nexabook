@@ -1088,6 +1088,61 @@ export const miscContacts = pgTable('misc_contacts', {
 });
 
 // ==========================================
+// FIXED ASSETS TABLES
+// ==========================================
+
+// Fixed Assets Register
+export const fixedAssets = pgTable('fixed_assets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  category: varchar('category', { length: 100 }).notNull(), // Machinery, Vehicle, Building, etc.
+  purchaseDate: timestamp('purchase_date').notNull(),
+  purchaseCost: decimal('purchase_cost', { precision: 14, scale: 2 }).notNull().default('0'),
+  usefulLifeYears: integer('useful_life_years').notNull(),
+  salvageValue: decimal('salvage_value', { precision: 14, scale: 2 }).notNull().default('0'),
+  depreciationMethod: varchar('depreciation_method', { length: 50 }).notNull().default('straight_line'), // straight_line, declining_balance
+  accumulatedDepreciation: decimal('accumulated_depreciation', { precision: 14, scale: 2 }).notNull().default('0'),
+  status: varchar('status', { length: 30 }).notNull().default('active'), // active, fully_depreciated, disposed, sold
+  disposalDate: timestamp('disposal_date'),
+  disposalProceeds: decimal('disposal_proceeds', { precision: 14, scale: 2 }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Depreciation Logs (Monthly depreciation tracking)
+export const depreciationLogs = pgTable('depreciation_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  assetId: uuid('asset_id').references(() => fixedAssets.id).notNull(),
+  depreciationDate: timestamp('depreciation_date').notNull(),
+  amount: decimal('amount', { precision: 14, scale: 2 }).notNull(),
+  bookValueAfter: decimal('book_value_after', { precision: 14, scale: 2 }).notNull(),
+  journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
+  isPosted: boolean('is_posted').notNull().default(false),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+// Relations for Fixed Assets
+export const fixedAssetsRelations = relations(fixedAssets, ({ many }) => ({
+  depreciationLogs: many(depreciationLogs),
+}));
+
+// Relations for Depreciation Logs
+export const depreciationLogsRelations = relations(depreciationLogs, ({ one }) => ({
+  asset: one(fixedAssets, {
+    fields: [depreciationLogs.assetId],
+    references: [fixedAssets.id],
+  }),
+  journalEntry: one(journalEntries, {
+    fields: [depreciationLogs.journalEntryId],
+    references: [journalEntries.id],
+  }),
+}));
+
+// ==========================================
 // CREDIT & DEBIT NOTES TABLES
 // ==========================================
 
@@ -1889,6 +1944,11 @@ export const schema = {
   creditDebitNoteLines,
   pdcInstruments,
   miscContactSettlements,
+  // Fixed Assets
+  fixedAssets,
+  depreciationLogs,
+  fixedAssetsRelations,
+  depreciationLogsRelations,
   // Inventory Depth
   stockMovements,
   stockAdjustments,

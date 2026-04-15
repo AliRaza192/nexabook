@@ -1,177 +1,140 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Loader2, TrendingDown, Printer, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { 
+  Loader2, TrendingDown, ArrowDownLeft, CheckCircle2, AlertCircle 
+} from "lucide-react";
+import {
+  getFixedAssets,
+  getDepreciationSchedule,
+  postDepreciation,
+} from "@/lib/actions/fixed-assets";
+import ReportExportButtons from "@/components/reports/ReportExportButtons";
+import { formatPKR } from "@/lib/utils/number-format";
 
-const STORAGE_KEY = "nexabook_fixed_assets";
+// Pakistani currency formatting
+const formatCurrency = (value: number) => formatPKR(value, 'south-asian');
 
-interface FixedAsset {
-  id: string;
-  name: string;
-  category: string;
-  purchaseDate: string;
-  purchaseCost: number;
-  usefulLife: number;
-  depreciationMethod: string;
-  salvageValue: number;
-}
-
-interface DepreciationRow {
-  month: string;
-  openingBV: number;
-  depreciation: number;
-  closingBV: number;
-}
-
-function loadAssets(): FixedAsset[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function calcDepreciationSchedule(asset: FixedAsset, year: number): DepreciationRow[] {
-  const totalMonths = asset.usefulLife * 12;
-  if (totalMonths <= 0) return [];
-
-  const depreciable = asset.purchaseCost - asset.salvageValue;
-  const purchaseDate = new Date(asset.purchaseDate);
-
-  // Calculate accumulated depreciation up to start of the target year
-  const startOfYear = new Date(year, 0, 1);
-  const monthsBeforeYear = (startOfYear.getFullYear() - purchaseDate.getFullYear()) * 12 + (startOfYear.getMonth() - purchaseDate.getMonth());
-  const monthsBefore = Math.max(0, monthsBeforeYear);
-
-  let bv = asset.purchaseCost;
-
-  // Simulate depreciation from purchase date to start of target year
-  for (let m = 0; m < Math.min(monthsBefore, totalMonths); m++) {
-    if (asset.depreciationMethod === "Straight Line") {
-      const monthlyDep = depreciable / totalMonths;
-      bv -= monthlyDep;
-    } else {
-      const rate = 2 / asset.usefulLife;
-      const annualDep = bv * rate;
-      const monthlyDep = annualDep / 12;
-      if (bv - monthlyDep < asset.salvageValue) break;
-      bv -= monthlyDep;
-    }
-    bv = Math.max(asset.salvageValue, bv);
-  }
-
-  const schedule: DepreciationRow[] = [];
-  const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-  for (let month = 0; month < 12; month++) {
-    const totalMonthsElapsed = monthsBefore + month;
-    if (totalMonthsElapsed >= totalMonths) break;
-
-    const openingBV = Math.max(asset.salvageValue, bv);
-    let depreciation = 0;
-
-    if (asset.depreciationMethod === "Straight Line") {
-      depreciation = depreciable / totalMonths;
-    } else {
-      const rate = 2 / asset.usefulLife;
-      const annualDep = bv * rate;
-      depreciation = annualDep / 12;
-    }
-
-    const closingBV = Math.max(asset.salvageValue, bv - depreciation);
-    depreciation = openingBV - closingBV; // adjust for precision
-
-    schedule.push({
-      month: `${MONTH_NAMES[month]} ${year}`,
-      openingBV: Math.round(openingBV * 100) / 100,
-      depreciation: Math.round(depreciation * 100) / 100,
-      closingBV: Math.round(closingBV * 100) / 100,
-    });
-
-    bv = closingBV;
-  }
-
-  return schedule;
-}
-
-function fmt(n: number): string {
-  return n.toLocaleString("en-PK", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
 
 export default function DepreciationPage() {
-  const [assets, setAssets] = useState<FixedAsset[]>([]);
+  const [assets, setAssets] = useState<any[]>([]);
   const [selectedAsset, setSelectedAsset] = useState("");
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [loading, setLoading] = useState(false);
-  const [schedule, setSchedule] = useState<DepreciationRow[] | null>(null);
-  const [assetName, setAssetName] = useState("");
+  const [posting, setPosting] = useState<string | null>(null);
+  const [schedule, setSchedule] = useState<any | null>(null);
+  const [postedMonths, setPostedMonths] = useState<Set<string>>(new Set());
 
+  // Load assets from database
   useEffect(() => {
-    const loaded = loadAssets();
-    setAssets(loaded);
-    if (loaded.length > 0) setSelectedAsset(loaded[0].id);
+    async function loadAssets() {
+      const res = await getFixedAssets();
+      if (res.success && res.data) {
+        const activeAssets = (res.data as any[]).filter((a: any) => a.status === "active");
+        setAssets(activeAssets);
+        if (activeAssets.length > 0) {
+          setSelectedAsset(activeAssets[0].id);
+        }
+      }
+    }
+    loadAssets();
   }, []);
 
-  const handleCalculate = () => {
+  const handleCalculate = async () => {
     if (!selectedAsset) return;
+    
     setLoading(true);
-    // Simulate async
-    setTimeout(() => {
-      const asset = assets.find(a => a.id === selectedAsset);
-      if (asset) {
-        setAssetName(asset.name);
-        const sch = calcDepreciationSchedule(asset, parseInt(year));
-        setSchedule(sch);
-      }
-      setLoading(false);
-    }, 300);
+    setSchedule(null);
+    
+    const res = await getDepreciationSchedule(selectedAsset, parseInt(year));
+    if (res.success && res.data) {
+      setSchedule(res.data);
+      // Initialize posted months (in real app, fetch from depreciation_logs)
+      setPostedMonths(new Set());
+    }
+    
+    setLoading(false);
   };
 
-  const handlePrint = () => window.print();
+  const handlePostDepreciation = async (month: number) => {
+    if (!selectedAsset) return;
+    
+    const key = `${year}-${month}`;
+    if (postedMonths.has(key)) {
+      alert("Depreciation already posted for this month");
+      return;
+    }
 
-  const totalDep = schedule ? schedule.reduce((s, r) => s + r.depreciation, 0) : 0;
-  const openingBV = schedule?.[0]?.openingBV ?? 0;
-  const closingBV = schedule?.[schedule.length - 1]?.closingBV ?? 0;
+    if (!confirm(`Post depreciation for ${MONTH_NAMES[month - 1]} ${year}?`)) {
+      return;
+    }
+
+    setPosting(key);
+    const res = await postDepreciation(selectedAsset, parseInt(year), month);
+    
+    if (res.success) {
+      setPostedMonths(prev => new Set([...prev, key]));
+      alert(`Depreciation posted successfully! Journal Entry: ${res.data?.journalEntryNumber}`);
+    } else {
+      alert(res.error || "Failed to post depreciation");
+    }
+    
+    setPosting(null);
+  };
+
+  // Calculate totals
+  const totalDep = schedule ? schedule.totalDepreciation : 0;
+  const openingBV = schedule ? schedule.openingBookValue : 0;
+  const closingBV = schedule ? schedule.closingBookValue : 0;
 
   return (
     <div className="space-y-6">
+      {/* Page Header */}
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-nexabook-900">Asset Depreciation</h1>
-            <p className="text-nexabook-600 mt-1">Calculate and track asset depreciation over time</p>
+            <p className="text-nexabook-600 mt-1">Calculate and post asset depreciation to general ledger</p>
           </div>
-          {schedule && schedule.length > 0 && (
-            <Button variant="outline" onClick={handlePrint} className="print:hidden">
-              <Printer className="h-4 w-4 mr-2" />Print Schedule
-            </Button>
+          {schedule && schedule.schedule.length > 0 && (
+            <ReportExportButtons 
+              reportTitle="Depreciation Schedule" 
+              tableId="depreciation-schedule-table"
+            />
           )}
         </div>
       </motion.div>
 
-      {/* Selector */}
-      <Card className="print:hidden">
-        <CardHeader><CardTitle>Depreciation Calculator</CardTitle><CardDescription>Select an asset and year to generate the depreciation schedule</CardDescription></CardHeader>
+      {/* Selector Card */}
+      <Card className="print-hidden enterprise-card">
+        <CardHeader>
+          <CardTitle className="text-nexabook-900">Depreciation Calculator</CardTitle>
+          <CardDescription>Select an asset and year to generate the depreciation schedule</CardDescription>
+        </CardHeader>
         <CardContent>
           <div className="flex flex-col md:flex-row gap-4 items-end">
             <div className="space-y-2 flex-1">
-              <Label>Asset</Label>
+              <Label className="text-nexabook-700">Asset</Label>
               <Select value={selectedAsset} onValueChange={setSelectedAsset}>
-                <SelectTrigger><SelectValue placeholder="Select asset…" /></SelectTrigger>
+                <SelectTrigger className="border-slate-200">
+                  <SelectValue placeholder="Select asset…" />
+                </SelectTrigger>
                 <SelectContent>
                   {assets.map(a => (
                     <SelectItem key={a.id} value={a.id}>
@@ -182,9 +145,11 @@ export default function DepreciationPage() {
               </Select>
             </div>
             <div className="space-y-2 w-40">
-              <Label>Year</Label>
+              <Label className="text-nexabook-700">Year</Label>
               <Select value={year} onValueChange={setYear}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className="border-slate-200">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
                     <SelectItem key={y} value={String(y)}>{y}</SelectItem>
@@ -192,15 +157,23 @@ export default function DepreciationPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={handleCalculate} disabled={!selectedAsset || loading} className="bg-nexabook-900 hover:bg-nexabook-800">
-              {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <TrendingDown className="h-4 w-4 mr-2" />}
+            <Button 
+              onClick={handleCalculate} 
+              disabled={!selectedAsset || loading} 
+              className="bg-nexabook-900 hover:bg-nexabook-800"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <TrendingDown className="h-4 w-4 mr-2" />
+              )}
               {loading ? "Calculating…" : "Calculate Depreciation"}
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Loading */}
+      {/* Loading State */}
       {loading && (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-nexabook-500" />
@@ -208,76 +181,150 @@ export default function DepreciationPage() {
       )}
 
       {/* Schedule */}
-      {!loading && schedule && schedule.length > 0 && (
+      {!loading && schedule && schedule.schedule.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-          {/* Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card>
+          
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="enterprise-card">
               <CardContent className="p-5">
                 <p className="text-xs text-nexabook-500 uppercase tracking-wide">Asset</p>
-                <p className="text-sm font-bold text-nexabook-900 mt-1">{assetName}</p>
+                <p className="text-sm font-bold text-nexabook-900 mt-1">
+                  {schedule.asset.name}
+                </p>
+                <p className="text-xs text-nexabook-500 mt-1">{schedule.asset.category}</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="enterprise-card">
               <CardContent className="p-5">
                 <p className="text-xs text-nexabook-500 uppercase tracking-wide">Opening Book Value</p>
-                <p className="text-xl font-bold text-blue-700 mt-1">{fmt(openingBV)}</p>
+                <p className="text-xl font-bold text-blue-700 mt-1">
+                  {formatCurrency(openingBV)}
+                </p>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="enterprise-card">
               <CardContent className="p-5">
                 <p className="text-xs text-nexabook-500 uppercase tracking-wide">Total Depreciation</p>
-                <p className="text-xl font-bold text-red-700 mt-1">{fmt(totalDep)}</p>
+                <p className="text-xl font-bold text-red-700 mt-1">
+                  {formatCurrency(totalDep)}
+                </p>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="enterprise-card">
               <CardContent className="p-5">
                 <p className="text-xs text-nexabook-500 uppercase tracking-wide">Closing Book Value</p>
-                <p className="text-xl font-bold text-green-700 mt-1">{fmt(closingBV)}</p>
+                <p className="text-xl font-bold text-green-700 mt-1">
+                  {formatCurrency(closingBV)}
+                </p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Schedule Table */}
-          <Card>
-            <CardHeader><CardTitle>Depreciation Schedule — {year}</CardTitle><CardDescription>Monthly breakdown of depreciation for the selected asset</CardDescription></CardHeader>
-            <Table>
+          {/* Depreciation Schedule Table */}
+          <Card className="enterprise-card">
+            <CardHeader>
+              <CardTitle className="text-nexabook-900">Depreciation Schedule — {year}</CardTitle>
+              <CardDescription>
+                Monthly breakdown of depreciation for {schedule.asset.name}
+              </CardDescription>
+            </CardHeader>
+            <Table id="depreciation-schedule-table">
               <TableHeader>
-                <TableRow>
-                  <TableHead>Month</TableHead>
-                  <TableHead className="text-right">Opening Book Value</TableHead>
-                  <TableHead className="text-right">Depreciation</TableHead>
-                  <TableHead className="text-right">Closing Book Value</TableHead>
+                <TableRow className="bg-nexabook-50">
+                  <TableHead className="text-nexabook-900">Month</TableHead>
+                  <TableHead className="text-right text-nexabook-900">Opening Book Value</TableHead>
+                  <TableHead className="text-right text-nexabook-900">Depreciation</TableHead>
+                  <TableHead className="text-right text-nexabook-900">Closing Book Value</TableHead>
+                  <TableHead className="text-center text-nexabook-900 print:hidden">Status</TableHead>
+                  <TableHead className="text-center text-nexabook-900 print:hidden">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {schedule.map((row, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="font-medium">{row.month}</TableCell>
-                    <TableCell className="text-right font-mono text-sm">{fmt(row.openingBV)}</TableCell>
-                    <TableCell className="text-right">
-                      <span className="flex items-center justify-end gap-1 text-red-700 font-mono text-sm">
-                        <ArrowDownLeft className="h-3.5 w-3.5" />
-                        {fmt(row.depreciation)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm font-semibold text-green-700">{fmt(row.closingBV)}</TableCell>
-                  </TableRow>
-                ))}
+                {schedule.schedule.map((row: any, i: number) => {
+                  const key = `${year}-${row.month}`;
+                  const isPosted = postedMonths.has(key);
+                  
+                  return (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium text-nexabook-900">
+                        {row.monthName} {row.year}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm text-nexabook-700">
+                        {formatCurrency(row.openingBalance)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className="flex items-center justify-end gap-1 text-red-700 font-mono text-sm font-medium">
+                          <ArrowDownLeft className="h-3.5 w-3.5" />
+                          {formatCurrency(row.depreciation)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm font-semibold text-green-700">
+                        {formatCurrency(row.closingBalance)}
+                      </TableCell>
+                      <TableCell className="text-center print:hidden">
+                        {isPosted ? (
+                          <Badge className="bg-green-100 text-green-800 text-xs">
+                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                            Posted
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">
+                            <AlertCircle className="h-3 w-3 mr-1" />
+                            Pending
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center print:hidden">
+                        <Button
+                          size="sm"
+                          variant={isPosted ? "outline" : "default"}
+                          disabled={isPosted || posting === key}
+                          onClick={() => handlePostDepreciation(row.month)}
+                          className={isPosted 
+                            ? "text-green-700 border-green-300" 
+                            : "bg-nexabook-900 hover:bg-nexabook-800"
+                          }
+                        >
+                          {posting === key ? (
+                            <>
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              Posting...
+                            </>
+                          ) : isPosted ? (
+                            <>
+                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                              Posted
+                            </>
+                          ) : (
+                            "Post"
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
               <tfoot>
-                <TableRow className="bg-nexabook-50 font-semibold">
-                  <TableCell>Total</TableCell>
-                  <TableCell className="text-right font-mono text-sm">{fmt(openingBV)}</TableCell>
-                  <TableCell className="text-right font-mono text-sm text-red-700">{fmt(totalDep)}</TableCell>
-                  <TableCell className="text-right font-mono text-sm text-green-700">{fmt(closingBV)}</TableCell>
+                <TableRow className="bg-nexabook-100 font-semibold">
+                  <TableCell className="text-nexabook-900">Total</TableCell>
+                  <TableCell className="text-right font-mono text-sm text-nexabook-900">
+                    {formatCurrency(openingBV)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm text-red-700">
+                    {formatCurrency(totalDep)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm text-green-700">
+                    {formatCurrency(closingBV)}
+                  </TableCell>
+                  <TableCell colSpan={2} className="print:hidden"></TableCell>
                 </TableRow>
               </tfoot>
             </Table>
           </Card>
 
           {/* Accumulated Depreciation Summary */}
-          <Card>
+          <Card className="enterprise-card">
             <CardContent className="p-5">
               <h3 className="font-semibold text-nexabook-900 mb-2">Accumulated Depreciation Summary</h3>
               <Separator className="mb-3" />
@@ -285,16 +332,40 @@ export default function DepreciationPage() {
                 <div>
                   <p className="text-xs text-nexabook-500 uppercase tracking-wide">Original Cost</p>
                   <p className="text-lg font-bold text-nexabook-900 mt-1">
-                    {fmt(openingBV + totalDep)}
+                    {formatCurrency(parseFloat(schedule.asset.purchaseCost))}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-nexabook-500 uppercase tracking-wide">Total Depreciation (This Year)</p>
-                  <p className="text-lg font-bold text-red-700 mt-1">{fmt(totalDep)}</p>
+                  <p className="text-xs text-nexabook-500 uppercase tracking-wide">Accumulated Depreciation</p>
+                  <p className="text-lg font-bold text-red-700 mt-1">
+                    {formatCurrency(parseFloat(schedule.asset.accumulatedDepreciation || "0"))}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-xs text-nexabook-500 uppercase tracking-wide">Remaining Book Value</p>
-                  <p className="text-lg font-bold text-green-700 mt-1">{fmt(closingBV)}</p>
+                  <p className="text-xs text-nexabook-500 uppercase tracking-wide">Current Book Value</p>
+                  <p className="text-lg font-bold text-green-700 mt-1">
+                    {formatCurrency(
+                      parseFloat(schedule.asset.purchaseCost) - 
+                      parseFloat(schedule.asset.accumulatedDepreciation || "0")
+                    )}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Info Box */}
+          <Card className="border-blue-200 bg-blue-50 enterprise-card">
+            <CardContent className="p-5">
+              <div className="flex gap-3">
+                <AlertCircle className="h-5 w-5 text-blue-700 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-blue-900 mb-1">Straight Line Method</h4>
+                  <p className="text-sm text-blue-800">
+                    Depreciation is calculated using the Straight Line Method (SLM). Each month's depreciation 
+                    is posted as a journal entry: <strong>Debit: Depreciation Expense</strong>, <strong>Credit: Accumulated Depreciation</strong>.
+                    Click "Post" to create the journal entry for each month.
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -302,34 +373,39 @@ export default function DepreciationPage() {
         </motion.div>
       )}
 
-      {/* Empty state */}
-      {!loading && schedule && schedule.length === 0 && (
-        <Card>
+      {/* Empty States */}
+      {!loading && schedule && schedule.schedule.length === 0 && (
+        <Card className="enterprise-card">
           <CardContent className="p-12 text-center">
             <TrendingDown className="h-16 w-16 mx-auto mb-4 text-nexabook-200" />
             <h3 className="text-lg font-medium text-nexabook-700">No depreciation for this year</h3>
-            <p className="text-sm text-nexabook-500 mt-1">This asset may be fully depreciated or not yet in service for {year}</p>
+            <p className="text-sm text-nexabook-500 mt-1">
+              This asset may be fully depreciated or not yet in service for {year}
+            </p>
           </CardContent>
         </Card>
       )}
 
       {!loading && !schedule && (
-        <Card>
+        <Card className="enterprise-card">
           <CardContent className="p-12 text-center">
             <TrendingDown className="h-16 w-16 mx-auto mb-4 text-nexabook-200" />
             <h3 className="text-lg font-medium text-nexabook-700">No schedule generated</h3>
-            <p className="text-sm text-nexabook-500 mt-1">Select an asset and click "Calculate Depreciation"</p>
+            <p className="text-sm text-nexabook-500 mt-1">
+              Select an asset and click "Calculate Depreciation"
+            </p>
           </CardContent>
         </Card>
       )}
 
-      {/* No assets */}
       {!loading && assets.length === 0 && (
-        <Card>
+        <Card className="enterprise-card">
           <CardContent className="p-12 text-center">
             <TrendingDown className="h-16 w-16 mx-auto mb-4 text-nexabook-200" />
-            <h3 className="text-lg font-medium text-nexabook-700">No assets registered</h3>
-            <p className="text-sm text-nexabook-500 mt-1">Register assets in the Asset Register first</p>
+            <h3 className="text-lg font-medium text-nexabook-700">No active assets</h3>
+            <p className="text-sm text-nexabook-500 mt-1">
+              Register assets in the Asset Register first
+            </p>
           </CardContent>
         </Card>
       )}
