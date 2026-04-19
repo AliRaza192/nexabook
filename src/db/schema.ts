@@ -63,6 +63,16 @@ export const organizations = pgTable('organizations', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
+
+  // Document Numbering Settings
+  invoicePrefix: varchar('invoice_prefix', { length: 10 }).notNull().default('INV'),
+  orderPrefix: varchar('order_prefix', { length: 10 }).notNull().default('SO'),
+  quotationPrefix: varchar('quotation_prefix', { length: 10 }).notNull().default('QT'),
+  purchasePrefix: varchar('purchase_prefix', { length: 10 }).notNull().default('PO'),
+  billPrefix: varchar('bill_prefix', { length: 10 }).notNull().default('PI'),
+  grnPrefix: varchar('grn_prefix', { length: 10 }).notNull().default('GRN'),
+  numberingPadding: integer('numbering_padding').notNull().default(5),
+  numberingIncludeYear: boolean('numbering_include_year').notNull().default(true),
 });
 
 // Profiles Table (Links Clerk Users to Organizations)

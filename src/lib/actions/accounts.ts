@@ -331,7 +331,14 @@ export async function updateCompanySettings(data: {
   website?: string;
   fiscalYearStart?: string;
   currency?: string;
-  numberFormat?: string;
+  invoicePrefix?: string;
+  orderPrefix?: string;
+  quotationPrefix?: string;
+  purchasePrefix?: string;
+  billPrefix?: string;
+  grnPrefix?: string;
+  numberingPadding?: number;
+  numberingIncludeYear?: boolean;
 }) {
   try {
     const orgId = await getCurrentOrgId();
@@ -343,7 +350,7 @@ export async function updateCompanySettings(data: {
       return { success: false, error: "Company name is required" };
     }
 
-    const updateData: Record<string, string> = { name: data.name.trim() };
+    const updateData: any = { name: data.name.trim() };
     if (data.ntn !== undefined) updateData.ntn = data.ntn;
     if (data.strn !== undefined) updateData.strn = data.strn;
     if (data.address !== undefined) updateData.address = data.address;
@@ -353,7 +360,16 @@ export async function updateCompanySettings(data: {
     if (data.website !== undefined) updateData.website = data.website;
     if (data.fiscalYearStart !== undefined) updateData.fiscalYearStart = data.fiscalYearStart;
     if (data.currency !== undefined) updateData.currency = data.currency;
-    if (data.numberFormat !== undefined) updateData.numberFormat = data.numberFormat;
+    
+    // Add document numbering fields
+    if (data.invoicePrefix !== undefined) updateData.invoicePrefix = data.invoicePrefix;
+    if (data.orderPrefix !== undefined) updateData.orderPrefix = data.orderPrefix;
+    if (data.quotationPrefix !== undefined) updateData.quotationPrefix = data.quotationPrefix;
+    if (data.purchasePrefix !== undefined) updateData.purchasePrefix = data.purchasePrefix;
+    if (data.billPrefix !== undefined) updateData.billPrefix = data.billPrefix;
+    if (data.grnPrefix !== undefined) updateData.grnPrefix = data.grnPrefix;
+    if (data.numberingPadding !== undefined) updateData.numberingPadding = data.numberingPadding;
+    if (data.numberingIncludeYear !== undefined) updateData.numberingIncludeYear = data.numberingIncludeYear;
 
     await db
       .update(organizations)
@@ -364,6 +380,7 @@ export async function updateCompanySettings(data: {
 
     return { success: true, message: "Settings saved successfully" };
   } catch (error) {
+    console.error("Failed to update company settings:", error);
     return { success: false, error: "Failed to update company settings" };
   }
 }

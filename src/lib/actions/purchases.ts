@@ -26,28 +26,8 @@ import {
 import { eq, and, or, ilike, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber } from "./shared";
 
-// Generate bill number
-async function generateBillNumber(orgId: string): Promise<string> {
-  const result = await db
-    .select({ billNumber: purchaseInvoices.billNumber })
-    .from(purchaseInvoices)
-    .where(eq(purchaseInvoices.orgId, orgId))
-    .orderBy(desc(purchaseInvoices.createdAt))
-    .limit(1);
-
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].billNumber) {
-    const match = result[0].billNumber.match(/\d+$/);
-    if (match) {
-      const lastNumber = parseInt(match[0]);
-      nextNumber = lastNumber + 1;
-    }
-  }
-
-  return `PI-${String(nextNumber).padStart(5, '0')}`;
-}
 
 // Generate journal entry number
 async function generateJournalEntryNumber(orgId: string): Promise<string> {
@@ -263,7 +243,10 @@ export async function getNextBillNumber() {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const billNumber = await generateBillNumber(orgId);
+    const billNumber = await generateDocumentNumber('bill', orgId);
+    if (!billNumber) {
+      return { success: false, error: "Failed to generate bill number" };
+    }
     return { success: true, data: billNumber };
   } catch (error) {
     return { success: false, error: "Failed to generate bill number" };
@@ -278,7 +261,10 @@ export async function createPurchaseInvoice(data: PurchaseInvoiceFormData) {
       return { success: false, error: "Vendor and at least one item are required" };
     }
 
-    const billNumber = await generateBillNumber(orgId);
+    const billNumber = await generateDocumentNumber('bill', orgId);
+    if (!billNumber) {
+      return { success: false, error: "Failed to generate bill number" };
+    }
 
     const [newInvoice] = await db
       .insert(purchaseInvoices)
@@ -872,21 +858,15 @@ export interface PurchaseOrderFormData {
   terms?: string;
 }
 
-async function generatePurchaseOrderNumber(orgId: string): Promise<string> {
-  const result = await db.select({ orderNumber: purchaseOrders.orderNumber }).from(purchaseOrders).where(eq(purchaseOrders.orgId, orgId)).orderBy(desc(purchaseOrders.createdAt)).limit(1);
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].orderNumber) {
-    const match = result[0].orderNumber.match(/\d+$/);
-    if (match) nextNumber = parseInt(match[0]) + 1;
-  }
-  return `PO-${String(nextNumber).padStart(5, '0')}`;
-}
 
 export async function getNextPurchaseOrderNumber() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    const number = await generatePurchaseOrderNumber(orgId);
+    const number = await generateDocumentNumber('purchase', orgId);
+    if (!number) {
+      return { success: false, error: "Failed to generate purchase order number" };
+    }
     return { success: true, data: number };
   } catch (error) {
     return { success: false, error: "Failed to generate purchase order number" };
@@ -951,7 +931,10 @@ export async function createPurchaseOrder(data: PurchaseOrderFormData) {
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.vendorId || !data.items.length) return { success: false, error: "Vendor and at least one item are required" };
 
-    const orderNumber = await generatePurchaseOrderNumber(orgId);
+    const orderNumber = await generateDocumentNumber('purchase', orgId);
+    if (!orderNumber) {
+      return { success: false, error: "Failed to generate purchase order number" };
+    }
 
     const grossAmount = data.items.reduce((sum, item) => {
       const qty = parseFloat(item.quantity || '0');
@@ -1147,21 +1130,15 @@ export interface GRNFormData {
   notes?: string;
 }
 
-async function generateGRNNumber(orgId: string): Promise<string> {
-  const result = await db.select({ grnNumber: goodReceivingNotes.grnNumber }).from(goodReceivingNotes).where(eq(goodReceivingNotes.orgId, orgId)).orderBy(desc(goodReceivingNotes.createdAt)).limit(1);
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].grnNumber) {
-    const match = result[0].grnNumber.match(/\d+$/);
-    if (match) nextNumber = parseInt(match[0]) + 1;
-  }
-  return `GRN-${String(nextNumber).padStart(5, '0')}`;
-}
 
 export async function getNextGRNNumber() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    const number = await generateGRNNumber(orgId);
+    const number = await generateDocumentNumber('grn', orgId);
+    if (!number) {
+      return { success: false, error: "Failed to generate GRN number" };
+    }
     return { success: true, data: number };
   } catch (error) {
     return { success: false, error: "Failed to generate GRN number" };
@@ -1209,7 +1186,10 @@ export async function createGRN(data: GRNFormData) {
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.vendorId || !data.items.length) return { success: false, error: "Vendor and at least one item are required" };
 
-    const grnNumber = await generateGRNNumber(orgId);
+    const grnNumber = await generateDocumentNumber('grn', orgId);
+    if (!grnNumber) {
+      return { success: false, error: "Failed to generate GRN number" };
+    }
 
     const result = await db.transaction(async (tx) => {
       const [newGRN] = await tx.insert(goodReceivingNotes).values({
@@ -1892,7 +1872,10 @@ export async function duplicatePurchaseInvoice(invoiceId: string) {
       .where(eq(purchaseItems.purchaseInvoiceId, invoiceId));
 
     // Generate new bill number
-    const newBillNumber = await generateBillNumber(orgId);
+    const newBillNumber = await generateDocumentNumber('bill', orgId);
+    if (!newBillNumber) {
+      return { success: false, error: "Failed to generate bill number" };
+    }
 
     // Get current date
     const currentDate = new Date();

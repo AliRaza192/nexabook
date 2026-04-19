@@ -16,7 +16,7 @@ import {
 import { eq, and, desc, or, ilike, sum, gte, lte, sql, count as countFn } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber } from "./shared";
 
 // POS Shift interfaces
 export interface PosShift {
@@ -363,7 +363,10 @@ export async function processPosSale(saleData: PosSaleData) {
     const netAmount = grossAmount - globalDiscount - totalDiscount + totalTax;
 
     // Generate invoice number for POS
-    const invoiceNumber = `POS-${Date.now()}`;
+    const invoiceNumber = await generateDocumentNumber('invoice', orgId);
+    if (!invoiceNumber) {
+      return { success: false, error: "Failed to generate invoice number" };
+    }
 
     // Create invoice
     const [invoice] = await db

@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import {
   Building2, Hash, Percent, Users, Save, Upload, Plus, Trash2, CheckCircle,
-  Shield, ShieldCheck,
+  Shield, ShieldCheck, Info,
 } from "lucide-react";
 import { getCompanySettings, updateCompanySettings } from "@/lib/actions/accounts";
 
@@ -39,6 +39,15 @@ export default function SettingsPage() {
     currency: "PKR",
     fiscalYearStart: "07-01",
     numberFormat: "south-asian" as "south-asian" | "international",
+    // Numbering Series
+    invoicePrefix: "INV",
+    orderPrefix: "SO",
+    quotationPrefix: "QT",
+    purchasePrefix: "PO",
+    billPrefix: "PI",
+    grnPrefix: "GRN",
+    numberingPadding: 5,
+    numberingIncludeYear: true,
   });
 
   // Check FBR compliance
@@ -64,6 +73,15 @@ export default function SettingsPage() {
           currency: d.currency || "PKR",
           fiscalYearStart: d.fiscalYearStart || "07-01",
           numberFormat: ((typeof window !== 'undefined' ? localStorage.getItem(NUMBER_FORMAT_KEY) : null) || "south-asian") as "south-asian" | "international",
+          // Numbering Series
+          invoicePrefix: d.invoicePrefix || "INV",
+          orderPrefix: d.orderPrefix || "SO",
+          quotationPrefix: d.quotationPrefix || "QT",
+          purchasePrefix: d.purchasePrefix || "PO",
+          billPrefix: d.billPrefix || "PI",
+          grnPrefix: d.grnPrefix || "GRN",
+          numberingPadding: d.numberingPadding || 5,
+          numberingIncludeYear: d.numberingIncludeYear ?? true,
         });
       }
       setLoading(false);
@@ -78,6 +96,17 @@ export default function SettingsPage() {
     // Save number format to localStorage immediately
     if (key === 'numberFormat' && typeof window !== 'undefined') {
       localStorage.setItem(NUMBER_FORMAT_KEY, value);
+    }
+  };
+
+  const setSwitch = (key: string) => (checked: boolean) => {
+    setForm(prev => ({ ...prev, [key]: checked }));
+  };
+
+  const setNumber = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseInt(e.target.value);
+    if (!isNaN(value)) {
+      setForm(prev => ({ ...prev, [key]: value }));
     }
   };
 
@@ -97,6 +126,14 @@ export default function SettingsPage() {
         website: form.website,
         fiscalYearStart: form.fiscalYearStart,
         currency: form.currency,
+        invoicePrefix: form.invoicePrefix,
+        orderPrefix: form.orderPrefix,
+        quotationPrefix: form.quotationPrefix,
+        purchasePrefix: form.purchasePrefix,
+        billPrefix: form.billPrefix,
+        grnPrefix: form.grnPrefix,
+        numberingPadding: form.numberingPadding,
+        numberingIncludeYear: form.numberingIncludeYear,
       });
       if (res.success) {
         setSaveStatus("success");
@@ -111,6 +148,12 @@ export default function SettingsPage() {
     }
     setSaving(false);
     setTimeout(() => setSaveStatus("idle"), 4000);
+  };
+
+  const renderPreview = (prefix: string) => {
+    const year = new Date().getFullYear();
+    const padded = "1".padStart(form.numberingPadding, "0");
+    return `${prefix}${form.numberingIncludeYear ? `-${year}` : ""}-${padded}`;
   };
 
   if (loading) {
@@ -193,7 +236,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
-                    NT N (National Tax Number)
+                    NTN (National Tax Number)
                     {form.ntn.trim() && <ShieldCheck className="h-4 w-4 text-green-600" />}
                   </Label>
                   <Input value={form.ntn} onChange={set("ntn")} placeholder="1234567-8" />
@@ -201,7 +244,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label className="flex items-center gap-2">
-                    STR N (Sales Tax Registration Number)
+                    STRN (Sales Tax Registration Number)
                     {form.strn.trim() && <ShieldCheck className="h-4 w-4 text-green-600" />}
                   </Label>
                   <Input value={form.strn} onChange={set("strn")} placeholder="1234567890123" />
@@ -260,33 +303,122 @@ export default function SettingsPage() {
 
         {/* NUMBERING SERIES */}
         <TabsContent value="numbering" className="space-y-6">
-          <Card>
-            <CardHeader><CardTitle>Document Numbering Series</CardTitle><CardDescription>Configure custom prefixes and formats for document numbers</CardDescription></CardHeader>
-            <CardContent className="space-y-4">
-              {[
-                { label: "Sales Invoice", key: "invoice", default: "SI", example: "SI-00001" },
-                { label: "Sale Order", key: "order", default: "SO", example: "SO-00001" },
-                { label: "Purchase Invoice (Bill)", key: "purchase", default: "PI", example: "PI-00001" },
-                { label: "Purchase Order", key: "po", default: "PO", example: "PO-00001" },
-                { label: "Quotation", key: "quote", default: "QT", example: "QT-00001" },
-                { label: "Delivery Note", key: "delivery", default: "DN", example: "DN-00001" },
-                { label: "Journal Entry", key: "journal", default: "JE", example: "JE-00001" },
-                { label: "Payment Receipt", key: "payment", default: "RC", example: "RC-00001" },
-              ].map((series, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-4 items-center p-4 border rounded-lg">
-                  <div className="col-span-3"><Label className="text-sm font-medium">{series.label}</Label></div>
-                  <div className="col-span-2"><Input defaultValue={series.default} placeholder="Prefix" className="h-9" /></div>
-                  <div className="col-span-2"><Input defaultValue="00001" placeholder="Start #" className="h-9" /></div>
-                  <div className="col-span-3"><p className="text-sm text-nexabook-500">Example: <code className="bg-nexabook-100 px-2 py-0.5 rounded">{series.example}</code></p></div>
-                  <div className="col-span-2 flex justify-end"><Badge variant="outline">Active</Badge></div>
-                </div>
-              ))}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Prefix Configuration</CardTitle>
+                  <CardDescription>Set custom prefixes for different document types</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Invoice Prefix</Label>
+                      <Input value={form.invoicePrefix} onChange={set("invoicePrefix")} maxLength={10} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Sale Order Prefix</Label>
+                      <Input value={form.orderPrefix} onChange={set("orderPrefix")} maxLength={10} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Quotation Prefix</Label>
+                      <Input value={form.quotationPrefix} onChange={set("quotationPrefix")} maxLength={10} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Purchase Order Prefix</Label>
+                      <Input value={form.purchasePrefix} onChange={set("purchasePrefix")} maxLength={10} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Purchase Bill Prefix</Label>
+                      <Input value={form.billPrefix} onChange={set("billPrefix")} maxLength={10} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>GRN Prefix</Label>
+                      <Input value={form.grnPrefix} onChange={set("grnPrefix")} maxLength={10} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-              <Button onClick={handleSave} disabled={saving} className="bg-nexabook-900 hover:bg-nexabook-800 mt-4">
-                <Save className="h-4 w-4 mr-2" />Save Numbering Series
+              <Card>
+                <CardHeader>
+                  <CardTitle>Format Options</CardTitle>
+                  <CardDescription>Adjust how the sequence number is formatted</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Include Year</Label>
+                      <p className="text-xs text-nexabook-500">Adds the current year to the document ID (e.g., INV-2025-00001)</p>
+                    </div>
+                    <Switch 
+                      checked={form.numberingIncludeYear} 
+                      onCheckedChange={setSwitch("numberingIncludeYear")} 
+                    />
+                  </div>
+                  
+                  <Separator />
+
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <Label>Number Padding</Label>
+                      <Badge variant="secondary">{form.numberingPadding} Digits</Badge>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs text-nexabook-500">3</span>
+                      <input 
+                        type="range" 
+                        min="3" 
+                        max="8" 
+                        step="1"
+                        value={form.numberingPadding}
+                        onChange={setNumber("numberingPadding")}
+                        className="flex-1 accent-nexabook-900"
+                      />
+                      <span className="text-xs text-nexabook-500">8</span>
+                    </div>
+                    <p className="text-xs text-nexabook-500 italic">Determines the number of leading zeros (e.g., 5 digits = 00001)</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-6">
+              <Card className="bg-nexabook-900 text-white border-nexabook-800">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Info className="h-5 w-5 text-nexabook-300" />
+                    Live Preview
+                  </CardTitle>
+                  <CardDescription className="text-nexabook-400">See how your IDs will look</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="p-3 bg-nexabook-800/50 rounded-lg border border-nexabook-700">
+                      <p className="text-[10px] uppercase tracking-wider text-nexabook-400 mb-1 font-semibold">Sales Invoice</p>
+                      <code className="text-lg font-mono text-nexabook-100">{renderPreview(form.invoicePrefix)}</code>
+                    </div>
+                    <div className="p-3 bg-nexabook-800/50 rounded-lg border border-nexabook-700">
+                      <p className="text-[10px] uppercase tracking-wider text-nexabook-400 mb-1 font-semibold">Sale Order</p>
+                      <code className="text-lg font-mono text-nexabook-100">{renderPreview(form.orderPrefix)}</code>
+                    </div>
+                    <div className="p-3 bg-nexabook-800/50 rounded-lg border border-nexabook-700">
+                      <p className="text-[10px] uppercase tracking-wider text-nexabook-400 mb-1 font-semibold">Purchase Bill</p>
+                      <code className="text-lg font-mono text-nexabook-100">{renderPreview(form.billPrefix)}</code>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Button 
+                onClick={handleSave} 
+                disabled={saving} 
+                className="w-full bg-nexabook-900 hover:bg-nexabook-800 border-nexabook-700 h-12 text-lg shadow-lg"
+              >
+                <Save className="h-5 w-5 mr-2" />{saving ? "Saving..." : "Save All Changes"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </TabsContent>
 
         {/* TAX SETTINGS */}

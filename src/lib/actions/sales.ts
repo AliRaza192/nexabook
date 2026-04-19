@@ -30,7 +30,7 @@ import {
 import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber } from "./shared";
 
 // ==================== CUSTOMER ACTIONS ====================
 
@@ -507,26 +507,6 @@ export async function getInvoiceWithDetails(invoiceId: string): Promise<{ succes
   }
 }
 
-// Generate invoice number
-async function generateInvoiceNumber(orgId: string): Promise<string> {
-  const result = await db
-    .select({ invoiceNumber: invoices.invoiceNumber })
-    .from(invoices)
-    .where(eq(invoices.orgId, orgId))
-    .orderBy(desc(invoices.createdAt))
-    .limit(1);
-
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].invoiceNumber) {
-    const match = result[0].invoiceNumber.match(/\d+$/);
-    if (match) {
-      const lastNumber = parseInt(match[0]);
-      nextNumber = lastNumber + 1;
-    }
-  }
-
-  return `SL-${String(nextNumber).padStart(5, '0')}`;
-}
 
 // Generate journal entry number
 async function generateJournalEntryNumber(orgId: string): Promise<string> {
@@ -562,7 +542,10 @@ export async function createInvoice(data: InvoiceFormData) {
     }
 
     // Generate invoice number
-    const invoiceNumber = await generateInvoiceNumber(orgId);
+    const invoiceNumber = await generateDocumentNumber('invoice', orgId);
+    if (!invoiceNumber) {
+      return { success: false, error: "Failed to generate invoice number" };
+    }
 
     // Calculate balance
     const receivedAmount = data.receivedAmount || '0';
@@ -1111,7 +1094,10 @@ export async function getNextInvoiceNumber() {
       return { success: false, error: "No organization found" };
     }
 
-    const invoiceNumber = await generateInvoiceNumber(orgId);
+    const invoiceNumber = await generateDocumentNumber('invoice', orgId);
+    if (!invoiceNumber) {
+      return { success: false, error: "Failed to generate invoice number" };
+    }
     return { success: true, data: invoiceNumber };
   } catch (error) {
     return { success: false, error: "Failed to generate invoice number" };
@@ -1120,26 +1106,6 @@ export async function getNextInvoiceNumber() {
 
 // ==================== SALE ORDER ACTIONS ====================
 
-// Generate sale order number
-async function generateSaleOrderNumber(orgId: string): Promise<string> {
-  const result = await db
-    .select({ orderNumber: saleOrders.orderNumber })
-    .from(saleOrders)
-    .where(eq(saleOrders.orgId, orgId))
-    .orderBy(desc(saleOrders.createdAt))
-    .limit(1);
-
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].orderNumber) {
-    const match = result[0].orderNumber.match(/\d+$/);
-    if (match) {
-      const lastNumber = parseInt(match[0]);
-      nextNumber = lastNumber + 1;
-    }
-  }
-
-  return `SO-${String(nextNumber).padStart(5, '0')}`;
-}
 
 // Sale Order Form Data interface
 export interface SaleOrderFormData {
@@ -1170,7 +1136,10 @@ export async function getNextSaleOrderNumber() {
       return { success: false, error: "No organization found" };
     }
 
-    const orderNumber = await generateSaleOrderNumber(orgId);
+    const orderNumber = await generateDocumentNumber('order', orgId);
+    if (!orderNumber) {
+      return { success: false, error: "Failed to generate sale order number" };
+    }
     return { success: true, data: orderNumber };
   } catch (error) {
     return { success: false, error: "Failed to generate sale order number" };
@@ -1190,7 +1159,10 @@ export async function createSaleOrder(data: SaleOrderFormData) {
     }
 
     // Generate order number
-    const orderNumber = await generateSaleOrderNumber(orgId);
+    const orderNumber = await generateDocumentNumber('order', orgId);
+    if (!orderNumber) {
+      return { success: false, error: "Failed to generate order number" };
+    }
 
     // Create sale order
     const [newOrder] = await db
@@ -1468,21 +1440,15 @@ export interface SettlementFormData {
 
 // ==================== QUOTATION ACTIONS ====================
 
-async function generateQuotationNumber(orgId: string): Promise<string> {
-  const result = await db.select({ quotationNumber: quotations.quotationNumber }).from(quotations).where(eq(quotations.orgId, orgId)).orderBy(desc(quotations.createdAt)).limit(1);
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].quotationNumber) {
-    const match = result[0].quotationNumber.match(/\d+$/);
-    if (match) nextNumber = parseInt(match[0]) + 1;
-  }
-  return `QUO-${String(nextNumber).padStart(5, '0')}`;
-}
 
 export async function getNextQuotationNumber() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    const number = await generateQuotationNumber(orgId);
+    const number = await generateDocumentNumber('quotation', orgId);
+    if (!number) {
+      return { success: false, error: "Failed to generate quotation number" };
+    }
     return { success: true, data: number };
   } catch (error) {
     return { success: false, error: "Failed to generate quotation number" };
@@ -1529,7 +1495,10 @@ export async function createQuotation(data: QuotationFormData) {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.customerId || !data.items.length) return { success: false, error: "Customer and at least one item are required" };
-    const quotationNumber = await generateQuotationNumber(orgId);
+    const quotationNumber = await generateDocumentNumber('quotation', orgId);
+    if (!quotationNumber) {
+      return { success: false, error: "Failed to generate quotation number" };
+    }
     const grossAmount = data.items.reduce((sum, item) => {
       const qty = parseFloat(item.quantity || '0'); const price = parseFloat(item.unitPrice || '0');
       const discPct = parseFloat(item.discountPercentage || '0'); const lineTotal = qty * price;
@@ -1637,13 +1606,10 @@ export async function convertQuotationToOrder(quotationId: string) {
     if (!quotation) return { success: false, error: "Quotation not found" };
     if (quotation.isConverted) return { success: false, error: "Quotation already converted" };
     const items = await db.select().from(quotationItems).where(eq(quotationItems.quotationId, quotationId));
-    async function generateSaleOrderNumber(orgId: string): Promise<string> {
-      const result = await db.select({ orderNumber: saleOrders.orderNumber }).from(saleOrders).where(eq(saleOrders.orgId, orgId)).orderBy(desc(saleOrders.createdAt)).limit(1);
-      let nextNumber = 1;
-      if (result.length > 0 && result[0].orderNumber) { const match = result[0].orderNumber.match(/\d+$/); if (match) nextNumber = parseInt(match[0]) + 1; }
-      return `SO-${String(nextNumber).padStart(5, '0')}`;
+    const orderNumber = await generateDocumentNumber('order', orgId);
+    if (!orderNumber) {
+      return { success: false, error: "Failed to generate sale order number" };
     }
-    const orderNumber = await generateSaleOrderNumber(orgId);
     const [newOrder] = await db.insert(saleOrders).values({
       orgId, orderNumber, customerId: quotation.customerId, orderBooker: '',
       subject: quotation.subject || `From ${quotation.quotationNumber}`, reference: quotation.reference,
@@ -2250,7 +2216,10 @@ export async function duplicateInvoice(invoiceId: string) {
       .where(eq(invoiceItems.invoiceId, invoiceId));
 
     // Generate new invoice number
-    const newInvoiceNumber = await generateInvoiceNumber(orgId);
+    const newInvoiceNumber = await generateDocumentNumber('invoice', orgId);
+    if (!newInvoiceNumber) {
+      return { success: false, error: "Failed to generate invoice number" };
+    }
 
     // Get current date
     const currentDate = new Date();
@@ -2354,7 +2323,10 @@ export async function duplicateSaleOrder(orderId: string) {
       .where(eq(orderItems.orderId, orderId));
 
     // Generate new order number
-    const newOrderNumber = await generateSaleOrderNumber(orgId);
+    const newOrderNumber = await generateDocumentNumber('order', orgId);
+    if (!newOrderNumber) {
+      return { success: false, error: "Failed to generate order number" };
+    }
 
     // Get current date
     const currentDate = new Date();

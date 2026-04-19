@@ -1,8 +1,18 @@
 "use server";
 
 import { db } from "@/db";
-import { organizations, profiles, chartOfAccounts } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { 
+  organizations, 
+  profiles, 
+  chartOfAccounts, 
+  invoices, 
+  saleOrders, 
+  quotations, 
+  purchaseOrders, 
+  purchaseInvoices, 
+  goodReceivingNotes 
+} from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
 // Seed default Chart of Accounts for a new organization
@@ -120,6 +130,112 @@ export async function getCurrentOrgId(): Promise<string | null> {
 
     return newOrgId;
   } catch (error) {
+    return null;
+  }
+}
+
+// Helper to pad numbers with leading zeros
+function padNumber(num: number, padding: number): string {
+  return String(num).padStart(padding, '0');
+}
+
+// Centralized function to generate document numbers
+export async function generateDocumentNumber(
+  type: 'invoice' | 'order' | 'quotation' | 'purchase' | 'bill' | 'grn', 
+  orgId: string
+): Promise<string | null> {
+  try {
+    const orgSettings = await db
+      .select({
+        invoicePrefix: organizations.invoicePrefix,
+        orderPrefix: organizations.orderPrefix,
+        quotationPrefix: organizations.quotationPrefix,
+        purchasePrefix: organizations.purchasePrefix,
+        billPrefix: organizations.billPrefix,
+        grnPrefix: organizations.grnPrefix,
+        numberingPadding: organizations.numberingPadding,
+        numberingIncludeYear: organizations.numberingIncludeYear,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+
+    if (!orgSettings || orgSettings.length === 0) {
+      console.error(`Organization settings not found for orgId: ${orgId}`);
+      return null;
+    }
+
+    const settings = orgSettings[0];
+    let prefix = '';
+    let count = 0;
+
+    switch (type) {
+      case 'invoice':
+        prefix = settings.invoicePrefix || 'INV';
+        const [invoiceCount] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(invoices)
+          .where(eq(invoices.orgId, orgId));
+        count = Number(invoiceCount.count);
+        break;
+      case 'order':
+        prefix = settings.orderPrefix || 'SO';
+        const [orderCount] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(saleOrders)
+          .where(eq(saleOrders.orgId, orgId));
+        count = Number(orderCount.count);
+        break;
+      case 'quotation':
+        prefix = settings.quotationPrefix || 'QT';
+        const [quotationCount] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(quotations)
+          .where(eq(quotations.orgId, orgId));
+        count = Number(quotationCount.count);
+        break;
+      case 'purchase':
+        prefix = settings.purchasePrefix || 'PO';
+        const [purchaseCount] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.orgId, orgId));
+        count = Number(purchaseCount.count);
+        break;
+      case 'bill':
+        prefix = settings.billPrefix || 'PI';
+        const [billCount] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(purchaseInvoices)
+          .where(eq(purchaseInvoices.orgId, orgId));
+        count = Number(billCount.count);
+        break;
+      case 'grn':
+        prefix = settings.grnPrefix || 'GRN';
+        const [grnCount] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(goodReceivingNotes)
+          .where(eq(goodReceivingNotes.orgId, orgId));
+        count = Number(grnCount.count);
+        break;
+      default:
+        console.error(`Unknown document type: ${type}`);
+        return null;
+    }
+
+    const nextNumber = count + 1;
+    const currentYear = new Date().getFullYear();
+    const paddedNumber = padNumber(nextNumber, settings.numberingPadding || 5);
+
+    let documentNumber = prefix;
+    if (settings.numberingIncludeYear) {
+      documentNumber += `-${currentYear}`;
+    }
+    documentNumber += `-${paddedNumber}`;
+
+    return documentNumber;
+  } catch (error) {
+    console.error(`Error generating document number for type ${type} and orgId ${orgId}:`, error);
     return null;
   }
 }
