@@ -12,6 +12,7 @@ import {
   Trash2,
   Package,
   AlertTriangle,
+  Trash,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ import {
   getBoms,
   type JobOrderFormData,
 } from "@/lib/actions/manufacturing";
+import { getAllAccounts } from "@/lib/actions/accounts";
 
 interface BomSelect {
   id: string;
@@ -89,6 +91,13 @@ interface JobOrderRow {
   } | null;
 }
 
+interface AccountSelect {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+}
+
 interface ComponentGridItem {
   componentId: string;
   componentName: string;
@@ -104,9 +113,11 @@ export default function JobOrdersPage() {
   const [boms, setBoms] = useState<BomSelect[]>([]);
   const [loading, setLoading] = useState(true);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [completingOrderId, setCompletingOrderId] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<AccountSelect[]>([]);
 
   // Form state
   const [formData, setFormData] = useState<JobOrderFormData>({
@@ -118,13 +129,20 @@ export default function JobOrdersPage() {
   const [orderNumber, setOrderNumber] = useState("");
   const [componentGrid, setComponentGrid] = useState<ComponentGridItem[]>([]);
 
+  // Scrap state
+  const [scrapData, setScrapData] = useState({
+    quantity: 0,
+    accountId: "",
+  });
+
   // Load data
   const loadData = async () => {
     setLoading(true);
     try {
-      const [ordersRes, bomsRes] = await Promise.all([
+      const [ordersRes, bomsRes, accountsRes] = await Promise.all([
         getJobOrders(statusFilter === "all" ? undefined : statusFilter),
         getBoms("active"),
+        getAllAccounts(),
       ]);
 
       if (ordersRes.success && ordersRes.data) {
@@ -133,6 +151,11 @@ export default function JobOrdersPage() {
 
       if (bomsRes.success && bomsRes.data) {
         setBoms(bomsRes.data as unknown as BomSelect[]);
+      }
+
+      if (accountsRes.success && accountsRes.data) {
+        // Filter expense accounts for scrap
+        setAccounts(accountsRes.data.filter((a: any) => a.type === "expense"));
       }
     } catch (error) {
     } finally {
@@ -187,6 +210,13 @@ export default function JobOrdersPage() {
     setComponentGrid(gridItems);
   }, [formData.bomId, formData.quantityToProduce, boms]);
 
+  // Handle open completion dialog
+  const openCompletionDialog = (jobOrderId: string) => {
+    setCompletingOrderId(jobOrderId);
+    setScrapData({ quantity: 0, accountId: "" });
+    setCompleteDialogOpen(true);
+  };
+
   // Handle form submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,15 +260,20 @@ export default function JobOrdersPage() {
   };
 
   // Handle complete job order
-  const handleComplete = async (jobOrderId: string) => {
-    if (!confirm("Complete this job order? This will deduct materials and add finished goods to stock.")) {
+  const handleComplete = async () => {
+    if (!completingOrderId) return;
+
+    if (scrapData.quantity > 0 && !scrapData.accountId) {
+      alert("Please select a scrap expense account");
       return;
     }
 
-    setCompletingOrderId(jobOrderId);
+    setSubmitting(true);
     try {
-      const result = await completeJobOrder(jobOrderId);
+      const result = await completeJobOrder(completingOrderId, scrapData.quantity > 0 ? scrapData : undefined);
       if (result.success) {
+        setCompleteDialogOpen(false);
+        setCompletingOrderId(null);
         await loadData();
         alert(result.message || "Job order completed successfully");
       } else {
@@ -247,7 +282,7 @@ export default function JobOrdersPage() {
     } catch (error) {
       alert("An error occurred while completing the job order");
     } finally {
-      setCompletingOrderId(null);
+      setSubmitting(false);
     }
   };
 
@@ -606,16 +641,11 @@ export default function JobOrdersPage() {
                         <div className="flex items-center justify-center gap-2">
                           {(order.status === "draft" || order.status === "in-progress") && (
                             <button
-                              onClick={() => handleComplete(order.id)}
-                              disabled={completingOrderId === order.id}
+                              onClick={() => openCompletionDialog(order.id)}
                               className="text-blue-600 hover:text-blue-800 disabled:opacity-50"
                               title="Complete Order"
                             >
-                              {completingOrderId === order.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <CheckCircle className="h-4 w-4" />
-                              )}
+                              <CheckCircle className="h-4 w-4" />
                             </button>
                           )}
                           {order.status === "draft" && (
@@ -637,6 +667,85 @@ export default function JobOrdersPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Completion Dialog with Scrap Tracking */}
+      <Dialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-blue-600" />
+              Complete Job Order
+            </DialogTitle>
+            <DialogDescription>
+              Confirm completion of production. You can record any scrap or waste generated during this job.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <Trash className="h-4 w-4 text-nexabook-400" />
+                Scrap / Waste Quantity
+              </Label>
+              <Input
+                type="number"
+                value={scrapData.quantity}
+                onChange={(e) => setScrapData({ ...scrapData, quantity: parseFloat(e.target.value) || 0 })}
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+              />
+              <p className="text-[10px] text-nexabook-500 italic">Total units of finished good failed or raw material wasted</p>
+            </div>
+
+            {scrapData.quantity > 0 && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
+                <Label className="text-sm font-medium">Scrap Expense Account</Label>
+                <Select
+                  value={scrapData.accountId}
+                  onValueChange={(value) => setScrapData({ ...scrapData, accountId: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select expense account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.code} - {account.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-nexabook-500 italic">Accounting entry will debit this account for the value of scrap</p>
+              </div>
+            )}
+
+            <div className="p-3 bg-blue-50 border border-blue-100 rounded-md">
+              <h4 className="text-xs font-bold text-blue-800 mb-1 flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" />
+                Inventory Impact
+              </h4>
+              <ul className="text-[10px] text-blue-700 space-y-1 list-disc pl-4">
+                <li>Deduct raw materials from stock based on issued BOM</li>
+                <li>Add finished goods to inventory</li>
+                <li>Post manufacturing journal entry to General Ledger</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompleteDialogOpen(false)}>Cancel</Button>
+            <Button 
+              onClick={handleComplete} 
+              disabled={submitting}
+              className="bg-nexabook-900 hover:bg-nexabook-800"
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Confirm & Complete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

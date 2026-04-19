@@ -837,20 +837,208 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
   }
 }
 
+// Explode BOM recursively to get a flat list of base raw materials
+export async function explodeBOM(bomId: string, multiplier: number = 1): Promise<Array<{ productId: string, name: string, sku: string, quantity: number, unit: string }>> {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return [];
+
+    // Get current BOM items
+    const items = await db
+      .select({
+        componentId: bomItems.componentId,
+        quantityRequired: bomItems.quantityRequired,
+        unit: bomItems.unit,
+        component: {
+          id: products.id,
+          name: products.name,
+          sku: products.sku,
+        }
+      })
+      .from(bomItems)
+      .leftJoin(products, eq(bomItems.componentId, products.id))
+      .where(eq(bomItems.bomId, bomId));
+
+    let flatList: Array<{ productId: string, name: string, sku: string, quantity: number, unit: string }> = [];
+
+    for (const item of items) {
+      if (!item.component) continue;
+
+      const totalQty = parseFloat(item.quantityRequired) * multiplier;
+
+      // Check if this component has its own active BOM
+      const [subBom] = await db
+        .select({
+          id: manufacturingBoms.id,
+          quantity: manufacturingBoms.quantity,
+        })
+        .from(manufacturingBoms)
+        .where(and(
+          eq(manufacturingBoms.finishedGoodId, item.componentId),
+          eq(manufacturingBoms.orgId, orgId),
+          eq(manufacturingBoms.isActive, true),
+          eq(manufacturingBoms.status, 'active')
+        ))
+        .limit(1);
+
+      if (subBom) {
+        // Recursively explode the sub-BOM
+        // The multiplier for sub-BOM should be (total required qty of sub-assembly / sub-BOM output quantity)
+        const subMultiplier = totalQty / subBom.quantity;
+        const subExploded = await explodeBOM(subBom.id, subMultiplier);
+        flatList = [...flatList, ...subExploded];
+      } else {
+        // Base raw material
+        flatList.push({
+          productId: item.componentId,
+          name: item.component.name,
+          sku: item.component.sku,
+          quantity: totalQty,
+          unit: item.unit || 'Pcs',
+        });
+      }
+    }
+
+    // Merge duplicates in flat list
+    const mergedList = flatList.reduce((acc, current) => {
+      const existing = acc.find(item => item.productId === current.productId);
+      if (existing) {
+        existing.quantity += current.quantity;
+      } else {
+        acc.push(current);
+      }
+      return acc;
+    }, [] as Array<{ productId: string, name: string, sku: string, quantity: number, unit: string }>);
+
+    return mergedList;
+  } catch (error) {
+    console.error("Error exploding BOM:", error);
+    return [];
+  }
+}
+
+// Get BOM visual hierarchy (Tree view data)
+export async function getBOMHierarchy(bomId: string): Promise<any> {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return null;
+
+    const [bom] = await db
+      .select({
+        id: manufacturingBoms.id,
+        name: manufacturingBoms.name,
+        quantity: manufacturingBoms.quantity,
+        finishedGood: {
+          name: products.name,
+          sku: products.sku,
+        }
+      })
+      .from(manufacturingBoms)
+      .leftJoin(products, eq(manufacturingBoms.finishedGoodId, products.id))
+      .where(eq(manufacturingBoms.id, bomId))
+      .limit(1);
+
+    if (!bom) return null;
+
+    const items = await db
+      .select({
+        componentId: bomItems.componentId,
+        quantityRequired: bomItems.quantityRequired,
+        unit: bomItems.unit,
+        component: {
+          id: products.id,
+          name: products.name,
+          sku: products.sku,
+        }
+      })
+      .from(bomItems)
+      .leftJoin(products, eq(bomItems.componentId, products.id))
+      .where(eq(bomItems.bomId, bomId));
+
+    const children = [];
+    for (const item of items) {
+      if (!item.component) continue;
+
+      // Check if this component has its own BOM
+      const [subBom] = await db
+        .select({ id: manufacturingBoms.id })
+        .from(manufacturingBoms)
+        .where(and(
+          eq(manufacturingBoms.finishedGoodId, item.componentId),
+          eq(manufacturingBoms.orgId, orgId),
+          eq(manufacturingBoms.isActive, true),
+          eq(manufacturingBoms.status, 'active')
+        ))
+        .limit(1);
+
+      if (subBom) {
+        const subHierarchy = await getBOMHierarchy(subBom.id);
+        children.push({
+          productId: item.componentId,
+          name: item.component.name,
+          sku: item.component.sku,
+          quantity: parseFloat(item.quantityRequired),
+          unit: item.unit,
+          isSubAssembly: true,
+          children: subHierarchy.children,
+        });
+      } else {
+        children.push({
+          productId: item.componentId,
+          name: item.component.name,
+          sku: item.component.sku,
+          quantity: parseFloat(item.quantityRequired),
+          unit: item.unit,
+          isSubAssembly: false,
+        });
+      }
+    }
+
+    return {
+      id: bom.id,
+      name: bom.name,
+      finishedGoodName: bom.finishedGood?.name,
+      quantity: bom.quantity,
+      children,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
 // Get products for manufacturing (only products, not services)
 export async function getProducts() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
+    // Get all products
     const allProducts = await db
       .select()
       .from(products)
       .where(and(eq(products.orgId, orgId), eq(products.isActive, true)))
       .orderBy(products.name);
 
-    return { success: true, data: allProducts };
+    // Get all active BOMs to identify sub-assemblies
+    const boms = await db
+      .select({ finishedGoodId: manufacturingBoms.finishedGoodId })
+      .from(manufacturingBoms)
+      .where(and(
+        eq(manufacturingBoms.orgId, orgId),
+        eq(manufacturingBoms.isActive, true),
+        eq(manufacturingBoms.status, 'active')
+      ));
+
+    const bomSet = new Set(boms.map(b => b.finishedGoodId));
+
+    const productsWithBomFlag = allProducts.map(p => ({
+      ...p,
+      hasBom: bomSet.has(p.id)
+    }));
+
+    return { success: true, data: productsWithBomFlag };
   } catch (error) {
     return { success: false, error: "Failed to fetch products" };
   }
 }
+

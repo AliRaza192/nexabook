@@ -12,6 +12,8 @@ import {
   Archive,
   ChevronDown,
   X,
+  Layers,
+  ChevronRight,
 } from "lucide-react";
 import { formatPKR } from "@/lib/utils/number-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,12 +38,14 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   getBoms,
   createBom,
   deleteBom,
   updateBomStatus,
   getProducts,
+  getBOMHierarchy,
   type BomFormData,
   type BomItemInput,
 } from "@/lib/actions/manufacturing";
@@ -54,6 +58,7 @@ interface Product {
   currentStock: number | null;
   unit: string | null;
   type: string;
+  hasBom?: boolean;
 }
 
 interface BomRow {
@@ -69,7 +74,51 @@ interface BomRow {
   quantity: number;
   totalEstimatedCost: string;
   status: string;
+  isSubAssembly: boolean;
   createdAt: Date;
+}
+
+// Tree Node Component
+function TreeNode({ node, level = 0 }: { node: any; level?: number }) {
+  const [isOpen, setIsOpen] = useState(level < 1);
+
+  return (
+    <div className="ml-4 border-l border-nexabook-200 pl-4 py-1">
+      <div className="flex items-center gap-2 group">
+        {node.children && node.children.length > 0 ? (
+          <button onClick={() => setIsOpen(!isOpen)} className="text-nexabook-400 hover:text-nexabook-600 transition-colors">
+            {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+        ) : (
+          <div className="w-4" />
+        )}
+        <div className="flex items-center gap-2 flex-1">
+          {node.isSubAssembly ? (
+            <Layers className="h-4 w-4 text-blue-500" />
+          ) : (
+            <Package className="h-4 w-4 text-nexabook-400" />
+          )}
+          <span className="text-sm font-medium text-nexabook-900">{node.name}</span>
+          <span className="text-xs text-nexabook-500 font-mono">({node.sku})</span>
+          <Badge variant="outline" className="text-[10px] h-5 bg-nexabook-50">
+            {node.quantity} {node.unit}
+          </Badge>
+          {node.isSubAssembly && (
+            <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] h-5">
+              Sub-Assembly
+            </Badge>
+          )}
+        </div>
+      </div>
+      {isOpen && node.children && (
+        <div className="mt-1">
+          {node.children.map((child: any, idx: number) => (
+            <TreeNode key={idx} node={child} level={level + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function BOMPage() {
@@ -79,14 +128,16 @@ export default function BOMPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [viewingHierarchy, setViewingHierarchy] = useState<any>(null);
 
   // Form state
-  const [formData, setFormData] = useState<BomFormData>({
+  const [formData, setFormData] = useState<BomFormData & { isSubAssembly: boolean }>({
     name: "",
     code: "",
     finishedGoodId: "",
     quantity: 1,
     instructions: "",
+    isSubAssembly: false,
     items: [],
   });
 
@@ -114,9 +165,7 @@ export default function BOMPage() {
       }
 
       if (productsRes.success && productsRes.data) {
-        const productData = productsRes.data as Product[];
-        // Filter only products (not services)
-        setProducts(productData.filter((p) => p.type === "product"));
+        setProducts(productsRes.data as Product[]);
       }
     } catch (error) {
     } finally {
@@ -127,6 +176,16 @@ export default function BOMPage() {
   useEffect(() => {
     loadData();
   }, [statusFilter]);
+
+  // Handle viewing hierarchy
+  const handleViewHierarchy = async (bomId: string) => {
+    const hierarchy = await getBOMHierarchy(bomId);
+    if (hierarchy) {
+      setViewingHierarchy(hierarchy);
+    } else {
+      alert("Failed to load BOM hierarchy");
+    }
+  };
 
   // Calculate total estimated cost
   const calculateTotalCost = () => {
@@ -199,6 +258,7 @@ export default function BOMPage() {
           finishedGoodId: "",
           quantity: 1,
           instructions: "",
+          isSubAssembly: false,
           items: [],
         });
         await loadData();
@@ -290,7 +350,7 @@ export default function BOMPage() {
         <div>
           <h1 className="text-2xl font-bold text-nexabook-900">Bill of Materials</h1>
           <p className="text-nexabook-600 mt-1">
-            Manage production recipes and component lists
+            Manage production recipes and multi-level assemblies
           </p>
         </div>
 
@@ -305,7 +365,7 @@ export default function BOMPage() {
             <DialogHeader>
               <DialogTitle>Create New BOM</DialogTitle>
               <DialogDescription>
-                Define a production recipe with finished good and required components
+                Define a production recipe. Supports sub-assemblies and raw materials.
               </DialogDescription>
             </DialogHeader>
 
@@ -338,7 +398,7 @@ export default function BOMPage() {
 
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-nexabook-900">
-                    Finished Good <span className="text-red-500">*</span>
+                    Finished Good / Sub-Assembly <span className="text-red-500">*</span>
                   </Label>
                   <Select
                     value={formData.finishedGoodId}
@@ -347,21 +407,38 @@ export default function BOMPage() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select finished good" />
+                      <SelectValue placeholder="Select target product" />
                     </SelectTrigger>
                     <SelectContent>
                       {products.map((product) => (
                         <SelectItem key={product.id} value={product.id}>
-                          {product.name} ({product.sku})
+                          <div className="flex items-center gap-2">
+                            {product.name} ({product.sku})
+                            {product.hasBom && (
+                              <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] h-4">Sub-Assembly</Badge>
+                            )}
+                          </div>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
 
+                <div className="space-y-2 flex flex-col justify-end pb-1">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="isSubAssembly"
+                      checked={formData.isSubAssembly}
+                      onCheckedChange={(checked) => setFormData({ ...formData, isSubAssembly: checked })}
+                    />
+                    <Label htmlFor="isSubAssembly">Mark as Sub-Assembly</Label>
+                  </div>
+                  <p className="text-[10px] text-nexabook-500 italic mt-1 pl-1">Enable if this BOM is used as a component in other BOMs</p>
+                </div>
+
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-nexabook-900">
-                    Base Quantity
+                    Output Quantity
                   </Label>
                   <Input
                     type="number"
@@ -395,8 +472,9 @@ export default function BOMPage() {
               {/* Components Section */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-sm font-semibold text-nexabook-900">
-                    Components (Raw Materials)
+                  <Label className="text-sm font-semibold text-nexabook-900 flex items-center gap-2">
+                    Components List
+                    <Badge variant="outline" className="text-[10px] font-normal">Raw Materials & Sub-Assemblies</Badge>
                   </Label>
                   {formData.items.length > 0 && (
                     <Badge variant="outline" className="text-xs">
@@ -406,9 +484,9 @@ export default function BOMPage() {
                 </div>
 
                 {/* Add Component Row */}
-                <div className="flex gap-2 items-end p-3 bg-nexabook-50 rounded-md">
+                <div className="flex gap-2 items-end p-3 bg-nexabook-50 rounded-md border border-nexabook-100">
                   <div className="flex-1">
-                    <Label className="text-xs text-nexabook-700">Component</Label>
+                    <Label className="text-xs text-nexabook-700">Select Component</Label>
                     <Select
                       value={newComponentRow.componentId}
                       onValueChange={(value) =>
@@ -416,12 +494,17 @@ export default function BOMPage() {
                       }
                     >
                       <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Select component" />
+                        <SelectValue placeholder="Choose product..." />
                       </SelectTrigger>
                       <SelectContent>
                         {products.map((product) => (
                           <SelectItem key={product.id} value={product.id}>
-                            {product.name} ({product.sku})
+                            <div className="flex items-center gap-2">
+                              {product.name}
+                              {product.hasBom && (
+                                <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] h-4">Sub-Assembly</Badge>
+                              )}
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -429,7 +512,7 @@ export default function BOMPage() {
                   </div>
 
                   <div className="w-28">
-                    <Label className="text-xs text-nexabook-700">Qty</Label>
+                    <Label className="text-xs text-nexabook-700">Qty Required</Label>
                     <Input
                       type="number"
                       value={newComponentRow.quantityRequired}
@@ -469,7 +552,7 @@ export default function BOMPage() {
 
                 {/* Components Table */}
                 {formData.items.length > 0 && (
-                  <div className="border border-nexabook-200 rounded-md overflow-hidden">
+                  <div className="border border-nexabook-200 rounded-md overflow-hidden shadow-sm">
                     <table className="w-full">
                       <thead className="bg-nexabook-50">
                         <tr>
@@ -477,20 +560,19 @@ export default function BOMPage() {
                             Component
                           </th>
                           <th className="text-center py-2 px-3 text-xs font-semibold text-nexabook-700">
-                            Qty Required
+                            Type
                           </th>
                           <th className="text-center py-2 px-3 text-xs font-semibold text-nexabook-700">
-                            Unit Cost
+                            Qty Required
                           </th>
                           <th className="text-right py-2 px-3 text-xs font-semibold text-nexabook-700">
-                            Total
+                            Total Est. Cost
                           </th>
                           <th className="text-center py-2 px-3 text-xs font-semibold text-nexabook-700 w-12">
-                            Actions
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-nexabook-100">
+                      <tbody className="divide-y divide-nexabook-100 bg-white">
                         {formData.items.map((item, index) => {
                           const product = products.find((p) => p.id === item.componentId);
                           const unitCost = product?.costPrice
@@ -499,15 +581,20 @@ export default function BOMPage() {
                           const total = unitCost * parseFloat(item.quantityRequired);
 
                           return (
-                            <tr key={index} className="hover:bg-nexabook-50">
-                              <td className="py-2 px-3 text-sm text-nexabook-900">
-                                {product?.name || "Unknown"}
+                            <tr key={index} className="hover:bg-nexabook-50/50">
+                              <td className="py-2 px-3">
+                                <div className="text-sm font-medium text-nexabook-900">{product?.name || "Unknown"}</div>
+                                <div className="text-[10px] text-nexabook-500">{product?.sku}</div>
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                {product?.hasBom ? (
+                                  <Badge className="bg-blue-50 text-blue-600 border-blue-100 text-[10px] h-5">Sub-Assembly</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-[10px] h-5">Raw Material</Badge>
+                                )}
                               </td>
                               <td className="py-2 px-3 text-sm text-center text-nexabook-700">
-                                {item.quantityRequired}
-                              </td>
-                              <td className="py-2 px-3 text-sm text-center text-nexabook-700">
-                                {formatCurrency(unitCost)}
+                                {item.quantityRequired} {item.unit}
                               </td>
                               <td className="py-2 px-3 text-sm text-right font-medium text-nexabook-900">
                                 {formatCurrency(total)}
@@ -516,22 +603,22 @@ export default function BOMPage() {
                                 <button
                                   type="button"
                                   onClick={() => removeComponentRow(index)}
-                                  className="text-red-600 hover:text-red-800"
+                                  className="text-red-400 hover:text-red-600 transition-colors"
                                 >
-                                  <X className="h-4 w-4" />
+                                  <Trash2 className="h-4 w-4" />
                                 </button>
                               </td>
                             </tr>
                           );
                         })}
                       </tbody>
-                      <tfoot className="bg-nexabook-50">
+                      <tfoot className="bg-nexabook-50/80">
                         <tr>
                           <td
                             colSpan={3}
-                            className="py-2 px-3 text-sm font-semibold text-nexabook-900 text-right"
+                            className="py-2 px-3 text-xs font-semibold text-nexabook-900 text-right uppercase tracking-wider"
                           >
-                            Total Estimated Cost:
+                            Total Recipe Cost:
                           </td>
                           <td className="py-2 px-3 text-sm font-bold text-nexabook-900 text-right">
                             {formatCurrency(calculateTotalCost())}
@@ -560,7 +647,7 @@ export default function BOMPage() {
                   {submitting ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating...
+                      Saving...
                     </>
                   ) : (
                     "Create BOM"
@@ -572,115 +659,168 @@ export default function BOMPage() {
         </Dialog>
       </motion.div>
 
+      {/* Hierarchy View Dialog */}
+      <Dialog open={!!viewingHierarchy} onOpenChange={(open) => !open && setViewingHierarchy(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5 text-blue-600" />
+              BOM Visual Hierarchy
+            </DialogTitle>
+            <DialogDescription>
+              Exploded view of components and sub-assemblies for <span className="font-semibold text-nexabook-900">{viewingHierarchy?.name}</span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 px-2 bg-slate-50 rounded-lg border border-slate-200">
+            {viewingHierarchy && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 font-bold text-nexabook-900 mb-4 px-2">
+                  <Package className="h-5 w-5" />
+                  {viewingHierarchy.finishedGoodName} 
+                  <Badge variant="secondary">Output: {viewingHierarchy.quantity} Units</Badge>
+                </div>
+                <div className="space-y-1">
+                  {viewingHierarchy.children.map((child: any, idx: number) => (
+                    <TreeNode key={idx} node={child} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewingHierarchy(null)}>Close View</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Filter */}
-      <Card>
+      <Card className="border-nexabook-100 shadow-sm">
         <CardContent className="p-4">
-          <div className="flex items-center gap-3">
-            <Label className="text-sm font-medium text-nexabook-700">Status:</Label>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All BOMs</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="archived">Archived</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="flex flex-wrap items-center gap-6">
+            <div className="flex items-center gap-3">
+              <Label className="text-sm font-medium text-nexabook-700">Status Filter:</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[180px] h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All BOMs</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="archived">Archived</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
 
       {/* BOM List */}
-      <Card>
-        <CardHeader>
+      <Card className="border-nexabook-100 shadow-sm overflow-hidden">
+        <CardHeader className="bg-white border-b border-nexabook-50">
           <CardTitle className="text-xl text-nexabook-900">
-            BOMs ({boms.length})
+            Bill of Materials ({boms.length})
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {boms.length === 0 ? (
-            <div className="text-center py-12">
-              <FileText className="h-16 w-16 text-nexabook-300 mx-auto mb-4" />
+            <div className="text-center py-16">
+              <FileText className="h-16 w-16 text-nexabook-200 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-nexabook-900 mb-2">
                 No BOMs found
               </h3>
-              <p className="text-nexabook-600 mb-4">
-                Get started by creating your first Bill of Materials
+              <p className="text-nexabook-600 mb-6 max-w-xs mx-auto text-sm">
+                You haven't created any recipes yet. Define your production process to start manufacturing.
               </p>
               <Button
                 onClick={() => setAddDialogOpen(true)}
                 className="bg-nexabook-900 hover:bg-nexabook-800"
               >
                 <Plus className="mr-2 h-4 w-4" />
-                Create BOM
+                Create First BOM
               </Button>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-left">
                 <thead>
-                  <tr className="border-b border-nexabook-200">
-                    <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
+                  <tr className="bg-nexabook-50/50 border-b border-nexabook-100">
+                    <th className="py-3 px-4 text-xs font-bold text-nexabook-700 uppercase tracking-wider">
                       Code
                     </th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
-                      Name
+                    <th className="py-3 px-4 text-xs font-bold text-nexabook-700 uppercase tracking-wider">
+                      Product / Recipe Name
                     </th>
-                    <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
-                      Finished Good
+                    <th className="py-3 px-4 text-xs font-bold text-nexabook-700 uppercase tracking-wider text-center">
+                      Type
                     </th>
-                    <th className="text-center py-3 px-4 text-sm font-semibold text-nexabook-700">
+                    <th className="py-3 px-4 text-xs font-bold text-nexabook-700 uppercase tracking-wider text-center">
                       Base Qty
                     </th>
-                    <th className="text-right py-3 px-4 text-sm font-semibold text-nexabook-700">
-                      Est. Cost
+                    <th className="py-3 px-4 text-xs font-bold text-nexabook-700 uppercase tracking-wider text-right">
+                      Est. Unit Cost
                     </th>
-                    <th className="text-center py-3 px-4 text-sm font-semibold text-nexabook-700">
+                    <th className="py-3 px-4 text-xs font-bold text-nexabook-700 uppercase tracking-wider text-center">
                       Status
                     </th>
-                    <th className="text-center py-3 px-4 text-sm font-semibold text-nexabook-700">
+                    <th className="py-3 px-4 text-xs font-bold text-nexabook-700 uppercase tracking-wider text-center w-32">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-nexabook-50">
                   {boms.map((bom, index) => (
                     <motion.tr
                       key={bom.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="border-b border-nexabook-100 hover:bg-nexabook-50 transition-colors"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: index * 0.03 }}
+                      className="group hover:bg-nexabook-50/30 transition-colors"
                     >
-                      <td className="py-3 px-4 text-sm font-mono text-nexabook-900">
+                      <td className="py-3 px-4 text-sm font-mono font-semibold text-nexabook-600">
                         {bom.code}
                       </td>
-                      <td className="py-3 px-4 text-sm text-nexabook-900">
-                        {bom.name}
+                      <td className="py-3 px-4">
+                        <div className="text-sm font-medium text-nexabook-900">
+                          {bom.name}
+                        </div>
+                        <div className="text-[11px] text-nexabook-500 font-medium">
+                          FG: {bom.finishedGood?.name || "N/A"}
+                        </div>
                       </td>
-                      <td className="py-3 px-4 text-sm text-nexabook-700">
-                        {bom.finishedGood?.name || "N/A"}
+                      <td className="py-3 px-4 text-center">
+                        {bom.isSubAssembly ? (
+                          <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] font-semibold">Sub-Assembly</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] font-semibold border-slate-200 text-slate-500">End Product</Badge>
+                        )}
                       </td>
-                      <td className="py-3 px-4 text-sm text-center text-nexabook-700">
+                      <td className="py-3 px-4 text-sm text-center text-nexabook-700 font-medium">
                         {bom.quantity}
                       </td>
-                      <td className="py-3 px-4 text-sm text-right font-medium text-nexabook-900">
-                        {formatCurrency(parseFloat(bom.totalEstimatedCost))}
+                      <td className="py-3 px-4 text-sm text-right font-bold text-nexabook-900">
+                        {formatCurrency(parseFloat(bom.totalEstimatedCost) / bom.quantity)}
                       </td>
                       <td className="py-3 px-4 text-center">
                         {getStatusBadge(bom.status)}
                       </td>
                       <td className="py-3 px-4">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => handleViewHierarchy(bom.id)}
+                            className="p-1.5 rounded-md text-nexabook-600 hover:bg-nexabook-100 transition-colors"
+                            title="View Hierarchy"
+                          >
+                            <Layers className="h-4 w-4" />
+                          </button>
                           {bom.status === "draft" && (
                             <button
                               onClick={() =>
                                 handleStatusUpdate(bom.id, "active")
                               }
-                              className="text-blue-600 hover:text-blue-800"
-                              title="Activate"
+                              className="p-1.5 rounded-md text-green-600 hover:bg-green-50 transition-colors"
+                              title="Activate BOM"
                             >
                               <CheckCircle className="h-4 w-4" />
                             </button>
@@ -690,16 +830,16 @@ export default function BOMPage() {
                               onClick={() =>
                                 handleStatusUpdate(bom.id, "archived")
                               }
-                              className="text-amber-600 hover:text-amber-800"
-                              title="Archive"
+                              className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50 transition-colors"
+                              title="Archive BOM"
                             >
                               <Archive className="h-4 w-4" />
                             </button>
                           )}
                           <button
                             onClick={() => handleDelete(bom.id)}
-                            className="text-red-600 hover:text-red-800"
-                            title="Delete"
+                            className="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors"
+                            title="Delete BOM"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>

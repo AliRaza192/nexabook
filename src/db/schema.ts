@@ -539,6 +539,7 @@ export const manufacturingBoms = pgTable('manufacturing_boms', {
   totalEstimatedCost: decimal('total_estimated_cost', { precision: 12, scale: 2 }).default('0'),
   instructions: text('instructions'),
   status: bomStatusEnum('status').notNull().default('draft'),
+  isSubAssembly: boolean('is_sub_assembly').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -564,6 +565,8 @@ export const jobOrders = pgTable('job_orders', {
   status: jobOrderStatusEnum('status').notNull().default('draft'),
   completionDate: timestamp('completion_date'),
   instructions: text('instructions'),
+  scrapQuantity: decimal('scrap_quantity', { precision: 12, scale: 2 }).default('0'),
+  scrapAccountId: uuid('scrap_account_id').references(() => chartOfAccounts.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
