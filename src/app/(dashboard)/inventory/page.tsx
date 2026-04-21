@@ -38,12 +38,15 @@ import {
   getProducts,
   getCategories,
   getInventoryStats,
+  getUoms,
+  addUom,
   addProduct,
   addCategory,
   type ProductWithCategory,
   type ProductFormData,
   type CategoryFormData,
   type InventoryStats,
+  type UomFormData,
 } from "@/lib/actions/inventory";
 
 // Product interface for table
@@ -110,10 +113,12 @@ function StatCard({
 // Add Product Form Component
 function AddProductForm({
   categories,
+  uoms,
   onSubmit,
   loading,
 }: {
   categories: { id: string; name: string }[];
+  uoms: { id: string; name: string }[];
   onSubmit: (data: ProductFormData) => void;
   loading: boolean;
 }) {
@@ -124,19 +129,48 @@ function AddProductForm({
     categoryId: "",
     type: "product",
     unit: "Pcs",
+    baseUomId: "",
+    saleUomId: "",
     description: "",
     salePrice: "0",
     costPrice: "0",
-    openingStock: 0,
-    minStockLevel: 0,
+    openingStock: "0",
+    minStockLevel: "0",
+    conversions: [],
   });
+
+  const [altUnitId, setAltUnitId] = useState("");
+  const [convFactor, setConvFactor] = useState("1");
+  const [showAltUnit, setShowAltUnit] = useState(false);
 
   const [newCategory, setNewCategory] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
 
+  const [newUom, setNewUom] = useState("");
+  const [showNewUom, setShowNewUom] = useState(false);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+    
+    // Prepare conversions if alt unit is selected
+    const finalData = { ...formData };
+    if (showAltUnit && altUnitId && convFactor && formData.baseUomId) {
+      finalData.conversions = [
+        {
+          fromUomId: altUnitId,
+          toUomId: formData.baseUomId,
+          conversionFactor: convFactor,
+        }
+      ];
+      // Default sale UOM to alt unit if provided
+      if (!finalData.saleUomId) {
+        finalData.saleUomId = altUnitId;
+      }
+    } else if (formData.baseUomId && !formData.saleUomId) {
+      finalData.saleUomId = formData.baseUomId;
+    }
+
+    onSubmit(finalData);
   };
 
   const handleAddCategory = async () => {
@@ -154,8 +188,23 @@ function AddProductForm({
     }
   };
 
+  const handleAddUom = async () => {
+    if (!newUom.trim()) return;
+
+    const result = await addUom({
+      name: newUom,
+      description: "",
+    } as UomFormData);
+
+    if (result.success && result.data) {
+      setFormData({ ...formData, baseUomId: result.data.id });
+      setNewUom("");
+      setShowNewUom(false);
+    }
+  };
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Product Name */}
         <div className="space-y-2">
@@ -181,37 +230,6 @@ function AddProductForm({
             placeholder="e.g., PRD-001"
             required
           />
-        </div>
-
-        {/* Barcode */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-nexabook-900">Barcode</label>
-          <Input
-            value={formData.barcode || ""}
-            onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-            placeholder="Optional"
-          />
-        </div>
-
-        {/* Unit */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-nexabook-900">Unit</label>
-          <Select
-            value={formData.unit}
-            onValueChange={(value) => setFormData({ ...formData, unit: value })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Pcs">Pieces (Pcs)</SelectItem>
-              <SelectItem value="Kg">Kilogram (Kg)</SelectItem>
-              <SelectItem value="Ltr">Liter (Ltr)</SelectItem>
-              <SelectItem value="Mtr">Meter (Mtr)</SelectItem>
-              <SelectItem value="Box">Box</SelectItem>
-              <SelectItem value="Dozen">Dozen</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
 
         {/* Category */}
@@ -248,7 +266,7 @@ function AddProductForm({
               <Input
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
-                placeholder="New category name"
+                placeholder="New category"
               />
               <Button type="button" size="sm" onClick={handleAddCategory}>
                 Add
@@ -265,6 +283,159 @@ function AddProductForm({
           )}
         </div>
 
+        {/* Barcode */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-nexabook-900">Barcode</label>
+          <Input
+            value={formData.barcode || ""}
+            onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+            placeholder="Optional"
+          />
+        </div>
+      </div>
+
+      {/* Units & Conversions Section */}
+      <div className="border-t border-b border-nexabook-100 py-4 space-y-4">
+        <h3 className="text-sm font-semibold text-nexabook-900 flex items-center gap-2">
+          <Package className="h-4 w-4 text-nexabook-600" />
+          Units & Conversions
+        </h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Base Unit */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-nexabook-900">
+              Base Unit <span className="text-red-500">*</span>
+              <span className="text-xs text-nexabook-500 ml-1 font-normal">(for stock tracking)</span>
+            </label>
+            {!showNewUom ? (
+              <div className="flex gap-2">
+                <Select
+                  value={formData.baseUomId}
+                  onValueChange={(value) => setFormData({ ...formData, baseUomId: value })}
+                  required
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Select base unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uoms.map((uom) => (
+                      <SelectItem key={uom.id} value={uom.id}>
+                        {uom.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowNewUom(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  value={newUom}
+                  onChange={(e) => setNewUom(e.target.value)}
+                  placeholder="New unit (e.g., Kg)"
+                />
+                <Button type="button" size="sm" onClick={handleAddUom}>
+                  Add
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowNewUom(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Sale Unit */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-nexabook-900">
+              Default Sale Unit
+            </label>
+            <Select
+              value={formData.saleUomId}
+              onValueChange={(value) => setFormData({ ...formData, saleUomId: value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Same as base unit" />
+              </SelectTrigger>
+              <SelectContent>
+                {uoms.map((uom) => (
+                  <SelectItem key={uom.id} value={uom.id}>
+                    {uom.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Alternative Unit Toggle */}
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-nexabook-600 hover:text-nexabook-900 p-0 h-auto font-medium"
+            onClick={() => setShowAltUnit(!showAltUnit)}
+          >
+            {showAltUnit ? "- Remove Alternative Unit" : "+ Add Alternative Unit/Conversion"}
+          </Button>
+        </div>
+
+        {showAltUnit && (
+          <div className="bg-nexabook-50 p-4 rounded-lg space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-nexabook-900">Alternative Unit</label>
+                <Select value={altUnitId} onValueChange={setAltUnitId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uoms.map((uom) => (
+                      <SelectItem key={uom.id} value={uom.id}>
+                        {uom.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-nexabook-900">Conversion Factor</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-nexabook-600 font-medium">1 {uoms.find(u => u.id === altUnitId)?.name || 'Alt Unit'} =</span>
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    value={convFactor}
+                    onChange={(e) => setConvFactor(e.target.value)}
+                    className="w-24 h-9"
+                  />
+                  <span className="text-sm text-nexabook-600 font-medium">
+                    {uoms.find(u => u.id === formData.baseUomId)?.name || 'Base Units'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-nexabook-500 italic">
+              Example: 1 Box = 12 Pieces. Unit tracking will be in Pieces.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Sale Price */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-nexabook-900">
@@ -297,12 +468,13 @@ function AddProductForm({
 
         {/* Opening Stock */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-nexabook-900">Opening Stock</label>
+          <label className="text-sm font-medium text-nexabook-900">Opening Stock (Base Unit)</label>
           <Input
             type="number"
+            step="0.01"
             value={formData.openingStock}
             onChange={(e) =>
-              setFormData({ ...formData, openingStock: parseInt(e.target.value) || 0 })
+              setFormData({ ...formData, openingStock: e.target.value })
             }
             placeholder="0"
           />
@@ -310,12 +482,13 @@ function AddProductForm({
 
         {/* Min Stock Level */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-nexabook-900">Min Stock Level</label>
+          <label className="text-sm font-medium text-nexabook-900">Min Stock Level (Base Unit)</label>
           <Input
             type="number"
+            step="0.01"
             value={formData.minStockLevel}
             onChange={(e) =>
-              setFormData({ ...formData, minStockLevel: parseInt(e.target.value) || 0 })
+              setFormData({ ...formData, minStockLevel: e.target.value })
             }
             placeholder="0"
           />
@@ -343,7 +516,7 @@ function AddProductForm({
 
       {/* Submit Button */}
       <DialogFooter>
-        <Button type="submit" disabled={loading} className="w-full">
+        <Button type="submit" disabled={loading} className="w-full bg-nexabook-900">
           {loading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -428,8 +601,8 @@ export default function InventoryPage() {
 
   // Get stock status
   const getStockStatus = (product: ProductTableRow) => {
-    const stock = product.currentStock || 0;
-    const minLevel = product.minStockLevel || 0;
+    const stock = parseFloat(product.currentStock || "0");
+    const minLevel = parseFloat(product.minStockLevel || "0");
 
     if (stock === 0) {
       return { label: "Out of Stock", variant: "destructive" as const };
@@ -491,6 +664,7 @@ export default function InventoryPage() {
             </DialogHeader>
             <AddProductForm
               categories={categories}
+              uoms={uoms}
               onSubmit={handleAddProduct}
               loading={submitting}
             />
@@ -637,11 +811,11 @@ export default function InventoryPage() {
                 <tbody>
                   {products.map((product, index) => {
                     const status = getStockStatus(product);
-                    const stock = product.currentStock || 0;
+                    const stock = parseFloat(product.currentStock || "0");
+                    const minLevel = parseFloat(product.minStockLevel || "0");
                     const isLowStock =
                       stock > 0 &&
-                      product.minStockLevel !== null &&
-                      stock <= (product.minStockLevel || 0);
+                      stock <= minLevel;
 
                     return (
                       <motion.tr

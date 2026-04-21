@@ -123,6 +123,17 @@ export const productCategories = pgTable('product_categories', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Units of Measure (UOM)
+export const uoms = pgTable('uoms', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 50 }).notNull(), // e.g., Kg, Pcs, Box
+  description: text('description'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Products/Services
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -132,14 +143,28 @@ export const products = pgTable('products', {
   barcode: varchar('barcode', { length: 100 }),
   categoryId: uuid('category_id').references(() => productCategories.id),
   type: productTypeEnum('type').notNull().default('product'),
-  unit: varchar('unit', { length: 20 }).default('Pcs'), // Pcs, Kg, Ltr, Mtr, Box, etc.
+  unit: varchar('unit', { length: 20 }).default('Pcs'), // Deprecated: use baseUomId
+  baseUomId: uuid('base_uom_id').references(() => uoms.id),
+  saleUomId: uuid('sale_uom_id').references(() => uoms.id),
   description: text('description'),
   salePrice: decimal('sale_price', { precision: 12, scale: 2 }),
   costPrice: decimal('cost_price', { precision: 12, scale: 2 }),
-  currentStock: integer('current_stock').default(0),
-  minStockLevel: integer('min_stock_level').default(0),
+  currentStock: decimal('current_stock', { precision: 12, scale: 2 }).default('0'),
+  minStockLevel: decimal('min_stock_level', { precision: 12, scale: 2 }).default('0'),
   taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0'),
   isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// UOM Conversions
+export const uomConversions = pgTable('uom_conversions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  fromUomId: uuid('from_uom_id').references(() => uoms.id).notNull(),
+  toUomId: uuid('to_uom_id').references(() => uoms.id).notNull(),
+  conversionFactor: decimal('conversion_factor', { precision: 12, scale: 4 }).notNull(), // 1 fromUom = conversionFactor * toUom
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -149,10 +174,45 @@ export const productCategoriesRelations = relations(productCategories, ({ many }
   products: many(products),
 }));
 
-export const productsRelations = relations(products, ({ one }) => ({
+export const uomsRelations = relations(uoms, ({ many }) => ({
+  productsBase: many(products, { relationName: 'baseUom' }),
+  productsSale: many(products, { relationName: 'saleUom' }),
+  conversionsFrom: many(uomConversions, { relationName: 'fromUom' }),
+  conversionsTo: many(uomConversions, { relationName: 'toUom' }),
+}));
+
+export const productsRelations = relations(products, ({ one, many }) => ({
   category: one(productCategories, {
     fields: [products.categoryId],
     references: [productCategories.id],
+  }),
+  baseUom: one(uoms, {
+    fields: [products.baseUomId],
+    references: [uoms.id],
+    relationName: 'baseUom',
+  }),
+  saleUom: one(uoms, {
+    fields: [products.saleUomId],
+    references: [uoms.id],
+    relationName: 'saleUom',
+  }),
+  conversions: many(uomConversions),
+}));
+
+export const uomConversionsRelations = relations(uomConversions, ({ one }) => ({
+  product: one(products, {
+    fields: [uomConversions.productId],
+    references: [products.id],
+  }),
+  fromUom: one(uoms, {
+    fields: [uomConversions.fromUomId],
+    references: [uoms.id],
+    relationName: 'fromUom',
+  }),
+  toUom: one(uoms, {
+    fields: [uomConversions.toUomId],
+    references: [uoms.id],
+    relationName: 'toUom',
   }),
 }));
 
@@ -210,6 +270,7 @@ export const invoiceItems = pgTable('invoice_items', {
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   invoiceId: uuid('invoice_id').references(() => invoices.id).notNull(),
   productId: uuid('product_id').references(() => products.id),
+  uomId: uuid('uom_id').references(() => uoms.id),
   description: text('description').notNull(),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -239,6 +300,10 @@ export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
   product: one(products, {
     fields: [invoiceItems.productId],
     references: [products.id],
+  }),
+  uom: one(uoms, {
+    fields: [invoiceItems.uomId],
+    references: [uoms.id],
   }),
 }));
 
@@ -506,6 +571,7 @@ export const purchaseItems = pgTable('purchase_items', {
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   purchaseInvoiceId: uuid('purchase_invoice_id').references(() => purchaseInvoices.id).notNull(),
   productId: uuid('product_id').references(() => products.id),
+  uomId: uuid('uom_id').references(() => uoms.id),
   description: text('description').notNull(),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -602,6 +668,10 @@ export const purchaseItemsRelations = relations(purchaseItems, ({ one }) => ({
   product: one(products, {
     fields: [purchaseItems.productId],
     references: [products.id],
+  }),
+  uom: one(uoms, {
+    fields: [purchaseItems.uomId],
+    references: [uoms.id],
   }),
 }));
 
@@ -1559,8 +1629,12 @@ export type ChartOfAccount = typeof chartOfAccounts.$inferSelect;
 export type NewChartOfAccount = typeof chartOfAccounts.$inferInsert;
 export type ProductCategory = typeof productCategories.$inferSelect;
 export type NewProductCategory = typeof productCategories.$inferInsert;
+export type Uom = typeof uoms.$inferSelect;
+export type NewUom = typeof uoms.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
+export type UomConversion = typeof uomConversions.$inferSelect;
+export type NewUomConversion = typeof uomConversions.$inferInsert;
 export type Customer = typeof customers.$inferSelect;
 export type NewCustomer = typeof customers.$inferInsert;
 export type Invoice = typeof invoices.$inferSelect;

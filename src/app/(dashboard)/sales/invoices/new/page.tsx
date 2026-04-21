@@ -51,12 +51,15 @@ import {
   type InvoiceFormData,
   type InvoiceLineItem,
 } from "@/lib/actions/sales";
-import { getProducts } from "@/lib/actions/inventory";
+import {
+  getProducts,
+  getUoms,
+} from "@/lib/actions/inventory";
 import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
 import { getInvoiceWithDetails } from "@/lib/actions/sales";
 import { getCompanySettings } from "@/lib/actions/accounts";
 import { generateFBRQRCode, isFBREligible } from "@/lib/utils/fbr-qr";
-import { Shield, ShieldCheck, QrCode } from "lucide-react";
+import { Shield, ShieldCheck, QrCode, Box } from "lucide-react";
 import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer {
@@ -72,7 +75,14 @@ interface Product {
   currentStock: number | null;
   taxRate: string | null;
   unit: string | null;
+  baseUomId: string | null;
+  saleUomId: string | null;
   description: string | null;
+}
+
+interface Uom {
+  id: string;
+  name: string;
 }
 
 interface CashBankAccount {
@@ -86,6 +96,7 @@ function LineItemRow({
   index,
   item,
   products,
+  uoms,
   onUpdate,
   onRemove,
   onCheck,
@@ -97,6 +108,7 @@ function LineItemRow({
   index: number;
   item: InvoiceLineItem;
   products: Product[];
+  uoms: Uom[];
   onUpdate: (index: number, field: keyof InvoiceLineItem, value: string) => void;
   onRemove: (index: number) => void;
   onCheck: (index: number) => void;
@@ -115,6 +127,9 @@ function LineItemRow({
       if (product.taxRate) {
         onUpdate(index, "taxRate", product.taxRate);
       }
+      // Set default UOM (saleUomId if exists, otherwise baseUomId)
+      const defaultUomId = product.saleUomId || product.baseUomId || "";
+      onUpdate(index, "uomId", defaultUomId);
     }
   };
 
@@ -149,18 +164,38 @@ function LineItemRow({
         )}
       </div>
 
-      {/* Quantity - 1.5 cols */}
+      {/* UOM - 1 col */}
+      <div className="col-span-1 flex items-center">
+        <Select
+          value={item.uomId || ""}
+          onValueChange={(val) => onUpdate(index, "uomId", val)}
+          disabled={isChecked || !item.productId}
+        >
+          <SelectTrigger className="h-8 text-xs border-gray-300 px-1">
+            <SelectValue placeholder="Unit" />
+          </SelectTrigger>
+          <SelectContent>
+            {uoms.map((uom) => (
+              <SelectItem key={uom.id} value={uom.id} className="text-xs px-1">
+                {uom.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Quantity - 1 col */}
       <div className="col-span-1 flex items-center">
         <Input type="number" min="0" step="1" value={item.quantity} onChange={(e) => onUpdate(index, "quantity", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs" placeholder="0" />
       </div>
 
-      {/* Price - 1.5 cols */}
-      <div className="col-span-1 flex items-center">
+      {/* Price - 2 cols */}
+      <div className="col-span-2 flex items-center">
         <Input type="number" min="0" step="0.01" value={item.unitPrice} onChange={(e) => onUpdate(index, "unitPrice", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs" placeholder="0" />
       </div>
 
-      {/* Discount - 2 cols */}
-      <div className="col-span-2 flex items-center gap-1">
+      {/* Discount - 1 col */}
+      <div className="col-span-1 flex items-center gap-1">
         <Input type="number" min="0" max="100" step="0.1" value={item.discountPercentage || "0"} onChange={(e) => onUpdate(index, "discountPercentage", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs flex-1" placeholder="%" />
       </div>
 
@@ -191,6 +226,7 @@ export default function NewInvoicePage() {
   const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [uoms, setUoms] = useState<Uom[]>([]);
   const [cashBankAccounts, setCashBankAccounts] = useState<CashBankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -219,7 +255,7 @@ export default function NewInvoicePage() {
 
   // Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
-    { productId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" },
+    { productId: "", uomId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" },
   ]);
   const [checkedRows, setCheckedRows] = useState<Set<number>>(new Set());
 
@@ -227,11 +263,12 @@ export default function NewInvoicePage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [customersRes, productsRes, invoiceNumRes, cashBankRes, orgRes] = await Promise.all([
-          getCustomers(), getProducts(), getNextInvoiceNumber(), getCashBankAccounts(), getCompanySettings(),
+        const [customersRes, productsRes, invoiceNumRes, cashBankRes, orgRes, uomsRes] = await Promise.all([
+          getCustomers(), getProducts(), getNextInvoiceNumber(), getCashBankAccounts(), getCompanySettings(), getUoms(),
         ]);
         if (customersRes.success && customersRes.data) setCustomers(customersRes.data as Customer[]);
         if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
+        if (uomsRes.success && uomsRes.data) setUoms(uomsRes.data as Uom[]);
         if (invoiceNumRes.success && invoiceNumRes.data) setInvoiceNumber(invoiceNumRes.data as string);
         if (cashBankRes.success && cashBankRes.data) setCashBankAccounts(cashBankRes.data as CashBankAccount[]);
         if (orgRes.success && orgRes.data) {
@@ -258,7 +295,7 @@ export default function NewInvoicePage() {
   };
 
   const addLineItem = () => {
-    setLineItems([...lineItems, { productId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" }]);
+    setLineItems([...lineItems, { productId: "", uomId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" }]);
   };
 
   const checkRow = (index: number) => {
@@ -468,15 +505,16 @@ export default function NewInvoicePage() {
           <Card className="border-gray-200 shadow-sm">
             <div className="grid grid-cols-12 gap-2 py-2 px-2 bg-gray-100 border-b border-gray-200 text-xs font-semibold text-gray-700 uppercase">
               <div className="col-span-3 flex items-center gap-1"><Search className="h-3 w-3" />Product</div>
-              <div className="col-span-1 flex items-center"><ArrowUpDown className="h-3 w-3 mr-1" />Qty</div>
-              <div className="col-span-1 flex items-center"><ArrowUpDown className="h-3 w-3 mr-1" />Price</div>
-              <div className="col-span-2 flex items-center">Disc.</div>
+              <div className="col-span-1 flex items-center">Unit</div>
+              <div className="col-span-1 flex items-center">Qty</div>
+              <div className="col-span-2 flex items-center">Price</div>
+              <div className="col-span-1 flex items-center">Disc.</div>
               <div className="col-span-2 flex items-center">Amount</div>
               <div className="col-span-2 text-center">Action</div>
             </div>
             <div className="max-h-[350px] overflow-y-auto">
               {lineItems.map((item, i) => (
-                <LineItemRow key={i} index={i} item={item} products={products} onUpdate={updateLineItem} onRemove={removeLineItem} onCheck={checkRow} isChecked={checkedRows.has(i)} canRemove={lineItems.length > 1} onKeyDown={handleKeyDown} lineAmount={lineAmounts[i]} />
+                <LineItemRow key={i} index={i} item={item} products={products} uoms={uoms} onUpdate={updateLineItem} onRemove={removeLineItem} onCheck={checkRow} isChecked={checkedRows.has(i)} canRemove={lineItems.length > 1} onKeyDown={handleKeyDown} lineAmount={lineAmounts[i]} />
               ))}
             </div>
             <div className="p-2 border-t border-gray-200">

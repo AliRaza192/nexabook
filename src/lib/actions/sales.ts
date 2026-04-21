@@ -31,6 +31,7 @@ import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber } from "./shared";
+import { convertToBaseUnit } from "./inventory";
 
 // ==================== CUSTOMER ACTIONS ====================
 
@@ -220,6 +221,7 @@ export async function deleteCustomer(customerId: string) {
 
 export interface InvoiceLineItem {
   productId?: string;
+  uomId?: string;
   description: string;
   quantity: string;
   unitPrice: string;
@@ -586,6 +588,7 @@ export async function createInvoice(data: InvoiceFormData) {
         orgId,
         invoiceId: newInvoice.id,
         productId: item.productId || null,
+        uomId: item.uomId || null,
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -670,11 +673,18 @@ export async function approveInvoice(invoiceId: string) {
 
           if (product) {
             const available = product.currentStock || 0;
-            const required = parseFloat(item.quantity);
-            if (required > available) {
-              throw new Error(`Insufficient stock for ${product.name || 'product'}. Required: ${required}, Available: ${available}`);
+            const quantity = parseFloat(item.quantity);
+            
+            // Convert to base unit if uomId is provided
+            let baseQuantity = quantity;
+            if (item.uomId) {
+              baseQuantity = await convertToBaseUnit(item.productId, quantity, item.uomId);
             }
-            const newStock = available - required;
+
+            if (baseQuantity > available) {
+              throw new Error(`Insufficient stock for ${product.name || 'product'}. Required: ${baseQuantity}, Available: ${available}`);
+            }
+            const newStock = Math.round(available - baseQuantity);
             await tx
               .update(products)
               .set({ currentStock: newStock })
@@ -682,13 +692,13 @@ export async function approveInvoice(invoiceId: string) {
 
             // Log stock movement
             const unitCost = product.costPrice || '0';
-            const totalValue = (required * parseFloat(unitCost)).toFixed(2);
+            const totalValue = (baseQuantity * parseFloat(unitCost)).toFixed(2);
             await tx.insert(stockMovements).values({
               orgId,
               productId: item.productId,
               movementType: 'out',
               reason: 'sale',
-              quantity: item.quantity,
+              quantity: String(baseQuantity),
               unitCost,
               totalValue,
               referenceType: 'invoice',

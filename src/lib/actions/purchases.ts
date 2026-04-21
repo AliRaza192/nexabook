@@ -27,6 +27,7 @@ import { eq, and, or, ilike, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber } from "./shared";
+import { convertToBaseUnit } from "./inventory";
 
 
 // Generate journal entry number
@@ -170,6 +171,7 @@ export async function deleteVendor(vendorId: string) {
 
 export interface PurchaseInvoiceLineItem {
   productId?: string;
+  uomId?: string;
   description: string;
   quantity: string;
   unitPrice: string;
@@ -290,6 +292,7 @@ export async function createPurchaseInvoice(data: PurchaseInvoiceFormData) {
         orgId,
         purchaseInvoiceId: newInvoice.id,
         productId: item.productId || null,
+        uomId: item.uomId || null,
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -362,7 +365,16 @@ export async function approvePurchaseInvoice(invoiceId: string) {
             .limit(1);
 
           if (product) {
-            const newStock = (product.currentStock || 0) + parseFloat(item.quantity);
+            const available = product.currentStock || 0;
+            const quantity = parseFloat(item.quantity);
+            
+            // Convert to base unit if uomId is provided
+            let baseQuantity = quantity;
+            if (item.uomId) {
+              baseQuantity = await convertToBaseUnit(item.productId, quantity, item.uomId);
+            }
+
+            const newStock = Math.round(available + baseQuantity);
             await tx
               .update(products)
               .set({ currentStock: newStock, costPrice: item.unitPrice })
@@ -370,13 +382,13 @@ export async function approvePurchaseInvoice(invoiceId: string) {
 
             // Log stock movement
             const unitCost = item.unitPrice;
-            const totalValue = (parseFloat(item.quantity) * parseFloat(unitCost)).toFixed(2);
+            const totalValue = (baseQuantity * parseFloat(unitCost)).toFixed(2);
             await tx.insert(stockMovements).values({
               orgId,
               productId: item.productId,
               movementType: 'in',
               reason: 'purchase',
-              quantity: item.quantity,
+              quantity: String(baseQuantity),
               unitCost,
               totalValue,
               referenceType: 'purchase_invoice',

@@ -47,7 +47,7 @@ import {
   type PurchaseInvoiceFormData,
   type PurchaseInvoiceLineItem,
 } from "@/lib/actions/purchases";
-import { getProducts } from "@/lib/actions/inventory";
+import { getProducts, getUoms } from "@/lib/actions/inventory";
 
 interface Vendor {
   id: string;
@@ -63,7 +63,14 @@ interface Product {
   currentStock: number | null;
   taxRate: string | null;
   unit: string | null;
+  baseUomId: string | null;
+  saleUomId: string | null;
   description: string | null;
+}
+
+interface Uom {
+  id: string;
+  name: string;
 }
 
 // Line Item Row
@@ -71,6 +78,7 @@ function LineItemRow({
   index,
   item,
   products,
+  uoms,
   onUpdate,
   onRemove,
   onCheck,
@@ -82,6 +90,7 @@ function LineItemRow({
   index: number;
   item: PurchaseInvoiceLineItem;
   products: Product[];
+  uoms: Uom[];
   onUpdate: (index: number, field: keyof PurchaseInvoiceLineItem, value: string) => void;
   onRemove: (index: number) => void;
   onCheck: (index: number) => void;
@@ -100,6 +109,9 @@ function LineItemRow({
       if (product.taxRate) {
         onUpdate(index, "taxRate", product.taxRate);
       }
+      // Set default UOM (baseUomId for purchases usually)
+      const defaultUomId = product.baseUomId || product.saleUomId || "";
+      onUpdate(index, "uomId", defaultUomId);
     }
   };
 
@@ -134,50 +146,39 @@ function LineItemRow({
         )}
       </div>
 
-      {/* Quantity - 1.5 cols */}
+      {/* UOM - 1 col */}
       <div className="col-span-1 flex items-center">
-        <Input
-          type="number"
-          min="0"
-          step="1"
-          value={item.quantity}
-          onChange={(e) => onUpdate(index, "quantity", e.target.value)}
-          onKeyDown={(ev) => onKeyDown(ev, index)}
-          disabled={isChecked}
-          className="h-8 text-xs"
-          placeholder="0"
-        />
+        <Select
+          value={item.uomId || ""}
+          onValueChange={(val) => onUpdate(index, "uomId", val)}
+          disabled={isChecked || !item.productId}
+        >
+          <SelectTrigger className="h-8 text-xs border-gray-300 px-1">
+            <SelectValue placeholder="Unit" />
+          </SelectTrigger>
+          <SelectContent>
+            {uoms.map((uom) => (
+              <SelectItem key={uom.id} value={uom.id} className="text-xs px-1">
+                {uom.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      {/* Price - 1.5 cols */}
+      {/* Quantity - 1 col */}
       <div className="col-span-1 flex items-center">
-        <Input
-          type="number"
-          min="0"
-          step="0.01"
-          value={item.unitPrice}
-          onChange={(e) => onUpdate(index, "unitPrice", e.target.value)}
-          onKeyDown={(ev) => onKeyDown(ev, index)}
-          disabled={isChecked}
-          className="h-8 text-xs"
-          placeholder="0"
-        />
+        <Input type="number" min="0" step="1" value={item.quantity} onChange={(e) => onUpdate(index, "quantity", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs" placeholder="0" />
       </div>
 
-      {/* Discount - 2 cols */}
-      <div className="col-span-2 flex items-center gap-1">
-        <Input
-          type="number"
-          min="0"
-          max="100"
-          step="0.1"
-          value={item.discountPercentage || "0"}
-          onChange={(e) => onUpdate(index, "discountPercentage", e.target.value)}
-          onKeyDown={(ev) => onKeyDown(ev, index)}
-          disabled={isChecked}
-          className="h-8 text-xs flex-1"
-          placeholder="%"
-        />
+      {/* Price - 2 cols */}
+      <div className="col-span-2 flex items-center">
+        <Input type="number" min="0" step="0.01" value={item.unitPrice} onChange={(e) => onUpdate(index, "unitPrice", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs" placeholder="0" />
+      </div>
+
+      {/* Discount - 1 col */}
+      <div className="col-span-1 flex items-center gap-1">
+        <Input type="number" min="0" max="100" step="0.1" value={item.discountPercentage || "0"} onChange={(e) => onUpdate(index, "discountPercentage", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs flex-1" placeholder="%" />
       </div>
 
       {/* Amount - 2 cols */}
@@ -190,30 +191,12 @@ function LineItemRow({
       {/* Actions - 2 cols */}
       <div className="col-span-2 flex items-center justify-center gap-1">
         {!isChecked ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onCheck(index)}
-            className="h-7 w-7 p-0 text-green-600 hover:bg-green-50 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Lock"
-          >
-            <Check className="h-3.5 w-3.5" />
-          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onCheck(index)} className="h-7 w-7 p-0 text-green-600 hover:bg-green-50 opacity-0 group-hover:opacity-100 transition-opacity" title="Lock"><Check className="h-3.5 w-3.5" /></Button>
         ) : (
-          <Badge className="h-7 text-xs bg-green-100 text-green-700 border-green-200">
-            <Check className="h-3 w-3 mr-1" />Locked
-          </Badge>
+          <Badge className="h-7 text-xs bg-green-100 text-green-700 border-green-200"><Check className="h-3 w-3 mr-1" />Locked</Badge>
         )}
         {canRemove && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onRemove(index)}
-            className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Remove"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onRemove(index)} className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
         )}
       </div>
     </div>
@@ -225,6 +208,7 @@ export default function NewPurchaseInvoicePage() {
   const router = useRouter();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [uoms, setUoms] = useState<Uom[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -241,7 +225,7 @@ export default function NewPurchaseInvoicePage() {
 
   // Line items
   const [lineItems, setLineItems] = useState<PurchaseInvoiceLineItem[]>([
-    { productId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" },
+    { productId: "", uomId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" },
   ]);
   const [checkedRows, setCheckedRows] = useState<Set<number>>(new Set());
 
@@ -249,13 +233,15 @@ export default function NewPurchaseInvoicePage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [vendorsRes, productsRes, billNumRes] = await Promise.all([
+        const [vendorsRes, productsRes, billNumRes, uomsRes] = await Promise.all([
           getVendors(),
           getProducts(),
           getNextBillNumber(),
+          getUoms(),
         ]);
         if (vendorsRes.success && vendorsRes.data) setVendors(vendorsRes.data as Vendor[]);
         if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
+        if (uomsRes.success && uomsRes.data) setUoms(uomsRes.data as Uom[]);
         if (billNumRes.success && billNumRes.data) setBillNumber(billNumRes.data as string);
       } catch (error) {
       } finally {
@@ -279,7 +265,7 @@ export default function NewPurchaseInvoicePage() {
   };
 
   const addLineItem = () => {
-    setLineItems([...lineItems, { productId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" }]);
+    setLineItems([...lineItems, { productId: "", uomId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" }]);
   };
 
   const checkRow = (index: number) => {
@@ -522,15 +508,10 @@ export default function NewPurchaseInvoicePage() {
                 <Search className="h-3 w-3" />
                 Product
               </div>
-              <div className="col-span-1 flex items-center">
-                <ArrowUpDown className="h-3 w-3 mr-1" />
-                Qty
-              </div>
-              <div className="col-span-1 flex items-center">
-                <ArrowUpDown className="h-3 w-3 mr-1" />
-                Price
-              </div>
-              <div className="col-span-2 flex items-center">Disc.</div>
+              <div className="col-span-1 flex items-center">Unit</div>
+              <div className="col-span-1 flex items-center">Qty</div>
+              <div className="col-span-2 flex items-center">Price</div>
+              <div className="col-span-1 flex items-center">Disc.</div>
               <div className="col-span-2 flex items-center">Amount</div>
               <div className="col-span-2 text-center">Action</div>
             </div>
@@ -541,6 +522,7 @@ export default function NewPurchaseInvoicePage() {
                   index={i}
                   item={item}
                   products={products}
+                  uoms={uoms}
                   onUpdate={updateLineItem}
                   onRemove={removeLineItem}
                   onCheck={checkRow}

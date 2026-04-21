@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { products, productCategories } from "@/db/schema";
+import { products, productCategories, uoms, uomConversions } from "@/db/schema";
 import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentOrgId } from "./shared";
@@ -13,12 +13,24 @@ export interface ProductFormData {
   barcode?: string;
   categoryId?: string;
   type: 'product' | 'service';
-  unit?: string;
+  unit?: string; // Still here for backward compatibility
+  baseUomId?: string;
+  saleUomId?: string;
   description?: string;
   salePrice: string;
   costPrice: string;
-  openingStock: number;
-  minStockLevel: number;
+  openingStock: string;
+  minStockLevel: string;
+  conversions?: {
+    fromUomId: string;
+    toUomId: string;
+    conversionFactor: string;
+  }[];
+}
+
+export interface UomFormData {
+  name: string;
+  description?: string;
 }
 
 export interface ProductWithCategory {
@@ -34,11 +46,13 @@ export interface ProductWithCategory {
   } | null;
   type: 'product' | 'service';
   unit: string | null;
+  baseUomId: string | null;
+  saleUomId: string | null;
   description: string | null;
   salePrice: string | null;
   costPrice: string | null;
-  currentStock: number | null;
-  minStockLevel: number | null;
+  currentStock: string | null;
+  minStockLevel: string | null;
   taxRate: string | null;
   isActive: boolean;
   createdAt: Date;
@@ -86,6 +100,8 @@ export async function getProducts(searchQuery?: string, categoryId?: string) {
         categoryId: products.categoryId,
         type: products.type,
         unit: products.unit,
+        baseUomId: products.baseUomId,
+        saleUomId: products.saleUomId,
         description: products.description,
         salePrice: products.salePrice,
         costPrice: products.costPrice,
@@ -146,6 +162,8 @@ export async function addProduct(data: ProductFormData) {
         categoryId: data.categoryId || null,
         type: data.type,
         unit: data.unit || 'Pcs',
+        baseUomId: data.baseUomId || null,
+        saleUomId: data.saleUomId || null,
         description: data.description,
         salePrice: data.salePrice,
         costPrice: data.costPrice,
@@ -153,6 +171,19 @@ export async function addProduct(data: ProductFormData) {
         minStockLevel: data.minStockLevel,
       })
       .returning();
+
+    // Handle conversions
+    if (data.conversions && data.conversions.length > 0) {
+      const conversionsToInsert = data.conversions.map((conv) => ({
+        orgId,
+        productId: newProduct.id,
+        fromUomId: conv.fromUomId,
+        toUomId: conv.toUomId,
+        conversionFactor: conv.conversionFactor,
+      }));
+
+      await db.insert(uomConversions).values(conversionsToInsert);
+    }
 
     // TODO: Link to 'Inventory Asset' account in COA
     // This would create a journal entry to debit Inventory Asset account
@@ -273,6 +304,8 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
     if (data.categoryId !== undefined) updateData.categoryId = data.categoryId;
     if (data.type !== undefined) updateData.type = data.type;
     if (data.unit !== undefined) updateData.unit = data.unit;
+    if (data.baseUomId !== undefined) updateData.baseUomId = data.baseUomId;
+    if (data.saleUomId !== undefined) updateData.saleUomId = data.saleUomId;
     if (data.description !== undefined) updateData.description = data.description;
     if (data.salePrice !== undefined) updateData.salePrice = data.salePrice;
     if (data.costPrice !== undefined) updateData.costPrice = data.costPrice;
@@ -288,11 +321,116 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
       return { success: false, error: "Product not found" };
     }
 
+    // Handle conversions update (delete and re-insert for simplicity in this prototype)
+    if (data.conversions !== undefined) {
+      await db.delete(uomConversions).where(eq(uomConversions.productId, productId));
+      
+      if (data.conversions.length > 0) {
+        const conversionsToInsert = data.conversions.map((conv) => ({
+          orgId,
+          productId: productId,
+          fromUomId: conv.fromUomId,
+          toUomId: conv.toUomId,
+          conversionFactor: conv.conversionFactor,
+        }));
+
+        await db.insert(uomConversions).values(conversionsToInsert);
+      }
+    }
+
     revalidatePath('/inventory');
     
     return { success: true, data: updatedProduct, message: "Product updated successfully" };
   } catch (error) {
     return { success: false, error: "Failed to update product" };
+  }
+}
+
+// Get all UOMs for current organization
+export async function getUoms() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    const result = await db
+      .select()
+      .from(uoms)
+      .where(and(eq(uoms.orgId, orgId), eq(uoms.isActive, true)))
+      .orderBy(uoms.name);
+
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch UOMs" };
+  }
+}
+
+// Add a new UOM
+export async function addUom(data: UomFormData) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) {
+      return { success: false, error: "No organization found" };
+    }
+
+    if (!data.name) {
+      return { success: false, error: "UOM name is required" };
+    }
+
+    const [newUom] = await db
+      .insert(uoms)
+      .values({
+        orgId,
+        name: data.name,
+        description: data.description,
+      })
+      .returning();
+
+    revalidatePath('/inventory');
+    
+    return { success: true, data: newUom, message: "UOM added successfully" };
+  } catch (error) {
+    return { success: false, error: "Failed to add UOM" };
+  }
+}
+
+// Convert to base unit logic
+export async function convertToBaseUnit(productId: string, quantity: number, currentUomId: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return quantity;
+
+    const [product] = await db
+      .select({ baseUomId: products.baseUomId })
+      .from(products)
+      .where(and(eq(products.id, productId), eq(products.orgId, orgId)))
+      .limit(1);
+
+    if (!product || !product.baseUomId || product.baseUomId === currentUomId) {
+      return quantity;
+    }
+
+    const [conversion] = await db
+      .select({ conversionFactor: uomConversions.conversionFactor })
+      .from(uomConversions)
+      .where(
+        and(
+          eq(uomConversions.productId, productId),
+          eq(uomConversions.fromUomId, currentUomId),
+          eq(uomConversions.toUomId, product.baseUomId)
+        )
+      )
+      .limit(1);
+
+    if (conversion) {
+      return quantity * parseFloat(conversion.conversionFactor);
+    }
+
+    return quantity;
+  } catch (error) {
+    console.error("Conversion error:", error);
+    return quantity;
   }
 }
 
