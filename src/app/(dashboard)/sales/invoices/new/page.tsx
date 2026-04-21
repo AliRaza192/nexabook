@@ -54,12 +54,13 @@ import {
 import {
   getProducts,
   getUoms,
+  getWarehouses,
 } from "@/lib/actions/inventory";
 import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
 import { getInvoiceWithDetails } from "@/lib/actions/sales";
 import { getCompanySettings } from "@/lib/actions/accounts";
 import { generateFBRQRCode, isFBREligible } from "@/lib/utils/fbr-qr";
-import { Shield, ShieldCheck, QrCode, Box } from "lucide-react";
+import { Shield, ShieldCheck, QrCode, Box, Warehouse } from "lucide-react";
 import { formatPKR } from "@/lib/utils/number-format";
 
 interface Customer {
@@ -83,6 +84,12 @@ interface Product {
 interface Uom {
   id: string;
   name: string;
+}
+
+interface Warehouse {
+  id: string;
+  name: string;
+  isDefault: boolean;
 }
 
 interface CashBankAccount {
@@ -227,6 +234,7 @@ export default function NewInvoicePage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [uoms, setUoms] = useState<Uom[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [cashBankAccounts, setCashBankAccounts] = useState<CashBankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -234,6 +242,7 @@ export default function NewInvoicePage() {
   // Form state
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [customerId, setCustomerId] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split("T")[0]);
   const [dueDate, setDueDate] = useState(new Date().toISOString().split("T")[0]);
   const [reference, setReference] = useState("");
@@ -263,12 +272,19 @@ export default function NewInvoicePage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [customersRes, productsRes, invoiceNumRes, cashBankRes, orgRes, uomsRes] = await Promise.all([
-          getCustomers(), getProducts(), getNextInvoiceNumber(), getCashBankAccounts(), getCompanySettings(), getUoms(),
+        const [customersRes, productsRes, invoiceNumRes, cashBankRes, orgRes, uomsRes, warehousesRes] = await Promise.all([
+          getCustomers(), getProducts(), getNextInvoiceNumber(), getCashBankAccounts(), getCompanySettings(), getUoms(), getWarehouses(),
         ]);
         if (customersRes.success && customersRes.data) setCustomers(customersRes.data as Customer[]);
         if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
         if (uomsRes.success && uomsRes.data) setUoms(uomsRes.data as Uom[]);
+        if (warehousesRes.success && warehousesRes.data) {
+          const whs = warehousesRes.data as Warehouse[];
+          setWarehouses(whs);
+          const defaultWh = whs.find(w => w.isDefault);
+          if (defaultWh) setWarehouseId(defaultWh.id);
+          else if (whs.length > 0) setWarehouseId(whs[0].id);
+        }
         if (invoiceNumRes.success && invoiceNumRes.data) setInvoiceNumber(invoiceNumRes.data as string);
         if (cashBankRes.success && cashBankRes.data) setCashBankAccounts(cashBankRes.data as CashBankAccount[]);
         if (orgRes.success && orgRes.data) {
@@ -375,7 +391,7 @@ export default function NewInvoicePage() {
     setSubmitting(true);
     try {
       const data: InvoiceFormData = {
-        customerId, invoiceNumber, orderBooker, subject, reference,
+        customerId, warehouseId: warehouseId || undefined, invoiceNumber, orderBooker, subject, reference,
         issueDate: new Date(issueDate), dueDate: dueDate ? new Date(dueDate) : undefined,
         grossAmount: grossAmount.toFixed(2), discountPercentage: globalDiscPct.toFixed(2),
         discountAmount: effectiveGlobalDisc.toFixed(2), taxAmount: totalTax.toFixed(2),
@@ -478,15 +494,28 @@ export default function NewInvoicePage() {
             <CardContent className="p-4 space-y-3">
               {/* 5-col grid */}
               <div className="grid grid-cols-5 gap-3">
-                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Customer</Label>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Customer</Label>
                   <Select value={customerId} onValueChange={setCustomerId}><SelectTrigger className="h-9 text-xs border-gray-300"><SelectValue placeholder="Type to search customer" /></SelectTrigger><SelectContent>{customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
-                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Number</Label>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Warehouse</Label>
+                  <Select value={warehouseId} onValueChange={setWarehouseId}>
+                    <SelectTrigger className="h-9 text-xs border-gray-300">
+                      <SelectValue placeholder="Select warehouse" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {warehouses.map((w) => (
+                        <SelectItem key={w.id} value={w.id}>
+                          {w.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Number</Label>
                   <div className="flex items-center gap-2"><Input value={invoiceNumber} readOnly className="h-9 text-xs font-mono bg-green-50 border-green-300 text-green-700" /><Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => router.refresh()}><RefreshCw className="h-4 w-4 text-green-600" /></Button></div></div>
-                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Date</Label>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Date</Label>
                   <div className="relative"><Input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className="h-9 text-xs border-gray-300" /><Calendar className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" /></div></div>
-                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Due Date</Label>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Due Date</Label>
                   <div className="relative"><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-9 text-xs border-gray-300" /><Calendar className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" /></div></div>
-                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reference</Label><Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Ref #" className="h-9 text-xs border-gray-300" /></div>
               </div>
               {/* Secondary row */}
               <div className="grid grid-cols-2 gap-3">

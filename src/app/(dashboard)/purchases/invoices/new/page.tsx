@@ -17,6 +17,7 @@ import {
   Calendar,
   Search,
   ArrowUpDown,
+  Warehouse,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,7 +48,7 @@ import {
   type PurchaseInvoiceFormData,
   type PurchaseInvoiceLineItem,
 } from "@/lib/actions/purchases";
-import { getProducts, getUoms } from "@/lib/actions/inventory";
+import { getProducts, getUoms, getWarehouses } from "@/lib/actions/inventory";
 
 interface Vendor {
   id: string;
@@ -71,6 +72,12 @@ interface Product {
 interface Uom {
   id: string;
   name: string;
+}
+
+interface Warehouse {
+  id: string;
+  name: string;
+  isDefault: boolean;
 }
 
 // Line Item Row

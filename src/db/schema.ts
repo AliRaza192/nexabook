@@ -134,6 +134,27 @@ export const uoms = pgTable('uoms', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Warehouses
+export const warehouses = pgTable('warehouses', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  location: text('location'),
+  isDefault: boolean('is_default').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Warehouse Stock
+export const warehouseStock = pgTable('warehouse_stock', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  warehouseId: uuid('warehouse_id').references(() => warehouses.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  quantity: decimal('quantity', { precision: 12, scale: 2 }).notNull().default('0'),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Products/Services
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -167,6 +188,29 @@ export const uomConversions = pgTable('uom_conversions', {
   conversionFactor: decimal('conversion_factor', { precision: 12, scale: 4 }).notNull(), // 1 fromUom = conversionFactor * toUom
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Stock Transfers
+export const stockTransfers = pgTable('stock_transfers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  fromWarehouseId: uuid('from_warehouse_id').references(() => warehouses.id).notNull(),
+  toWarehouseId: uuid('to_warehouse_id').references(() => warehouses.id).notNull(),
+  transferDate: timestamp('transfer_date').notNull().defaultNow(),
+  status: varchar('status', { length: 20 }).notNull().default('Draft'), // Draft, Completed, Cancelled
+  referenceNo: varchar('reference_no', { length: 50 }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Stock Transfer Items
+export const stockTransferItems = pgTable('stock_transfer_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  transferId: uuid('transfer_id').references(() => stockTransfers.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  uomId: uuid('uom_id').references(() => uoms.id),
+  quantity: decimal('quantity', { precision: 12, scale: 2 }).notNull().default('0'),
 });
 
 // Add relations for productCategories
@@ -216,6 +260,52 @@ export const uomConversionsRelations = relations(uomConversions, ({ one }) => ({
   }),
 }));
 
+export const warehousesRelations = relations(warehouses, ({ many }) => ({
+  stock: many(warehouseStock),
+  transfersFrom: many(stockTransfers, { relationName: 'fromWarehouse' }),
+  transfersTo: many(stockTransfers, { relationName: 'toWarehouse' }),
+}));
+
+export const warehouseStockRelations = relations(warehouseStock, ({ one }) => ({
+  warehouse: one(warehouses, {
+    fields: [warehouseStock.warehouseId],
+    references: [warehouses.id],
+  }),
+  product: one(products, {
+    fields: [warehouseStock.productId],
+    references: [products.id],
+  }),
+}));
+
+export const stockTransfersRelations = relations(stockTransfers, ({ one, many }) => ({
+  fromWarehouse: one(warehouses, {
+    fields: [stockTransfers.fromWarehouseId],
+    references: [warehouses.id],
+    relationName: 'fromWarehouse',
+  }),
+  toWarehouse: one(warehouses, {
+    fields: [stockTransfers.toWarehouseId],
+    references: [warehouses.id],
+    relationName: 'toWarehouse',
+  }),
+  items: many(stockTransferItems),
+}));
+
+export const stockTransferItemsRelations = relations(stockTransferItems, ({ one }) => ({
+  transfer: one(stockTransfers, {
+    fields: [stockTransferItems.transferId],
+    references: [stockTransfers.id],
+  }),
+  product: one(products, {
+    fields: [stockTransferItems.productId],
+    references: [products.id],
+  }),
+  uom: one(uoms, {
+    fields: [stockTransferItems.uomId],
+    references: [uoms.id],
+  }),
+}));
+
 // Customers
 export const customers = pgTable('customers', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -235,13 +325,15 @@ export const customers = pgTable('customers', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-// Invoices
+// Sale Invoices
 export const invoices = pgTable('invoices', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   invoiceNumber: varchar('invoice_number', { length: 50 }).notNull(),
   customerId: uuid('customer_id').references(() => customers.id).notNull(),
-  orderBooker: varchar('order_booker', { length: 255 }).default(''),
+  warehouseId: uuid('warehouse_id').references(() => warehouses.id),
+  orderBooker: varchar('order_booker', { length: 100 }),
+
   subject: varchar('subject', { length: 255 }).default(''),
   reference: varchar('reference', { length: 100 }).default(''),
   issueDate: timestamp('issue_date').notNull(),
@@ -288,6 +380,10 @@ export const invoicesRelations = relations(invoices, ({ one, many }) => ({
   customer: one(customers, {
     fields: [invoices.customerId],
     references: [customers.id],
+  }),
+  warehouse: one(warehouses, {
+    fields: [invoices.warehouseId],
+    references: [warehouses.id],
   }),
   items: many(invoiceItems),
 }));
@@ -550,6 +646,7 @@ export const purchaseInvoices = pgTable('purchase_invoices', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   vendorId: uuid('vendor_id').references(() => vendors.id).notNull(),
+  warehouseId: uuid('warehouse_id').references(() => warehouses.id),
   billNumber: varchar('bill_number', { length: 50 }).notNull(),
   date: timestamp('date').notNull(),
   dueDate: timestamp('due_date'),
@@ -656,6 +753,10 @@ export const purchaseInvoicesRelations = relations(purchaseInvoices, ({ one, man
   vendor: one(vendors, {
     fields: [purchaseInvoices.vendorId],
     references: [vendors.id],
+  }),
+  warehouse: one(warehouses, {
+    fields: [purchaseInvoices.warehouseId],
+    references: [warehouses.id],
   }),
   items: many(purchaseItems),
 }));
@@ -1631,10 +1732,18 @@ export type ProductCategory = typeof productCategories.$inferSelect;
 export type NewProductCategory = typeof productCategories.$inferInsert;
 export type Uom = typeof uoms.$inferSelect;
 export type NewUom = typeof uoms.$inferInsert;
+export type Warehouse = typeof warehouses.$inferSelect;
+export type NewWarehouse = typeof warehouses.$inferInsert;
+export type WarehouseStock = typeof warehouseStock.$inferSelect;
+export type NewWarehouseStock = typeof warehouseStock.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type UomConversion = typeof uomConversions.$inferSelect;
 export type NewUomConversion = typeof uomConversions.$inferInsert;
+export type StockTransfer = typeof stockTransfers.$inferSelect;
+export type NewStockTransfer = typeof stockTransfers.$inferInsert;
+export type StockTransferItem = typeof stockTransferItems.$inferSelect;
+export type NewStockTransferItem = typeof stockTransferItems.$inferInsert;
 export type Customer = typeof customers.$inferSelect;
 export type NewCustomer = typeof customers.$inferInsert;
 export type Invoice = typeof invoices.$inferSelect;

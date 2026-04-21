@@ -31,7 +31,7 @@ import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber } from "./shared";
-import { convertToBaseUnit } from "./inventory";
+import { convertToBaseUnit, updateWarehouseStock } from "./inventory";
 
 // ==================== CUSTOMER ACTIONS ====================
 
@@ -232,6 +232,7 @@ export interface InvoiceLineItem {
 
 export interface InvoiceFormData {
   customerId: string;
+  warehouseId?: string;
   invoiceNumber: string;
   orderBooker?: string;
   subject?: string;
@@ -561,6 +562,7 @@ export async function createInvoice(data: InvoiceFormData) {
         orgId,
         invoiceNumber,
         customerId: data.customerId,
+        warehouseId: data.warehouseId || null,
         orderBooker: data.orderBooker || null,
         subject: data.subject || null,
         reference: data.reference || null,
@@ -672,7 +674,7 @@ export async function approveInvoice(invoiceId: string) {
             .limit(1);
 
           if (product) {
-            const available = product.currentStock || 0;
+            const available = parseFloat(product.currentStock || "0");
             const quantity = parseFloat(item.quantity);
             
             // Convert to base unit if uomId is provided
@@ -682,9 +684,15 @@ export async function approveInvoice(invoiceId: string) {
             }
 
             if (baseQuantity > available) {
-              throw new Error(`Insufficient stock for ${product.name || 'product'}. Required: ${baseQuantity}, Available: ${available}`);
+              throw new Error(`Insufficient global stock for ${product.name || 'product'}. Required: ${baseQuantity}, Available: ${available}`);
             }
-            const newStock = Math.round(available - baseQuantity);
+
+            // Update warehouse specific stock if warehouseId is set
+            if (invoice.warehouseId) {
+              await updateWarehouseStock(tx, invoice.warehouseId, item.productId, -baseQuantity);
+            }
+
+            const newStock = (available - baseQuantity).toFixed(2);
             await tx
               .update(products)
               .set({ currentStock: newStock })
@@ -705,6 +713,7 @@ export async function approveInvoice(invoiceId: string) {
               referenceId: invoiceId,
               referenceNumber: invoice.invoiceNumber,
               runningBalance: String(newStock),
+              warehouseId: invoice.warehouseId || null,
             });
           }
         }
