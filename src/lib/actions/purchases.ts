@@ -22,12 +22,13 @@ import {
   vendorPaymentAllocations,
   settlements,
   settlementLines,
+  productBatches,
 } from "@/db/schema";
 import { eq, and, or, ilike, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber } from "./shared";
-import { convertToBaseUnit, updateWarehouseStock } from "./inventory";
+import { convertToBaseUnit, updateWarehouseStock, updateBatchStock } from "./inventory";
 
 
 // Generate journal entry number
@@ -172,6 +173,9 @@ export async function deleteVendor(vendorId: string) {
 export interface PurchaseInvoiceLineItem {
   productId?: string;
   uomId?: string;
+  batchNo?: string;
+  expiryDate?: Date;
+  manufacturingDate?: Date;
   description: string;
   quantity: string;
   unitPrice: string;
@@ -295,6 +299,9 @@ export async function createPurchaseInvoice(data: PurchaseInvoiceFormData) {
         purchaseInvoiceId: newInvoice.id,
         productId: item.productId || null,
         uomId: item.uomId || null,
+        batchNo: item.batchNo || null,
+        expiryDate: item.expiryDate || null,
+        manufacturingDate: item.manufacturingDate || null,
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -361,7 +368,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
       for (const item of items) {
         if (item.productId) {
           const [product] = await tx
-            .select({ currentStock: products.currentStock })
+            .select({ currentStock: products.currentStock, isBatchTracked: products.isBatchTracked })
             .from(products)
             .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
             .limit(1);
@@ -374,6 +381,32 @@ export async function approvePurchaseInvoice(invoiceId: string) {
             let baseQuantity = quantity;
             if (item.uomId) {
               baseQuantity = await convertToBaseUnit(item.productId, quantity, item.uomId);
+            }
+
+            // Handle Batch Tracking
+            let batchId = null;
+            if (product.isBatchTracked && item.batchNo) {
+              const [newBatch] = await tx
+                .insert(productBatches)
+                .values({
+                  orgId,
+                  productId: item.productId,
+                  warehouseId: invoice.warehouseId!, // Should ideally ensure warehouseId is present
+                  batchNo: item.batchNo,
+                  expiryDate: item.expiryDate,
+                  manufacturingDate: item.manufacturingDate,
+                  costPrice: item.unitPrice,
+                  initialQty: String(baseQuantity),
+                  currentQty: String(baseQuantity),
+                })
+                .returning();
+              batchId = newBatch.id;
+              
+              // Update item with batchId
+              await tx
+                .update(purchaseItems)
+                .set({ batchId })
+                .where(eq(purchaseItems.id, item.id));
             }
 
             // Update warehouse specific stock if warehouseId is set
@@ -403,6 +436,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
               referenceNumber: invoice.billNumber,
               runningBalance: String(newStock),
               warehouseId: invoice.warehouseId || null,
+              batchId: batchId,
             });
           }
         }

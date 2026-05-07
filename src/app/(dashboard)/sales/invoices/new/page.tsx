@@ -55,6 +55,7 @@ import {
   getProducts,
   getUoms,
   getWarehouses,
+  getAvailableBatches,
 } from "@/lib/actions/inventory";
 import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
 import { getInvoiceWithDetails } from "@/lib/actions/sales";
@@ -79,6 +80,7 @@ interface Product {
   baseUomId: string | null;
   saleUomId: string | null;
   description: string | null;
+  isBatchTracked: boolean;
 }
 
 interface Uom {
@@ -104,6 +106,7 @@ function LineItemRow({
   item,
   products,
   uoms,
+  warehouseId,
   onUpdate,
   onRemove,
   onCheck,
@@ -116,6 +119,7 @@ function LineItemRow({
   item: InvoiceLineItem;
   products: Product[];
   uoms: Uom[];
+  warehouseId: string;
   onUpdate: (index: number, field: keyof InvoiceLineItem, value: string) => void;
   onRemove: (index: number) => void;
   onCheck: (index: number) => void;
@@ -124,6 +128,9 @@ function LineItemRow({
   onKeyDown: (e: React.KeyboardEvent, index: number) => void;
   lineAmount: number;
 }) {
+  const [availableBatches, setAvailableBatches] = useState<any[]>([]);
+  const [fetchingBatches, setFetchingBatches] = useState(false);
+
   const handleProductSelect = (productId: string) => {
     const product = products.find((p) => p.id === productId);
     if (product) {
@@ -137,8 +144,24 @@ function LineItemRow({
       // Set default UOM (saleUomId if exists, otherwise baseUomId)
       const defaultUomId = product.saleUomId || product.baseUomId || "";
       onUpdate(index, "uomId", defaultUomId);
+      onUpdate(index, "batchId", ""); // Reset batch
     }
   };
+
+  useEffect(() => {
+    if (item.productId && warehouseId && products.find(p => p.id === item.productId)?.isBatchTracked) {
+      setFetchingBatches(true);
+      getAvailableBatches(item.productId, warehouseId)
+        .then(res => {
+          if (res.success && res.data) {
+            setAvailableBatches(res.data);
+          }
+        })
+        .finally(() => setFetchingBatches(false));
+    } else {
+      setAvailableBatches([]);
+    }
+  }, [item.productId, warehouseId, products]);
 
   return (
     <div className="grid grid-cols-12 gap-2 py-2 px-2 border-b border-gray-200 hover:bg-blue-50/30 transition-colors group">
@@ -159,15 +182,49 @@ function LineItemRow({
             ))}
           </SelectContent>
         </Select>
+        
         {item.productId && (
-          <Textarea
-            value={item.description}
-            onChange={(e) => onUpdate(index, "description", e.target.value)}
-            placeholder="Item description..."
-            disabled={isChecked}
-            className="h-12 mt-1 text-xs resize-none border-gray-300"
-            onKeyDown={(e) => onKeyDown(e, index)}
-          />
+          <div className="mt-1 space-y-1">
+            <Textarea
+              value={item.description}
+              onChange={(e) => onUpdate(index, "description", e.target.value)}
+              placeholder="Item description..."
+              disabled={isChecked}
+              className="h-10 text-[11px] resize-none border-gray-300 py-1"
+              onKeyDown={(e) => onKeyDown(e, index)}
+            />
+            
+            {products.find(p => p.id === item.productId)?.isBatchTracked && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] font-bold text-blue-700 uppercase px-1">Select Batch *</span>
+                <Select 
+                  value={item.batchId || ""} 
+                  onValueChange={(val) => onUpdate(index, "batchId", val)}
+                  disabled={isChecked || !warehouseId}
+                >
+                  <SelectTrigger className="h-7 text-[10px] border-blue-200 bg-blue-50/30">
+                    <SelectValue placeholder={fetchingBatches ? "Loading..." : "Select batch"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableBatches.length === 0 ? (
+                      <div className="p-2 text-[10px] text-gray-500 italic">No batches available in this warehouse</div>
+                    ) : (
+                      availableBatches.map((batch) => (
+                        <SelectItem key={batch.id} value={batch.id} className="text-[10px]">
+                          <div className="flex justify-between w-full gap-4">
+                            <span className="font-medium">{batch.batchNo}</span>
+                            <span className="text-gray-500">
+                              Exp: {batch.expiryDate ? new Date(batch.expiryDate).toLocaleDateString() : 'N/A'} • Qty: {batch.currentQty}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -543,7 +600,7 @@ export default function NewInvoicePage() {
             </div>
             <div className="max-h-[350px] overflow-y-auto">
               {lineItems.map((item, i) => (
-                <LineItemRow key={i} index={i} item={item} products={products} uoms={uoms} onUpdate={updateLineItem} onRemove={removeLineItem} onCheck={checkRow} isChecked={checkedRows.has(i)} canRemove={lineItems.length > 1} onKeyDown={handleKeyDown} lineAmount={lineAmounts[i]} />
+                <LineItemRow key={i} index={i} item={item} products={products} uoms={uoms} warehouseId={warehouseId} onUpdate={updateLineItem} onRemove={removeLineItem} onCheck={checkRow} isChecked={checkedRows.has(i)} canRemove={lineItems.length > 1} onKeyDown={handleKeyDown} lineAmount={lineAmounts[i]} />
               ))}
             </div>
             <div className="p-2 border-t border-gray-200">

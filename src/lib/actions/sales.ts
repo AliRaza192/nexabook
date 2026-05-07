@@ -31,7 +31,7 @@ import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber } from "./shared";
-import { convertToBaseUnit, updateWarehouseStock } from "./inventory";
+import { convertToBaseUnit, updateWarehouseStock, updateBatchStock } from "./inventory";
 
 // ==================== CUSTOMER ACTIONS ====================
 
@@ -222,6 +222,7 @@ export async function deleteCustomer(customerId: string) {
 export interface InvoiceLineItem {
   productId?: string;
   uomId?: string;
+  batchId?: string;
   description: string;
   quantity: string;
   unitPrice: string;
@@ -544,6 +545,27 @@ export async function createInvoice(data: InvoiceFormData) {
       return { success: false, error: "Customer and at least one item are required" };
     }
 
+    // Credit limit check
+if (data.customerId) {
+  const [customer] = await db
+    .select({ creditLimit: customers.creditLimit, balance: customers.balance })
+    .from(customers)
+    .where(eq(customers.id, data.customerId));
+
+  if (customer?.creditLimit && parseFloat(customer.creditLimit) > 0) {
+    const currentBalance = parseFloat(customer.balance || '0');
+    const newInvoiceAmount = parseFloat(data.netAmount || '0');
+    const totalExposure = currentBalance + newInvoiceAmount;
+
+    if (totalExposure > parseFloat(customer.creditLimit)) {
+      return {
+        success: false,
+        error: `Credit limit exceeded! Customer balance: PKR ${currentBalance.toLocaleString('en-PK')}, Invoice: PKR ${newInvoiceAmount.toLocaleString('en-PK')}, Credit Limit: PKR ${parseFloat(customer.creditLimit).toLocaleString('en-PK')}. Total would be PKR ${totalExposure.toLocaleString('en-PK')}.`
+      };
+    }
+  }
+}
+
     // Generate invoice number
     const invoiceNumber = await generateDocumentNumber('invoice', orgId);
     if (!invoiceNumber) {
@@ -591,6 +613,7 @@ export async function createInvoice(data: InvoiceFormData) {
         invoiceId: newInvoice.id,
         productId: item.productId || null,
         uomId: item.uomId || null,
+        batchId: item.batchId || null,
         description: item.description,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -692,6 +715,11 @@ export async function approveInvoice(invoiceId: string) {
               await updateWarehouseStock(tx, invoice.warehouseId, item.productId, -baseQuantity);
             }
 
+            // Update batch specific stock if batchId is set
+            if (item.batchId) {
+              await updateBatchStock(tx, item.batchId, -baseQuantity);
+            }
+
             const newStock = (available - baseQuantity).toFixed(2);
             await tx
               .update(products)
@@ -714,6 +742,7 @@ export async function approveInvoice(invoiceId: string) {
               referenceNumber: invoice.invoiceNumber,
               runningBalance: String(newStock),
               warehouseId: invoice.warehouseId || null,
+              batchId: item.batchId || null,
             });
           }
         }

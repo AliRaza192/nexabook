@@ -67,6 +67,7 @@ interface Product {
   baseUomId: string | null;
   saleUomId: string | null;
   description: string | null;
+  isBatchTracked: boolean;
 }
 
 interface Uom {
@@ -141,15 +142,43 @@ function LineItemRow({
             ))}
           </SelectContent>
         </Select>
+        
         {item.productId && (
-          <Textarea
-            value={item.description}
-            onChange={(e) => onUpdate(index, "description", e.target.value)}
-            placeholder="Item description..."
-            disabled={isChecked}
-            className="h-12 mt-1 text-xs resize-none border-gray-300"
-            onKeyDown={(e) => onKeyDown(e, index)}
-          />
+          <div className="mt-1 space-y-1">
+            <Textarea
+              value={item.description}
+              onChange={(e) => onUpdate(index, "description", e.target.value)}
+              placeholder="Item description..."
+              disabled={isChecked}
+              className="h-10 text-[11px] resize-none border-gray-300 py-1"
+              onKeyDown={(e) => onKeyDown(e, index)}
+            />
+            
+            {products.find(p => p.id === item.productId)?.isBatchTracked && (
+              <div className="grid grid-cols-2 gap-1.5 p-1.5 bg-blue-50/50 rounded border border-blue-100">
+                <div className="space-y-0.5">
+                  <span className="text-[9px] font-bold text-blue-700 uppercase">Batch No *</span>
+                  <Input 
+                    value={item.batchNo || ""} 
+                    onChange={(e) => onUpdate(index, "batchNo", e.target.value)}
+                    placeholder="Batch #"
+                    className="h-6 text-[10px] px-1.5 border-blue-200"
+                    disabled={isChecked}
+                  />
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-[9px] font-bold text-blue-700 uppercase">Expiry *</span>
+                  <Input 
+                    type="date"
+                    value={item.expiryDate ? new Date(item.expiryDate).toISOString().split('T')[0] : ""} 
+                    onChange={(e) => onUpdate(index, "expiryDate", e.target.value)}
+                    className="h-6 text-[10px] px-1 border-blue-200"
+                    disabled={isChecked}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

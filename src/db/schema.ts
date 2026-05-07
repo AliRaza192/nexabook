@@ -155,6 +155,22 @@ export const warehouseStock = pgTable('warehouse_stock', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Product Batches
+export const productBatches = pgTable('product_batches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  warehouseId: uuid('warehouse_id').references(() => warehouses.id).notNull(),
+  batchNo: varchar('batch_no', { length: 100 }).notNull(),
+  expiryDate: timestamp('expiry_date'),
+  manufacturingDate: timestamp('manufacturing_date'),
+  costPrice: decimal('cost_price', { precision: 12, scale: 2 }),
+  initialQty: decimal('initial_qty', { precision: 12, scale: 2 }).notNull().default('0'),
+  currentQty: decimal('current_qty', { precision: 12, scale: 2 }).notNull().default('0'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Products/Services
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -168,6 +184,7 @@ export const products = pgTable('products', {
   baseUomId: uuid('base_uom_id').references(() => uoms.id),
   saleUomId: uuid('sale_uom_id').references(() => uoms.id),
   description: text('description'),
+  isBatchTracked: boolean('is_batch_tracked').notNull().default(false),
   salePrice: decimal('sale_price', { precision: 12, scale: 2 }),
   costPrice: decimal('cost_price', { precision: 12, scale: 2 }),
   currentStock: decimal('current_stock', { precision: 12, scale: 2 }).default('0'),
@@ -210,12 +227,19 @@ export const stockTransferItems = pgTable('stock_transfer_items', {
   transferId: uuid('transfer_id').references(() => stockTransfers.id).notNull(),
   productId: uuid('product_id').references(() => products.id).notNull(),
   uomId: uuid('uom_id').references(() => uoms.id),
+  batchId: uuid('batch_id').references(() => productBatches.id),
   quantity: decimal('quantity', { precision: 12, scale: 2 }).notNull().default('0'),
 });
 
-// Add relations for productCategories
-export const productCategoriesRelations = relations(productCategories, ({ many }) => ({
-  products: many(products),
+export const productBatchesRelations = relations(productBatches, ({ one }) => ({
+  product: one(products, {
+    fields: [productBatches.productId],
+    references: [products.id],
+  }),
+  warehouse: one(warehouses, {
+    fields: [productBatches.warehouseId],
+    references: [warehouses.id],
+  }),
 }));
 
 export const uomsRelations = relations(uoms, ({ many }) => ({
@@ -241,6 +265,7 @@ export const productsRelations = relations(products, ({ one, many }) => ({
     relationName: 'saleUom',
   }),
   conversions: many(uomConversions),
+  batches: many(productBatches),
 }));
 
 export const uomConversionsRelations = relations(uomConversions, ({ one }) => ({
@@ -304,6 +329,10 @@ export const stockTransferItemsRelations = relations(stockTransferItems, ({ one 
     fields: [stockTransferItems.uomId],
     references: [uoms.id],
   }),
+  batch: one(productBatches, {
+    fields: [stockTransferItems.batchId],
+    references: [productBatches.id],
+  }),
 }));
 
 // Customers
@@ -363,6 +392,7 @@ export const invoiceItems = pgTable('invoice_items', {
   invoiceId: uuid('invoice_id').references(() => invoices.id).notNull(),
   productId: uuid('product_id').references(() => products.id),
   uomId: uuid('uom_id').references(() => uoms.id),
+  batchId: uuid('batch_id').references(() => productBatches.id),
   description: text('description').notNull(),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -400,6 +430,10 @@ export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
   uom: one(uoms, {
     fields: [invoiceItems.uomId],
     references: [uoms.id],
+  }),
+  batch: one(productBatches, {
+    fields: [invoiceItems.batchId],
+    references: [productBatches.id],
   }),
 }));
 
@@ -669,6 +703,10 @@ export const purchaseItems = pgTable('purchase_items', {
   purchaseInvoiceId: uuid('purchase_invoice_id').references(() => purchaseInvoices.id).notNull(),
   productId: uuid('product_id').references(() => products.id),
   uomId: uuid('uom_id').references(() => uoms.id),
+  batchId: uuid('batch_id').references(() => productBatches.id),
+  batchNo: varchar('batch_no', { length: 100 }),
+  expiryDate: timestamp('expiry_date'),
+  manufacturingDate: timestamp('manufacturing_date'),
   description: text('description').notNull(),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -773,6 +811,10 @@ export const purchaseItemsRelations = relations(purchaseItems, ({ one }) => ({
   uom: one(uoms, {
     fields: [purchaseItems.uomId],
     references: [uoms.id],
+  }),
+  batch: one(productBatches, {
+    fields: [purchaseItems.batchId],
+    references: [productBatches.id],
   }),
 }));
 
@@ -1736,6 +1778,8 @@ export type Warehouse = typeof warehouses.$inferSelect;
 export type NewWarehouse = typeof warehouses.$inferInsert;
 export type WarehouseStock = typeof warehouseStock.$inferSelect;
 export type NewWarehouseStock = typeof warehouseStock.$inferInsert;
+export type ProductBatch = typeof productBatches.$inferSelect;
+export type NewProductBatch = typeof productBatches.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type UomConversion = typeof uomConversions.$inferSelect;

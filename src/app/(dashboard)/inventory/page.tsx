@@ -17,6 +17,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -132,6 +134,7 @@ function AddProductForm({
     baseUomId: "",
     saleUomId: "",
     description: "",
+    isBatchTracked: false,
     salePrice: "0",
     costPrice: "0",
     openingStock: "0",
@@ -291,6 +294,23 @@ function AddProductForm({
             onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
             placeholder="Optional"
           />
+        </div>
+
+        {/* Batch Tracking Toggle */}
+        <div className="flex items-center space-x-2 py-2">
+          <Switch
+            id="batch-tracking"
+            checked={formData.isBatchTracked}
+            onCheckedChange={(checked) => setFormData({ ...formData, isBatchTracked: checked })}
+          />
+          <div className="space-y-0.5">
+            <Label htmlFor="batch-tracking" className="text-sm font-medium text-nexabook-900">
+              Batch Tracking
+            </Label>
+            <p className="text-xs text-nexabook-500">
+              Enable expiry management for this product
+            </p>
+          </div>
         </div>
       </div>
 

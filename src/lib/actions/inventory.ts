@@ -1,8 +1,8 @@
 "use server";
 
 import { db } from "@/db";
-import { products, productCategories, uoms, uomConversions, warehouses, warehouseStock, stockTransfers, stockTransferItems, stockMovements } from "@/db/schema";
-import { eq, and, or, ilike, desc, sql } from "drizzle-orm";
+import { products, productCategories, uoms, uomConversions, warehouses, warehouseStock, stockTransfers, stockTransferItems, stockMovements, productBatches } from "@/db/schema";
+import { eq, and, or, ilike, desc, sql, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentOrgId } from "./shared";
 
@@ -17,6 +17,7 @@ export interface ProductFormData {
   baseUomId?: string;
   saleUomId?: string;
   description?: string;
+  isBatchTracked: boolean;
   salePrice: string;
   costPrice: string;
   openingStock: string;
@@ -70,6 +71,7 @@ export interface ProductWithCategory {
   baseUomId: string | null;
   saleUomId: string | null;
   description: string | null;
+  isBatchTracked: boolean;
   salePrice: string | null;
   costPrice: string | null;
   currentStock: string | null;
@@ -124,6 +126,7 @@ export async function getProducts(searchQuery?: string, categoryId?: string) {
         baseUomId: products.baseUomId,
         saleUomId: products.saleUomId,
         description: products.description,
+        isBatchTracked: products.isBatchTracked,
         salePrice: products.salePrice,
         costPrice: products.costPrice,
         currentStock: products.currentStock,
@@ -186,6 +189,7 @@ export async function addProduct(data: ProductFormData) {
         baseUomId: data.baseUomId || null,
         saleUomId: data.saleUomId || null,
         description: data.description,
+        isBatchTracked: data.isBatchTracked || false,
         salePrice: data.salePrice,
         costPrice: data.costPrice,
         currentStock: data.openingStock,
@@ -328,6 +332,7 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
     if (data.baseUomId !== undefined) updateData.baseUomId = data.baseUomId;
     if (data.saleUomId !== undefined) updateData.saleUomId = data.saleUomId;
     if (data.description !== undefined) updateData.description = data.description;
+    if (data.isBatchTracked !== undefined) updateData.isBatchTracked = data.isBatchTracked;
     if (data.salePrice !== undefined) updateData.salePrice = data.salePrice;
     if (data.costPrice !== undefined) updateData.costPrice = data.costPrice;
     if (data.minStockLevel !== undefined) updateData.minStockLevel = data.minStockLevel;
@@ -473,6 +478,118 @@ export async function deleteProduct(productId: string) {
     return { success: true, message: "Product deleted successfully" };
   } catch (error) {
     return { success: false, error: "Failed to delete product" };
+  }
+}
+
+// Get available batches for a product and warehouse
+export async function getAvailableBatches(productId: string, warehouseId: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const result = await db
+      .select()
+      .from(productBatches)
+      .where(
+        and(
+          eq(productBatches.orgId, orgId),
+          eq(productBatches.productId, productId),
+          eq(productBatches.warehouseId, warehouseId),
+          sql`${productBatches.currentQty} > 0`
+        )
+      )
+      .orderBy(asc(productBatches.expiryDate));
+
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch available batches" };
+  }
+}
+
+// Auto-select batch based on FIFO or FEFO
+export async function autoSelectBatch(productId: string, warehouseId: string, method: 'FIFO' | 'FEFO' = 'FEFO') {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return null;
+
+    let orderBy = method === 'FEFO' 
+      ? [asc(productBatches.expiryDate)] 
+      : [asc(productBatches.createdAt)];
+
+    const [batch] = await db
+      .select()
+      .from(productBatches)
+      .where(
+        and(
+          eq(productBatches.orgId, orgId),
+          eq(productBatches.productId, productId),
+          eq(productBatches.warehouseId, warehouseId),
+          sql`${productBatches.currentQty} > 0`
+        )
+      )
+      .orderBy(...orderBy)
+      .limit(1);
+
+    return batch || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// Update batch stock (Helper for Sales/Purchases)
+export async function updateBatchStock(tx: any, batchId: string, quantityChange: number) {
+  const [existing] = await tx
+    .select()
+    .from(productBatches)
+    .where(eq(productBatches.id, batchId))
+    .limit(1);
+
+  if (!existing) {
+    throw new Error("Batch not found");
+  }
+
+  const newQty = parseFloat(existing.currentQty) + quantityChange;
+  if (newQty < 0) {
+    throw new Error(`Insufficient stock in batch ${existing.batchNo}. Available: ${existing.currentQty}`);
+  }
+
+  await tx
+    .update(productBatches)
+    .set({ currentQty: newQty.toFixed(2), updatedAt: new Date() })
+    .where(eq(productBatches.id, batchId));
+}
+
+// Get expiry report data
+export async function getExpiryReport() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const result = await db
+      .select({
+        id: productBatches.id,
+        batchNo: productBatches.batchNo,
+        expiryDate: productBatches.expiryDate,
+        currentQty: productBatches.currentQty,
+        productId: products.id,
+        productName: products.name,
+        sku: products.sku,
+        warehouseName: warehouses.name,
+      })
+      .from(productBatches)
+      .innerJoin(products, eq(productBatches.productId, products.id))
+      .innerJoin(warehouses, eq(productBatches.warehouseId, warehouses.id))
+      .where(
+        and(
+          eq(productBatches.orgId, orgId),
+          sql`${productBatches.currentQty} > 0`
+        )
+      )
+      .orderBy(asc(productBatches.expiryDate));
+
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch expiry report" };
   }
 }
 

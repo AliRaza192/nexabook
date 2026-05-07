@@ -19,6 +19,7 @@ import {
   Mail,
   X,
   Copy,
+  MessageCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,7 @@ interface Invoice {
     id: string;
     name: string;
     email: string | null;
+    phone?: string | null;
   } | null;
 }
 
@@ -161,7 +163,7 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  
+
   // Email dialog state
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -271,7 +273,7 @@ export default function InvoicesPage() {
 
   const confirmSendEmail = async () => {
     if (!selectedInvoice || !selectedInvoice.customer?.email) return;
-    
+
     setSendingEmail(true);
     try {
       const response = await fetch('/api/send-invoice-email', {
@@ -305,9 +307,7 @@ export default function InvoicesPage() {
     try {
       const result = await duplicateInvoice(invoiceId);
       if (result.success && result.data) {
-        // Show success message
         alert(`Document duplicated as ${result.invoiceNumber}. You are now editing the copy.`);
-        // Redirect to edit the new invoice
         window.location.href = `/sales/invoices/new?id=${result.data.id}`;
       } else {
         alert(result.error || "Failed to duplicate invoice");
@@ -316,6 +316,32 @@ export default function InvoicesPage() {
       console.error("Failed to duplicate invoice:", error);
       alert("Failed to duplicate invoice. Please try again.");
     }
+  };
+
+  // WhatsApp Share
+  const handleWhatsAppShare = (invoice: Invoice) => {
+    const customerName = invoice.customer?.name || "Customer";
+    const amount = invoice.netAmount
+      ? `PKR ${parseFloat(invoice.netAmount).toLocaleString("en-PK", {
+          minimumFractionDigits: 2,
+        })}`
+      : "N/A";
+    const dueDate = invoice.dueDate
+      ? new Date(invoice.dueDate).toLocaleDateString("en-PK")
+      : "N/A";
+
+    const message = encodeURIComponent(
+      `Dear ${customerName},\n\nYour Invoice *${invoice.invoiceNumber}* is ready.\n\n` +
+      `Amount Due: *${amount}*\nDue Date: *${dueDate}*\n\n` +
+      `Please make payment at your earliest convenience.\n\nThank you for your business!`
+    );
+
+    const rawPhone = invoice.customer?.phone?.replace(/[^0-9]/g, "") || "";
+    const url = rawPhone
+      ? `https://wa.me/92${rawPhone.replace(/^0/, "")}?text=${message}`
+      : `https://wa.me/?text=${message}`;
+
+    window.open(url, "_blank");
   };
 
   if (loading && !invoices.length) {
@@ -543,42 +569,53 @@ export default function InvoicesPage() {
                                 Sent ✓
                               </Badge>
                             )}
-                            
+
                             <div className="flex items-center gap-1">
-                            {/* Email Button */}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleSendEmail(invoice)}
-                              className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
-                              title="Send Email"
-                              disabled={!invoice.customer?.email}
-                            >
-                              <Mail className="h-4 w-4" />
-                            </Button>
+                              {/* Email Button */}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleSendEmail(invoice)}
+                                className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
+                                title="Send Email"
+                                disabled={!invoice.customer?.email}
+                              >
+                                <Mail className="h-4 w-4" />
+                              </Button>
 
-                            {/* Download PDF Button */}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDownloadPDF(invoice.id)}
-                              className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
-                              title="Download PDF"
-                            >
-                              <Download className="h-4 w-4" />
-                            </Button>
+                              {/* Download PDF Button */}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDownloadPDF(invoice.id)}
+                                className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
+                                title="Download PDF"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
 
-                            {/* Duplicate Button */}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDuplicate(invoice.id)}
-                              className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
-                              title="Duplicate Invoice"
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                          </div>
+                              {/* Duplicate Button */}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDuplicate(invoice.id)}
+                                className="h-8 w-8 p-0 text-nexabook-600 hover:bg-nexabook-100"
+                                title="Duplicate Invoice"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+
+                              {/* WhatsApp Share Button */}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleWhatsAppShare(invoice)}
+                                className="h-8 w-8 p-0 text-green-600 hover:bg-green-50"
+                                title="Share on WhatsApp"
+                              >
+                                <MessageCircle className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                         </td>
                       </motion.tr>

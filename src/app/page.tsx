@@ -254,7 +254,8 @@ export default function LandingPage() {
             <motion.div variants={fadeInUp} className="mb-6">
               <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm text-sm font-medium border border-white/20">
                 <Star className="h-4 w-4 text-yellow-400" />
-                Trusted by 500+ businesses across Pakistan
+                Built for Pakistani Businesses — Now in Early Access
+
               </span>
             </motion.div>
 
@@ -311,11 +312,11 @@ export default function LandingPage() {
             variants={staggerContainer}
             className="grid grid-cols-2 lg:grid-cols-4 gap-8"
           >
-            {[
-              { value: "10K+", label: "Invoices Generated" },
-              { value: "500+", label: "Businesses Trust Us" },
-              { value: "Rs. 2B+", label: "Transactions Processed" },
-              { value: "99.9%", label: "Uptime Guarantee" },
+           {[
+              { value: "Beta", label: "Early Access" },
+              { value: "Free", label: "Starter Plan Always" },
+              { value: "PKR", label: "Pakistan First" },
+              { value: "99.9%", label: "Uptime SLA Target" },
             ].map((stat, index) => (
               <motion.div
                 key={stat.label}
@@ -402,24 +403,24 @@ export default function LandingPage() {
                     </div>
                   </div>
                   <div className="text-center lg:text-left">
-                    <h3 className="text-2xl lg:text-3xl font-bold text-nexabook-900 mb-4">
-                      FBR & SRB Compliance Ready
+                   <h3 className="text-2xl lg:text-3xl font-bold text-nexabook-900 mb-4">
+                      FBR & SRB Compliance — Designed for Pakistan
                     </h3>
                     <p className="text-lg text-nexabook-600 mb-6">
-                      NexaBook is fully compliant with Pakistan&apos;s Federal Board of Revenue (FBR) and Sindh Revenue Board (SRB) regulations. Generate tax-compliant invoices, file returns, and stay audit-ready — all automatically.
+                      NexaBook is being built with Pakistan&apos;s Federal Board of Revenue (FBR) and Sindh Revenue Board (SRB) regulations in mind. Tax-compliant invoices, structured tax calculations, and audit-ready reports — coming in our next release.
                     </p>
                     <div className="flex flex-wrap gap-4 justify-center lg:justify-start">
                       <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-100 text-green-700 font-medium">
                         <Check className="h-4 w-4" />
-                        FBR Integrated
+                        FBR Ready (Roadmap)
                       </span>
                       <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-100 text-green-700 font-medium">
                         <Check className="h-4 w-4" />
-                        SRB Compliant
+                        SRB Structured
                       </span>
                       <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-100 text-green-700 font-medium">
                         <Check className="h-4 w-4" />
-                        Auto Tax Calculation
+                        Tax Calculation Built-in
                       </span>
                     </div>
                   </div>
@@ -529,7 +530,7 @@ export default function LandingPage() {
               Ready to Transform Your Business?
             </motion.h2>
             <motion.p variants={fadeInUp} className="text-lg text-nexabook-200 mb-8">
-              Join 500+ businesses already using NexaBook to streamline their operations.
+              Be among the first to experience NexaBook — Pakistan&apos;s modern accounting platform built for real businesses.
             </motion.p>
             <motion.div variants={fadeInUp} className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/register">
