@@ -741,8 +741,6 @@ export async function approveInvoice(invoiceId: string) {
               referenceId: invoiceId,
               referenceNumber: invoice.invoiceNumber,
               runningBalance: String(newStock),
-              warehouseId: invoice.warehouseId || null,
-              batchId: item.batchId || null,
             });
           }
         }
@@ -763,13 +761,13 @@ export async function approveInvoice(invoiceId: string) {
         })
         .returning();
 
-      // Find required accounts
+      // Find required accounts — subType se lookup (name change se break nahi hoga)
       const [accountsReceivable] = await tx
         .select()
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, 'Accounts Receivable')
+          eq(chartOfAccounts.subType, 'accounts_receivable')
         ))
         .limit(1);
 
@@ -778,7 +776,7 @@ export async function approveInvoice(invoiceId: string) {
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, 'Sales Revenue')
+          eq(chartOfAccounts.subType, 'sales_revenue')
         ))
         .limit(1);
 
@@ -787,35 +785,35 @@ export async function approveInvoice(invoiceId: string) {
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, 'Sales Tax Payable')
+          eq(chartOfAccounts.subType, 'tax_payable')
         ))
         .limit(1);
 
       if (!accountsReceivable || !salesRevenue) {
-        throw new Error('Required accounts not found. Please seed Chart of Accounts first.');
+        throw new Error('Required accounts not found. Please setup Chart of Accounts first.');
       }
 
       // 4. Create Journal Entry Lines
       const discountAmount = parseFloat(invoice.discountAmount || '0');
       const shippingAmount = parseFloat(invoice.shippingCharges || '0');
 
-      // Fetch Discount Allowed account (expense — debit side)
+      // Fetch Discount Allowed account
       const [discountAllowed] = await tx
         .select()
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, 'Discount Allowed')
+          eq(chartOfAccounts.subType, 'discount_allowed')
         ))
         .limit(1);
 
-      // Fetch Shipping Revenue account (income — credit side)
+      // Fetch Shipping Revenue account
       const [shippingRevenue] = await tx
         .select()
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, 'Shipping Revenue')
+          eq(chartOfAccounts.subType, 'shipping_revenue')
         ))
         .limit(1);
 
@@ -2028,9 +2026,9 @@ export async function approveSalesReturn(returnId: string) {
     for (const item of items) {
       if (item.productId) {
         const [product] = await db.select({ currentStock: products.currentStock }).from(products).where(and(eq(products.id, item.productId), eq(products.orgId, orgId))).limit(1);
-        if (product) {
-          const newStock = (product.currentStock || 0) + parseFloat(item.quantity);
-          await db.update(products).set({ currentStock: newStock }).where(eq(products.id, item.productId));
+       if (product) {
+          const newStock = (parseFloat(String(product.currentStock || '0'))) + parseFloat(item.quantity);
+          await db.update(products).set({ currentStock: String(newStock) }).where(eq(products.id, item.productId));
         }
       }
     }
@@ -2043,9 +2041,8 @@ export async function approveSalesReturn(returnId: string) {
         await db.update(invoices).set({ balanceAmount: newBalance.toFixed(2), status: newStatus }).where(eq(invoices.id, salesReturn.invoiceId));
       }
     }
-    const [accountsReceivable] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.name, 'Accounts Receivable'))).limit(1);
-    const [salesReturnsAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), or(eq(chartOfAccounts.name, 'Sales Returns & Allowances'), eq(chartOfAccounts.name, 'Sales Revenue')))).limit(1);
-    if (accountsReceivable && salesReturnsAccount) {
+const [accountsReceivable] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'accounts_receivable'))).limit(1);
+    const [salesReturnsAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'sales_revenue'))).limit(1);    if (accountsReceivable && salesReturnsAccount) {
       const entryNumber = await (async () => {
         const result = await db.select({ entryNumber: journalEntries.entryNumber }).from(journalEntries).where(eq(journalEntries.orgId, orgId)).orderBy(desc(journalEntries.createdAt)).limit(1);
         let nextNumber = 1; if (result.length > 0 && result[0].entryNumber) { const match = result[0].entryNumber.match(/\d+$/); if (match) nextNumber = parseInt(match[0]) + 1; }
@@ -2118,8 +2115,8 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
         }
       }
     }
-    const [cashAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), or(ilike(chartOfAccounts.name, '%cash%'), ilike(chartOfAccounts.name, '%bank%')))).limit(1);
-    const [arAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.name, 'Accounts Receivable'))).limit(1);
+const [cashAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cash'))).limit(1);
+    const [arAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'accounts_receivable'))).limit(1);
     if (cashAccount && arAccount) {
       const entryNumber = await (async () => {
         const result = await db.select({ entryNumber: journalEntries.entryNumber }).from(journalEntries).where(eq(journalEntries.orgId, orgId)).orderBy(desc(journalEntries.createdAt)).limit(1);

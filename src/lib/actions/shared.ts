@@ -19,36 +19,40 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 async function seedDefaultChartOfAccounts(orgId: string): Promise<void> {
   const defaultAccounts = [
     // Assets
-    { code: "1010", name: "Cash", type: "asset", description: "Cash on hand" },
-    { code: "1020", name: "Bank", type: "asset", description: "Bank account" },
-    { code: "1100", name: "Accounts Receivable", type: "asset", description: "Money owed by customers" },
-    { code: "1200", name: "Inventory", type: "asset", description: "Goods available for sale" },
-    { code: "1210", name: "Input Tax", type: "asset", description: "Recoverable input tax" },
-    { code: "1300", name: "Prepaid Expenses", type: "asset", description: "Expenses paid in advance" },
+    { code: "1010", name: "Cash", type: "asset", subType: "cash", description: "Cash on hand" },
+    { code: "1020", name: "Bank", type: "asset", subType: "bank", description: "Bank account" },
+    { code: "1100", name: "Accounts Receivable", type: "asset", subType: "accounts_receivable", description: "Money owed by customers" },
+    { code: "1200", name: "Inventory", type: "asset", subType: "inventory", description: "Goods available for sale" },
+    { code: "1210", name: "Input Tax", type: "asset", subType: "input_tax", description: "Recoverable input tax" },
+    { code: "1300", name: "Prepaid Expenses", type: "asset", subType: "prepaid", description: "Expenses paid in advance" },
+    { code: "1400", name: "Fixed Assets", type: "asset", subType: "fixed_assets", description: "Long-term assets" },
 
     // Liabilities
-    { code: "2100", name: "Accounts Payable", type: "liability", description: "Money owed to suppliers" },
-    { code: "2200", name: "Sales Tax Payable", type: "liability", description: "Sales tax collected but not remitted" },
-    { code: "2210", name: "Income Tax Payable", type: "liability", description: "Income tax owed" },
-    { code: "2300", name: "Salaries Payable", type: "liability", description: "Salaries owed to employees" },
-    { code: "2310", name: "EOBI Payable", type: "liability", description: "EOBI contributions payable" },
+    { code: "2100", name: "Accounts Payable", type: "liability", subType: "accounts_payable", description: "Money owed to suppliers" },
+    { code: "2200", name: "Sales Tax Payable", type: "liability", subType: "tax_payable", description: "Sales tax collected but not remitted" },
+    { code: "2210", name: "Income Tax Payable", type: "liability", subType: "income_tax_payable", description: "Income tax owed" },
+    { code: "2300", name: "Salaries Payable", type: "liability", subType: "salaries_payable", description: "Salaries owed to employees" },
+    { code: "2310", name: "EOBI Payable", type: "liability", subType: "eobi_payable", description: "EOBI contributions payable" },
 
     // Equity
-    { code: "3000", name: "Owner's Equity", type: "equity", description: "Owner's investment in the business" },
-    { code: "3100", name: "Retained Earnings", type: "equity", description: "Accumulated profits/losses" },
+    { code: "3000", name: "Owner's Equity", type: "equity", subType: "capital", description: "Owner's investment in the business" },
+    { code: "3100", name: "Retained Earnings", type: "equity", subType: "retained_earnings", description: "Accumulated profits/losses" },
+    { code: "3200", name: "Current Year P&L", type: "equity", subType: "current_year_pl", description: "Current year profit or loss" },
 
     // Income
-    { code: "4000", name: "Sales Revenue", type: "income", description: "Revenue from sales" },
-    { code: "4100", name: "Other Income", type: "income", description: "Miscellaneous income" },
-    { code: "4200", name: "Shipping Revenue", type: "income", description: "Revenue from shipping charges" },
+    { code: "4000", name: "Sales Revenue", type: "income", subType: "sales_revenue", description: "Revenue from sales" },
+    { code: "4100", name: "Other Income", type: "income", subType: "other_income", description: "Miscellaneous income" },
+    { code: "4200", name: "Shipping Revenue", type: "income", subType: "shipping_revenue", description: "Revenue from shipping charges" },
+    { code: "4300", name: "Service Revenue", type: "income", subType: "service_revenue", description: "Revenue from services" },
 
     // Expense
-    { code: "5000", name: "Cost of Goods Sold", type: "expense", description: "Direct cost of goods sold" },
-    { code: "6100", name: "Salaries & Wages Expense", type: "expense", description: "Employee compensation" },
-    { code: "6200", name: "Rent Expense", type: "expense", description: "Office/warehouse rent" },
-    { code: "6300", name: "Utilities Expense", type: "expense", description: "Electricity, water, gas" },
-    { code: "6400", name: "Depreciation Expense", type: "expense", description: "Asset depreciation" },
-    { code: "6500", name: "Discount Allowed", type: "expense", description: "Discounts given to customers" },
+    { code: "5000", name: "Cost of Goods Sold", type: "expense", subType: "cogs", description: "Direct cost of goods sold" },
+    { code: "6100", name: "Salaries & Wages Expense", type: "expense", subType: "salary_expense", description: "Employee compensation" },
+    { code: "6200", name: "Rent Expense", type: "expense", subType: "rent_expense", description: "Office/warehouse rent" },
+    { code: "6300", name: "Utilities Expense", type: "expense", subType: "utilities", description: "Electricity, water, gas" },
+    { code: "6400", name: "Depreciation Expense", type: "expense", subType: "depreciation", description: "Asset depreciation" },
+    { code: "6500", name: "Discount Allowed", type: "expense", subType: "discount_allowed", description: "Discounts given to customers" },
+    { code: "6600", name: "Miscellaneous Expense", type: "expense", subType: "misc_expense", description: "Other expenses" },
   ];
 
   const accountsToInsert = defaultAccounts.map((account) => ({
@@ -56,8 +60,11 @@ async function seedDefaultChartOfAccounts(orgId: string): Promise<void> {
     code: account.code,
     name: account.name,
     type: account.type,
+    subType: account.subType,
+    isSystemAccount: true,
     description: account.description,
     isActive: true,
+    balance: "0",
   }));
 
   await db.insert(chartOfAccounts).values(accountsToInsert);
