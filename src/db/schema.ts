@@ -101,16 +101,22 @@ export const chartOfAccounts = pgTable('chart_of_accounts', {
   name: varchar('name', { length: 255 }).notNull(),
   type: varchar('type', { length: 50 }).notNull(), // asset, liability, equity, income, expense
   parentId: uuid('parent_id'), // Self-reference, will be resolved later
+  subType: varchar('sub_type', { length: 50 }),
+  // accounts_receivable | accounts_payable | cash | bank |
+  // sales_revenue | service_revenue | tax_payable | 
+  // cogs | salary_expense | retained_earnings | capital
+  balance: decimal('balance', { precision: 15, scale: 2 }).notNull().default('0'),
+  isSystemAccount: boolean('is_system_account').notNull().default(false),
   description: text('description'),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-// Add self-reference relation
-export const chartOfAccountsRelations = {
-  parent: chartOfAccounts.parentId ? undefined : null, // Placeholder for self-reference
-};
+// Proper relations (broken placeholder hata diya)
+export const chartOfAccountsRelations = relations(chartOfAccounts, ({ many }) => ({
+  journalLines: many(journalEntryLines),
+}));
 
 // Product Categories
 export const productCategories = pgTable('product_categories', {
@@ -381,6 +387,8 @@ export const invoices = pgTable('invoices', {
   notes: text('notes'),
   terms: text('terms'),
   emailSentAt: timestamp('email_sent_at'),
+  isPosted: boolean('is_posted').notNull().default(false),
+  journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -401,10 +409,6 @@ export const invoiceItems = pgTable('invoice_items', {
   lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
 });
 
-// Add relations
-export const customersRelations = relations(customers, ({ many }) => ({
-  invoices: many(invoices),
-}));
 
 export const invoicesRelations = relations(invoices, ({ one, many }) => ({
   customer: one(customers, {
@@ -477,7 +481,7 @@ export const orderItems = pgTable('order_items', {
 });
 
 // Add relations for saleOrders and orderItems
-export const customersRelationsExtended = relations(customers, ({ many }) => ({
+export const customersRelations = relations(customers, ({ many }) => ({
   invoices: many(invoices),
   saleOrders: many(saleOrders),
 }));
@@ -644,8 +648,42 @@ export const journalEntries = pgTable('journal_entries', {
   referenceType: varchar('reference_type', { length: 50 }).default(''),
   referenceId: uuid('reference_id'),
   description: text('description').default(''),
+  status: varchar('status', { length: 20 }).notNull().default('draft'),
+  // draft | posted | reversed
+  sourceType: varchar('source_type', { length: 30 }).default(''),
+  // invoice | payment | purchase | payroll | manual | expense
+  createdBy: varchar('created_by', { length: 255 }),
+  postedAt: timestamp('posted_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+// ==========================================
+// TAX RATES TABLE
+// ==========================================
+export const taxRates = pgTable('tax_rates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  // "GST 17%", "SRB 16%", "PRA 16%", "WHT 5%"
+  rate: decimal('rate', { precision: 5, scale: 2 }).notNull(),
+  taxType: varchar('tax_type', { length: 20 }).notNull().default('GST'),
+  // GST | SRB | WHT | PRA | KPRA | FED
+  isDefault: boolean('is_default').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const taxRatesRelations = relations(taxRates, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [taxRates.orgId],
+    references: [organizations.id],
+  }),
+}));
+
+export type TaxRate = typeof taxRates.$inferSelect;
+export type NewTaxRate = typeof taxRates.$inferInsert;
 
 // Journal Entry Lines
 export const journalEntryLines = pgTable('journal_entry_lines', {
@@ -1156,6 +1194,7 @@ export const customerPayments = pgTable('customer_payments', {
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
   reference: varchar('reference', { length: 100 }).default(''),
   notes: text('notes'),
+  journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -2316,3 +2355,22 @@ export const schema = {
   stockValuationLogs,
 };
 
+
+export const journalEntriesRelations = relations(journalEntries, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [journalEntries.orgId],
+    references: [organizations.id],
+  }),
+  lines: many(journalEntryLines),
+}));
+
+export const journalEntryLinesRelations = relations(journalEntryLines, ({ one }) => ({
+  journalEntry: one(journalEntries, {
+    fields: [journalEntryLines.journalEntryId],
+    references: [journalEntries.id],
+  }),
+  account: one(chartOfAccounts, {
+    fields: [journalEntryLines.accountId],
+    references: [chartOfAccounts.id],
+  }),
+}));
