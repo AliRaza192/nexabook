@@ -105,7 +105,7 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
     const totalExpenses = expensesResult[0]?.totalExpenses ? parseFloat(expensesResult[0].totalExpenses) : 0;
 
     // Get expense breakdown by account
-    const expenseBreakdown = await db
+    const expenseBreakdown = expenseAccounts.length > 0 ? await db
       .select({
         accountId: journalEntryLines.accountId,
         totalDebit: sql<string>`SUM(${journalEntryLines.debitAmount})`,
@@ -118,10 +118,9 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
         lte(journalEntries.entryDate, toDate),
         inArray(journalEntryLines.accountId, expenseAccounts.map(a => a.id))
       ))
-      .groupBy(journalEntryLines.accountId);
+      .groupBy(journalEntryLines.accountId) : [];
 
-    // Get income breakdown by account
-    const incomeBreakdown = await db
+    const incomeBreakdown = incomeAccounts.length > 0 ? await db
       .select({
         accountId: journalEntryLines.accountId,
         totalCredit: sql<string>`SUM(${journalEntryLines.creditAmount})`,
@@ -134,7 +133,7 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
         lte(journalEntries.entryDate, toDate),
         inArray(journalEntryLines.accountId, incomeAccounts.map(a => a.id))
       ))
-      .groupBy(journalEntryLines.accountId);
+      .groupBy(journalEntryLines.accountId) : [];
 
     const grossProfit = totalSales - totalCOGS;
     const totalOperatingExpenses = totalExpenses;
@@ -195,16 +194,14 @@ export async function getCashBookReport(dateFrom: string, dateTo: string) {
     toDate.setHours(23, 59, 59, 999);
 
     // Find Cash account
-    const cashAccount = await db
+const cashAccount = await db
       .select({ id: chartOfAccounts.id, name: chartOfAccounts.name, code: chartOfAccounts.code })
       .from(chartOfAccounts)
       .where(and(
         eq(chartOfAccounts.orgId, orgId),
-        sql`LOWER(${chartOfAccounts.name}) LIKE '%cash%'`,
-        eq(chartOfAccounts.type, 'asset')
+        eq(chartOfAccounts.subType, 'cash')
       ))
       .limit(1);
-
     if (!cashAccount || cashAccount.length === 0) {
       return { success: false, error: "Cash account not found. Please create a 'Cash' account in Chart of Accounts." };
     }
@@ -626,9 +623,9 @@ export async function getStockOnHandReport() {
       .orderBy(products.name);
 
     let totalValue = 0;
-    const itemsWithValue = stockItems.map(item => {
-      const stock = item.currentStock || 0;
-      const cost = item.costPrice ? parseFloat(item.costPrice) : 0;
+const itemsWithValue = stockItems.map(item => {
+      const stock = parseFloat(String(item.currentStock || '0'));
+      const cost = parseFloat(String(item.costPrice || '0'));
       const value = stock * cost;
       totalValue += value;
       return { ...item, stockValue: value };
@@ -653,12 +650,10 @@ export async function getLowStockReport() {
         eq(products.isActive, true)
       ));
 
-    const lowStockItems = products_list.filter(p => 
-      p.currentStock !== null && 
-      p.minStockLevel !== null && 
-      p.currentStock <= p.minStockLevel
-    );
-
+const lowStockItems = products_list.filter(p => {
+      if (p.currentStock === null || p.minStockLevel === null) return false;
+      return parseFloat(String(p.currentStock)) <= parseFloat(String(p.minStockLevel));
+    });
     return { success: true, data: lowStockItems };
   } catch (error) {
     return { success: false, error: "Failed to generate Low Stock report" };
@@ -709,28 +704,74 @@ export async function getAgedReceivablesReport() {
     if (!orgId) return { success: false, error: "No organization found" };
 
     const now = new Date();
-    const customers_with_balance = await db
-      .select()
-      .from(customers)
-      .where(and(eq(customers.orgId, orgId), eq(customers.isActive, true)));
 
-    const agedReceivables = customers_with_balance
-      .filter(c => c.balance && parseFloat(c.balance) > 0)
-      .map(customer => {
-        const balance = customer.balance ? parseFloat(customer.balance) : 0;
-        // Simplified aging - in production would calculate from invoices
-        return {
-          id: customer.id,
-          name: customer.name,
-          balance,
-          current: balance * 0.4,
-          days30: balance * 0.3,
-          days60: balance * 0.2,
-          days90Plus: balance * 0.1,
-        };
-      });
+    // Real aging from outstanding invoices
+    const outstandingInvoices = await db
+      .select({
+        customerId: invoices.customerId,
+        customerName: customers.name,
+        invoiceNumber: invoices.invoiceNumber,
+        dueDate: invoices.dueDate,
+        balanceAmount: invoices.balanceAmount,
+      })
+      .from(invoices)
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .where(and(
+        eq(invoices.orgId, orgId),
+        sql`${invoices.balanceAmount} > 0`,
+        sql`${invoices.status} NOT IN ('draft', 'cancelled', 'paid')`
+      ));
 
-    return { success: true, data: agedReceivables };
+    // Group by customer and bucket by days overdue
+    const customerMap = new Map<string, {
+      id: string;
+      name: string;
+      current: number;
+      days30: number;
+      days60: number;
+      days90Plus: number;
+      balance: number;
+    }>();
+
+    for (const inv of outstandingInvoices) {
+      const balance = parseFloat(inv.balanceAmount || '0');
+      if (balance <= 0) continue;
+
+      const dueDate = inv.dueDate ? new Date(inv.dueDate) : now;
+      const daysOverdue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (!customerMap.has(inv.customerId)) {
+        customerMap.set(inv.customerId, {
+          id: inv.customerId,
+          name: inv.customerName || 'Unknown',
+          current: 0,
+          days30: 0,
+          days60: 0,
+          days90Plus: 0,
+          balance: 0,
+        });
+      }
+
+      const entry = customerMap.get(inv.customerId)!;
+      entry.balance += balance;
+
+      if (daysOverdue <= 0) entry.current += balance;
+      else if (daysOverdue <= 30) entry.days30 += balance;
+      else if (daysOverdue <= 60) entry.days60 += balance;
+      else entry.days90Plus += balance;
+    }
+
+    const agedReceivables = Array.from(customerMap.values());
+
+    const totals = agedReceivables.reduce((acc, c) => ({
+      balance: acc.balance + c.balance,
+      current: acc.current + c.current,
+      days30: acc.days30 + c.days30,
+      days60: acc.days60 + c.days60,
+      days90Plus: acc.days90Plus + c.days90Plus,
+    }), { balance: 0, current: 0, days30: 0, days60: 0, days90Plus: 0 });
+
+    return { success: true, data: { customers: agedReceivables, totals } };
   } catch (error) {
     return { success: false, error: "Failed to generate Aged Receivables report" };
   }
@@ -823,26 +864,63 @@ export async function getAgedPayablesReport() {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const vendorsWithBalance = await db
-      .select()
-      .from(vendors)
-      .where(and(eq(vendors.orgId, orgId), eq(vendors.isActive, true)));
+    // const vendorsWithBalance = await db
+    //   .select()
+    //   .from(vendors)
+    //   .where(and(eq(vendors.orgId, orgId), eq(vendors.isActive, true)));
 
-    const agedPayables = vendorsWithBalance
-      .filter(v => v.balance && parseFloat(v.balance) > 0)
-      .map(vendor => {
-        const balance = vendor.balance ? parseFloat(vendor.balance) : 0;
-        return {
-          id: vendor.id,
-          name: vendor.name,
-          balance,
-          current: balance * 0.35,
-          days30: balance * 0.30,
-          days60: balance * 0.20,
-          days90Plus: balance * 0.15,
-        };
-      });
+    const now = new Date();
 
+    const outstandingBills = await db
+      .select({
+        vendorId: purchaseInvoices.vendorId,
+        vendorName: vendors.name,
+        billNumber: purchaseInvoices.billNumber,
+        dueDate: purchaseInvoices.dueDate,
+        netAmount: purchaseInvoices.netAmount,
+      })
+      .from(purchaseInvoices)
+      .leftJoin(vendors, eq(purchaseInvoices.vendorId, vendors.id))
+      .where(and(
+        eq(purchaseInvoices.orgId, orgId),
+        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Cancelled')`
+      ));
+
+    const vendorMap = new Map<string, {
+      id: string;
+      name: string;
+      current: number;
+      days30: number;
+      days60: number;
+      days90Plus: number;
+      balance: number;
+    }>();
+
+    for (const bill of outstandingBills) {
+      const amount = parseFloat(bill.netAmount || '0');
+      if (amount <= 0) continue;
+
+      const dueDate = bill.dueDate ? new Date(bill.dueDate) : now;
+      const daysOverdue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (!vendorMap.has(bill.vendorId)) {
+        vendorMap.set(bill.vendorId, {
+          id: bill.vendorId,
+          name: bill.vendorName || 'Unknown',
+          current: 0, days30: 0, days60: 0, days90Plus: 0, balance: 0,
+        });
+      }
+
+      const entry = vendorMap.get(bill.vendorId)!;
+      entry.balance += amount;
+
+      if (daysOverdue <= 0) entry.current += amount;
+      else if (daysOverdue <= 30) entry.days30 += amount;
+      else if (daysOverdue <= 60) entry.days60 += amount;
+      else entry.days90Plus += amount;
+    }
+
+    const agedPayables = Array.from(vendorMap.values());
     return { success: true, data: agedPayables };
   } catch (error) {
     return { success: false, error: "Failed to generate Aged Payables report" };
