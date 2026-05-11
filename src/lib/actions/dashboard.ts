@@ -171,8 +171,18 @@ export async function getDashboardData(dateRange?: { from: Date; to: Date }): Pr
       ));
 
     const accountsReceivable = parseFloat(arResult?.total || '0');
-    // Simplified AR trend (compare with customer balances)
-    const previousAR = accountsReceivable * 0.9; // Placeholder - would need historical AR data
+    // Previous period AR
+    const [prevARResult] = await db
+      .select({ total: sql<string>`COALESCE(SUM(${invoices.balanceAmount}), 0)` })
+      .from(invoices)
+      .where(and(
+        eq(invoices.orgId, orgId),
+        gte(invoices.issueDate, previousPeriod.from),
+        lte(invoices.issueDate, previousPeriod.to),
+        sql`${invoices.balanceAmount} > 0`,
+        sql`${invoices.status} NOT IN ('draft', 'cancelled', 'paid')`
+      ));
+    const previousAR = parseFloat(prevARResult?.total || '0');
     const arTrend = previousAR > 0 ? ((accountsReceivable - previousAR) / previousAR) * 100 : 0;
 
     // Inventory Value (current stock * cost price)
@@ -184,16 +194,16 @@ export async function getDashboardData(dateRange?: { from: Date; to: Date }): Pr
       .from(products)
       .where(and(eq(products.orgId, orgId), eq(products.isActive, true)));
 
-    let inventoryValue = 0;
+let inventoryValue = 0;
     for (const item of inventoryItems) {
-      const stock = item.currentStock || 0;
-      const cost = item.costPrice ? parseFloat(item.costPrice) : 0;
+      const stock = parseFloat(String(item.currentStock || '0'));
+      const cost = parseFloat(String(item.costPrice || '0'));
       inventoryValue += stock * cost;
     }
 
     // Simplified inventory trend
-    const previousInventory = inventoryValue * 0.95;
-    const inventoryTrend = previousInventory > 0 ? ((inventoryValue - previousInventory) / previousInventory) * 100 : 0;
+    const previousInventory = 0;
+    const inventoryTrend = 0;
 
     // ============ Monthly Trends (Last 6 months) ============
     const monthlyTrends: MonthlyTrend[] = [];
@@ -268,22 +278,47 @@ export async function getDashboardData(dateRange?: { from: Date; to: Date }): Pr
       }
     }
 
-    // ============ AR Aging ============
+   // ============ AR Aging — Real invoice data se ============
+    const outstandingInvoices = await db
+      .select({
+        dueDate: invoices.dueDate,
+        balanceAmount: invoices.balanceAmount,
+      })
+      .from(invoices)
+      .where(and(
+        eq(invoices.orgId, orgId),
+        sql`${invoices.balanceAmount} > 0`,
+        sql`${invoices.status} NOT IN ('draft', 'cancelled', 'paid')`
+      ));
+
+    const agingBuckets = { current: 0, days30: 0, days60: 0, days90Plus: 0 };
+
+    for (const inv of outstandingInvoices) {
+      const balance = parseFloat(inv.balanceAmount || '0');
+      const dueDate = inv.dueDate ? new Date(inv.dueDate) : now;
+      const daysOverdue = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (daysOverdue <= 0) agingBuckets.current += balance;
+      else if (daysOverdue <= 30) agingBuckets.days30 += balance;
+      else if (daysOverdue <= 60) agingBuckets.days60 += balance;
+      else agingBuckets.days90Plus += balance;
+    }
+
     const arAging: ARAging[] = [
-      { category: '0-30 Days', amount: accountsReceivable * 0.35 },
-      { category: '31-60 Days', amount: accountsReceivable * 0.30 },
-      { category: '61-90 Days', amount: accountsReceivable * 0.20 },
-      { category: '90+ Days', amount: accountsReceivable * 0.15 },
+      { category: '0-30 Days', amount: agingBuckets.current },
+      { category: '31-60 Days', amount: agingBuckets.days30 },
+      { category: '61-90 Days', amount: agingBuckets.days60 },
+      { category: '90+ Days', amount: agingBuckets.days90Plus },
     ];
 
     // ============ Cash Position ============
-    const cashAccounts = await db
+const cashAccounts = await db
       .select({ id: chartOfAccounts.id, name: chartOfAccounts.name, code: chartOfAccounts.code })
       .from(chartOfAccounts)
       .where(and(
         eq(chartOfAccounts.orgId, orgId),
         eq(chartOfAccounts.isActive, true),
-        sql`(LOWER(${chartOfAccounts.name}) LIKE '%cash%' OR LOWER(${chartOfAccounts.name}) LIKE '%bank%')`
+        sql`${chartOfAccounts.subType} IN ('cash', 'bank')`
       ));
 
     const cashPositions: CashPosition[] = [];
