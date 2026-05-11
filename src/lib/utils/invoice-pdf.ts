@@ -394,7 +394,10 @@ export async function generateInvoicePDF(data: InvoicePDFData): Promise<Blob> {
       doc.roundedRect(qrX - 3, qrY - 3, qrSize + 6, qrSize + 12, 2, 2, 'S');
 
       // Add QR code image
-      const qrImageDataUrl = 'data:image/png;base64,' + qrBuffer.toString('base64');
+            const qrArray = new Uint8Array(qrBuffer);
+      let binary = '';
+      qrArray.forEach(byte => binary += String.fromCharCode(byte));
+      const qrImageDataUrl = 'data:image/png;base64,' + btoa(binary);
       doc.addImage(qrImageDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
 
       // Add label below QR code
