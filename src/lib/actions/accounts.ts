@@ -161,14 +161,37 @@ export async function seedInitialCOA() {
       { code: "6900", name: "Miscellaneous Expense", type: "expense", description: "Other expenses" },
     ];
 
+// subType mapping
+    const subTypeMap: Record<string, string> = {
+      "1000": "cash", "1010": "bank", "1020": "bank", "1030": "cash",
+      "1100": "accounts_receivable", "1200": "inventory",
+      "1400": "prepaid", "1500": "fixed_assets", "1600": "fixed_assets",
+      "2000": "accounts_payable", "2200": "tax_payable",
+      "2210": "income_tax_payable", "2300": "income_tax_payable",
+      "2410": "salaries_payable", "2800": "eobi_payable",
+      "3000": "capital", "3100": "retained_earnings",
+      "3500": "current_year_pl",
+      "4000": "sales_revenue", "4100": "service_revenue",
+      "4300": "other_income", "4900": "discount_allowed",
+      "5000": "cogs", "5010": "cogs",
+      "5100": "salary_expense", "5110": "salary_expense",
+      "5200": "rent_expense", "5300": "utilities",
+      "5500": "depreciation", "5600": "misc_expense",
+      "6900": "misc_expense",
+    };
+
     const accountsToInsert = defaultAccounts.map((account) => ({
       orgId,
       code: account.code,
       name: account.name,
       type: account.type,
+      subType: subTypeMap[account.code] || null,
+      isSystemAccount: false,
       description: account.description,
       isActive: true,
+      balance: "0",
     }));
+
 
     await db.insert(chartOfAccounts).values(accountsToInsert);
 
@@ -716,15 +739,22 @@ export async function createVoucher(data: VoucherData) {
         if (!data.expenseAccountId) {
           return { success: false, error: "Expense account is required for CPV" };
         }
+// Cash account UUID dhundho
+        const [cashAcc] = await db.select({ id: chartOfAccounts.id })
+          .from(chartOfAccounts)
+          .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cash')))
+          .limit(1);
+        if (!cashAcc) return { success: false, error: "Cash account not found in Chart of Accounts" };
+
         linesToInsert = [
           {
-            accountId: data.expenseAccountId,
+            accountId: data.expenseAccountId!,
             description: data.description || `Payment for ${data.payeeName || 'expense'}`,
             debit: data.amount,
             credit: '0',
           },
           {
-            accountId: '1000', // Cash account code
+            accountId: cashAcc.id,
             description: 'Cash payment',
             debit: '0',
             credit: data.amount,
@@ -736,9 +766,15 @@ export async function createVoucher(data: VoucherData) {
         if (!data.receiptAccountId) {
           return { success: false, error: "Receipt account is required for CRV" };
         }
+const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
+          .from(chartOfAccounts)
+          .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cash')))
+          .limit(1);
+        if (!cashAcc2) return { success: false, error: "Cash account not found" };
+
         linesToInsert = [
           {
-            accountId: '1000', // Cash account code
+            accountId: cashAcc2.id,
             description: `Cash received from ${data.payeeName || 'customer'}`,
             debit: data.amount,
             credit: '0',
@@ -911,7 +947,10 @@ export async function getVouchersByType(voucherType: VoucherType, limit: number 
         description: journalEntries.description,
       })
       .from(journalEntries)
-      .where(sql`${journalEntries.orgId} = ${orgId} AND ${journalEntries.entryNumber} LIKE '${voucherType}-%'`)
+            .where(and(
+        eq(journalEntries.orgId, orgId),
+        sql`${journalEntries.entryNumber} LIKE ${voucherType + '-%'}`
+      ))
       .orderBy(desc(journalEntries.entryDate))
       .limit(limit);
 
@@ -934,7 +973,10 @@ export async function getVoucherWithLines(entryId: string) {
     const [entry] = await db
       .select()
       .from(journalEntries)
-      .where(sql`${journalEntries.id} = ${entryId} AND ${journalEntries.orgId} = ${orgId}`)
+      .where(and(
+        eq(journalEntries.id, entryId),
+        eq(journalEntries.orgId, orgId)
+      ))
       .limit(1);
 
     if (!entry) {
