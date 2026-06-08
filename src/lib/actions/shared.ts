@@ -12,7 +12,7 @@ import {
   purchaseInvoices, 
   goodReceivingNotes 
 } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
 // Seed default Chart of Accounts for a new organization
@@ -243,6 +243,60 @@ export async function generateDocumentNumber(
     return documentNumber;
   } catch (error) {
     console.error(`Error generating document number for type ${type} and orgId ${orgId}:`, error);
+    return null;
+  }
+}
+
+
+// ==========================================
+// ROLE-BASED ACCESS CONTROL
+// ==========================================
+
+type UserRole = "admin" | "manager" | "accountant" | "staff";
+
+/**
+ * Check if current user has required role.
+ * Usage: await requireRole(["admin", "accountant"])
+ * Throws error if user doesn't have permission.
+ */
+export async function requireRole(allowedRoles: UserRole[]): Promise<void> {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized: Not logged in");
+
+  const orgId = await getCurrentOrgId();
+  if (!orgId) throw new Error("Unauthorized: No organization found");
+
+  const [profile] = await db
+    .select({ role: profiles.role })
+    .from(profiles)
+    .where(and(eq(profiles.userId, userId), eq(profiles.orgId, orgId)))
+    .limit(1);
+
+  if (!profile) throw new Error("Unauthorized: Profile not found");
+  if (!allowedRoles.includes(profile.role as UserRole)) {
+    throw new Error(`Forbidden: This action requires one of these roles: ${allowedRoles.join(", ")}`);
+  }
+}
+
+/**
+ * Get current user's role (returns null if not found)
+ */
+export async function getCurrentUserRole(): Promise<UserRole | null> {
+  try {
+    const { userId } = await auth();
+    if (!userId) return null;
+
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return null;
+
+    const [profile] = await db
+      .select({ role: profiles.role })
+      .from(profiles)
+      .where(and(eq(profiles.userId, userId), eq(profiles.orgId, orgId)))
+      .limit(1);
+
+    return (profile?.role as UserRole) || null;
+  } catch {
     return null;
   }
 }

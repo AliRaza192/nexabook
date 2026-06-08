@@ -6,6 +6,7 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
+import { requireRole } from "./shared";
 
 export interface JournalEntryLine {
   accountId: string;
@@ -1001,5 +1002,38 @@ export async function getVoucherWithLines(entryId: string) {
     return { success: true, data: { entry, lines } };
   } catch (error) {
     return { success: false, error: "Failed to fetch voucher" };
+  }
+}
+
+
+export async function deleteJournalEntry(id: string) {
+  try {
+    // RBAC Check: Only admin and accountant can delete
+    await requireRole(['admin', 'accountant']);
+
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    // Atomic transaction for safe deletion
+    await db.transaction(async (tx) => {
+      // 1. Delete lines associated with the entry
+      await tx
+        .delete(journalEntryLines)
+        .where(eq(journalEntryLines.journalEntryId, id));
+
+      // 2. Delete the actual entry
+      await tx
+        .delete(journalEntries)
+        .where(and(eq(journalEntries.id, id), eq(journalEntries.orgId, orgId)));
+    });
+
+    revalidatePath("/dashboard/accounts/journal-entries");
+    return { success: true, message: "Journal entry deleted successfully" };
+  } catch (error) {
+    console.error("Delete Journal Error:", error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : "Failed to delete journal entry" 
+    };
   }
 }

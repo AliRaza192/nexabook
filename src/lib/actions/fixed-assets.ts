@@ -12,7 +12,7 @@ import {
 import { eq, and, desc, ilike, or, sql, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 
 // ==========================================
 // FIXED ASSETS
@@ -43,7 +43,7 @@ export async function getFixedAssets(searchQuery?: string) {
         or(
           ilike(fixedAssets.name, `%${searchQuery}%`),
           ilike(fixedAssets.category, `%${searchQuery}%`),
-        )!
+        )!,
       );
     }
 
@@ -87,11 +87,22 @@ export async function getFixedAsset(assetId: string) {
  */
 export async function createFixedAsset(data: FixedAssetFormData) {
   try {
+    // RBAC Check
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    if (!data.name || !data.purchaseCost || !data.purchaseDate || !data.usefulLifeYears) {
-      return { success: false, error: "Name, purchase cost, purchase date, and useful life are required" };
+    if (
+      !data.name ||
+      !data.purchaseCost ||
+      !data.purchaseDate ||
+      !data.usefulLifeYears
+    ) {
+      return {
+        success: false,
+        error:
+          "Name, purchase cost, purchase date, and useful life are required",
+      };
     }
 
     const purchaseCost = parseFloat(data.purchaseCost);
@@ -107,7 +118,10 @@ export async function createFixedAsset(data: FixedAssetFormData) {
     }
 
     if (salvageValue >= purchaseCost) {
-      return { success: false, error: "Salvage value must be less than purchase cost" };
+      return {
+        success: false,
+        error: "Salvage value must be less than purchase cost",
+      };
     }
 
     const [asset] = await db
@@ -128,7 +142,11 @@ export async function createFixedAsset(data: FixedAssetFormData) {
       .returning();
 
     revalidatePath("/fixed-assets/register");
-    return { success: true, data: asset, message: "Fixed asset created successfully" };
+    return {
+      success: true,
+      data: asset,
+      message: "Fixed asset created successfully",
+    };
   } catch (error) {
     console.error("Failed to create fixed asset:", error);
     return { success: false, error: "Failed to create fixed asset" };
@@ -138,7 +156,10 @@ export async function createFixedAsset(data: FixedAssetFormData) {
 /**
  * Update a fixed asset
  */
-export async function updateFixedAsset(assetId: string, data: Partial<FixedAssetFormData>) {
+export async function updateFixedAsset(
+  assetId: string,
+  data: Partial<FixedAssetFormData>,
+) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
@@ -146,11 +167,16 @@ export async function updateFixedAsset(assetId: string, data: Partial<FixedAsset
     const updateData: Record<string, any> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.category !== undefined) updateData.category = data.category;
-    if (data.purchaseDate !== undefined) updateData.purchaseDate = new Date(data.purchaseDate);
-    if (data.purchaseCost !== undefined) updateData.purchaseCost = data.purchaseCost;
-    if (data.usefulLifeYears !== undefined) updateData.usefulLifeYears = parseInt(data.usefulLifeYears);
-    if (data.salvageValue !== undefined) updateData.salvageValue = data.salvageValue;
-    if (data.depreciationMethod !== undefined) updateData.depreciationMethod = data.depreciationMethod;
+    if (data.purchaseDate !== undefined)
+      updateData.purchaseDate = new Date(data.purchaseDate);
+    if (data.purchaseCost !== undefined)
+      updateData.purchaseCost = data.purchaseCost;
+    if (data.usefulLifeYears !== undefined)
+      updateData.usefulLifeYears = parseInt(data.usefulLifeYears);
+    if (data.salvageValue !== undefined)
+      updateData.salvageValue = data.salvageValue;
+    if (data.depreciationMethod !== undefined)
+      updateData.depreciationMethod = data.depreciationMethod;
     if (data.notes !== undefined) updateData.notes = data.notes;
 
     const [updated] = await db
@@ -162,7 +188,11 @@ export async function updateFixedAsset(assetId: string, data: Partial<FixedAsset
     if (!updated) return { success: false, error: "Asset not found" };
 
     revalidatePath("/fixed-assets/register");
-    return { success: true, data: updated, message: "Fixed asset updated successfully" };
+    return {
+      success: true,
+      data: updated,
+      message: "Fixed asset updated successfully",
+    };
   } catch (error) {
     return { success: false, error: "Failed to update fixed asset" };
   }
@@ -173,6 +203,9 @@ export async function updateFixedAsset(assetId: string, data: Partial<FixedAsset
  */
 export async function deleteFixedAsset(assetId: string) {
   try {
+    // RBAC Check
+    await requireRole(["admin"]); // Delete sirf admin kar sake
+
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -180,10 +213,18 @@ export async function deleteFixedAsset(assetId: string) {
     const depLogs = await db
       .select({ count: sql<number>`count(*)` })
       .from(depreciationLogs)
-      .where(and(eq(depreciationLogs.assetId, assetId), eq(depreciationLogs.orgId, orgId)));
+      .where(
+        and(
+          eq(depreciationLogs.assetId, assetId),
+          eq(depreciationLogs.orgId, orgId),
+        ),
+      );
 
     if (depLogs[0].count > 0) {
-      return { success: false, error: "Cannot delete asset with depreciation history" };
+      return {
+        success: false,
+        error: "Cannot delete asset with depreciation history",
+      };
     }
 
     const [deleted] = await db
@@ -220,11 +261,11 @@ async function calculateMonthlyDepreciation(
   purchaseCost: number,
   salvageValue: number,
   usefulLifeYears: number,
-  depreciationMethod: string
+  depreciationMethod: string,
 ): Promise<number> {
   const depreciableAmount = purchaseCost - salvageValue;
   const totalMonths = usefulLifeYears * 12;
-  
+
   if (depreciationMethod === "straight_line") {
     return depreciableAmount / totalMonths;
   } else if (depreciationMethod === "declining_balance") {
@@ -234,7 +275,7 @@ async function calculateMonthlyDepreciation(
     // For first month, use full purchase cost
     return (purchaseCost * decliningRate) / 12;
   }
-  
+
   return depreciableAmount / totalMonths; // Default to straight line
 }
 
@@ -243,7 +284,7 @@ async function calculateMonthlyDepreciation(
  */
 export async function getDepreciationSchedule(
   assetId: string,
-  year: number
+  year: number,
 ): Promise<{
   success: boolean;
   data?: {
@@ -276,8 +317,9 @@ export async function getDepreciationSchedule(
 
     // Calculate months elapsed before the target year
     const startOfYear = new Date(year, 0, 1);
-    const monthsElapsedBeforeYear = (startOfYear.getFullYear() - purchaseDate.getFullYear()) * 12 + 
-                                     (startOfYear.getMonth() - purchaseDate.getMonth());
+    const monthsElapsedBeforeYear =
+      (startOfYear.getFullYear() - purchaseDate.getFullYear()) * 12 +
+      (startOfYear.getMonth() - purchaseDate.getMonth());
     const monthsBefore = Math.max(0, monthsElapsedBeforeYear);
     const totalMonths = usefulLife * 12;
 
@@ -291,23 +333,39 @@ export async function getDepreciationSchedule(
         currentBookValue,
         salvageValue,
         usefulLife,
-        method
+        method,
       );
-      
+
       if (method === "declining_balance") {
-        currentBookValue = Math.max(salvageValue, currentBookValue - monthlyDep);
+        currentBookValue = Math.max(
+          salvageValue,
+          currentBookValue - monthlyDep,
+        );
       } else {
         // Straight line: use constant monthly depreciation
         const constantMonthlyDep = depreciableAmount / totalMonths;
-        currentBookValue = Math.max(salvageValue, currentBookValue - constantMonthlyDep);
+        currentBookValue = Math.max(
+          salvageValue,
+          currentBookValue - constantMonthlyDep,
+        );
       }
     }
 
     const openingBookValue = currentBookValue;
     const schedule: DepreciationScheduleRow[] = [];
     const MONTH_NAMES = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
     ];
 
     // Generate schedule for 12 months
@@ -326,7 +384,7 @@ export async function getDepreciationSchedule(
           currentBookValue,
           salvageValue,
           usefulLife,
-          method
+          method,
         );
       }
 
@@ -345,8 +403,14 @@ export async function getDepreciationSchedule(
       currentBookValue = closingBV;
     }
 
-    const totalDepreciation = schedule.reduce((sum, row) => sum + row.depreciation, 0);
-    const closingBookValue = schedule.length > 0 ? schedule[schedule.length - 1].closingBalance : openingBookValue;
+    const totalDepreciation = schedule.reduce(
+      (sum, row) => sum + row.depreciation,
+      0,
+    );
+    const closingBookValue =
+      schedule.length > 0
+        ? schedule[schedule.length - 1].closingBalance
+        : openingBookValue;
 
     return {
       success: true,
@@ -360,7 +424,10 @@ export async function getDepreciationSchedule(
     };
   } catch (error) {
     console.error("Failed to calculate depreciation schedule:", error);
-    return { success: false, error: "Failed to calculate depreciation schedule" };
+    return {
+      success: false,
+      error: "Failed to calculate depreciation schedule",
+    };
   }
 }
 
@@ -370,7 +437,7 @@ export async function getDepreciationSchedule(
 export async function postDepreciation(
   assetId: string,
   year: number,
-  month: number
+  month: number,
 ): Promise<{
   success: boolean;
   data?: {
@@ -380,6 +447,9 @@ export async function postDepreciation(
   error?: string;
 }> {
   try {
+    // RBAC Check
+    await requireRole(["admin", "accountant"]);
+
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -392,7 +462,11 @@ export async function postDepreciation(
 
     if (!asset) return { success: false, error: "Asset not found" };
 
-    if (asset.status === "fully_depreciated" || asset.status === "disposed" || asset.status === "sold") {
+    if (
+      asset.status === "fully_depreciated" ||
+      asset.status === "disposed" ||
+      asset.status === "sold"
+    ) {
       return { success: false, error: "Asset is no longer active" };
     }
 
@@ -411,40 +485,47 @@ export async function postDepreciation(
         .update(fixedAssets)
         .set({ status: "fully_depreciated" })
         .where(eq(fixedAssets.id, assetId));
-      
+
       return { success: false, error: "Asset is fully depreciated" };
     }
 
     const monthlyDepreciation = depreciableAmount / totalMonths;
 
-    // Find COA accounts for depreciation
     const [depreciationExpenseAccount] = await db
       .select()
       .from(chartOfAccounts)
-      .where(and(
-        eq(chartOfAccounts.orgId, orgId),
-        ilike(chartOfAccounts.name, "%depreciation expense%")
-      ))
+      .where(
+        and(
+          eq(chartOfAccounts.orgId, orgId),
+          eq(chartOfAccounts.subType, "depreciation"),
+        ),
+      )
       .limit(1);
 
     const [accumulatedDepreciationAccount] = await db
       .select()
       .from(chartOfAccounts)
-      .where(and(
-        eq(chartOfAccounts.orgId, orgId),
-        ilike(chartOfAccounts.name, "%accumulated depreciation%")
-      ))
+      .where(
+        and(
+          eq(chartOfAccounts.orgId, orgId),
+          eq(chartOfAccounts.subType, "accumulated_depreciation"),
+        ),
+      )
       .limit(1);
 
     if (!depreciationExpenseAccount || !accumulatedDepreciationAccount) {
-      return { 
-        success: false, 
-        error: "Depreciation expense or accumulated depreciation account not found in Chart of Accounts" 
+      return {
+        success: false,
+        error:
+          "Depreciation or Accumulated Depreciation account not found. Please add both accounts in Chart of Accounts with correct subTypes: 'depreciation' and 'accumulated_depreciation'.",
       };
     }
 
     // Generate journal entry number
-    const entryCount = await db.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
+    const entryCount = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.orgId, orgId));
     const entryNumber = `JE-DEP-${String(entryCount.length + 1).padStart(5, "0")}`;
 
     // Create depreciation date
@@ -554,7 +635,12 @@ export async function getDepreciationHistory(assetId: string) {
     const logs = await db
       .select()
       .from(depreciationLogs)
-      .where(and(eq(depreciationLogs.assetId, assetId), eq(depreciationLogs.orgId, orgId)))
+      .where(
+        and(
+          eq(depreciationLogs.assetId, assetId),
+          eq(depreciationLogs.orgId, orgId),
+        ),
+      )
       .orderBy(desc(depreciationLogs.depreciationDate));
 
     return { success: true, data: logs };
@@ -565,6 +651,16 @@ export async function getDepreciationHistory(assetId: string) {
 
 // Helper: Month names
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];

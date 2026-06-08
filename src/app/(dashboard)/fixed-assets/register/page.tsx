@@ -1,430 +1,774 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Building2,
+  Plus,
+  Search,
+  Loader2,
+  Pencil,
+  Trash2,
+  Eye,
+  Calendar,
+  TrendingDown,
+  DollarSign,
+  Package,
+  AlertCircle,
+  CheckCircle2,
+  X,
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, Building2, Loader2 } from "lucide-react";
 import {
   getFixedAssets,
   createFixedAsset,
+  updateFixedAsset,
   deleteFixedAsset,
+  type FixedAssetFormData,
 } from "@/lib/actions/fixed-assets";
-import ReportExportButtons from "@/components/reports/ReportExportButtons";
 import { formatPKR } from "@/lib/utils/number-format";
 
-// Pakistani currency formatting
-const formatCurrency = (value: number) => formatPKR(value, 'south-asian');
+interface FixedAsset {
+  id: string;
+  name: string;
+  category: string;
+  purchaseDate: Date;
+  purchaseCost: string;
+  salvageValue: string;
+  usefulLifeYears: number;
+  depreciationMethod: string;
+  accumulatedDepreciation: string;
+  status: string;
+  notes: string | null;
+  createdAt: Date;
+}
 
-const CATEGORIES = ["Machinery", "Furniture", "Vehicle", "Computer", "Building", "Equipment", "Other"] as const;
-const METHODS = ["straight_line", "declining_balance"] as const;
+const CATEGORIES = [
+  "Machinery & Equipment",
+  "Vehicles",
+  "Furniture & Fixtures",
+  "Computer & IT Equipment",
+  "Land & Building",
+  "Office Equipment",
+  "Other",
+];
 
-const categoryColor = (cat: string) => {
-  const map: Record<string, string> = {
-    Machinery: "bg-blue-100 text-blue-800",
-    Furniture: "bg-amber-100 text-amber-800",
-    Vehicle: "bg-green-100 text-green-800",
-    Computer: "bg-purple-100 text-purple-800",
-    Building: "bg-red-100 text-red-800",
-    Equipment: "bg-cyan-100 text-cyan-800",
-    Other: "bg-gray-100 text-gray-800",
+const STATUS_COLORS: Record<string, string> = {
+  active: "bg-green-100 text-green-800 border-green-200",
+  fully_depreciated: "bg-gray-100 text-gray-700 border-gray-200",
+  disposed: "bg-red-100 text-red-800 border-red-200",
+  sold: "bg-blue-100 text-blue-800 border-blue-200",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  active: "Active",
+  fully_depreciated: "Fully Depreciated",
+  disposed: "Disposed",
+  sold: "Sold",
+};
+
+const EMPTY_FORM: FixedAssetFormData = {
+  name: "",
+  category: "",
+  purchaseDate: new Date().toISOString().split("T")[0],
+  purchaseCost: "",
+  usefulLifeYears: "",
+  salvageValue: "0",
+  depreciationMethod: "straight_line",
+  notes: "",
+};
+
+function getBookValue(asset: FixedAsset): number {
+  return (
+    parseFloat(asset.purchaseCost) - parseFloat(asset.accumulatedDepreciation)
+  );
+}
+
+function getDepreciationPercent(asset: FixedAsset): number {
+  const cost = parseFloat(asset.purchaseCost);
+  if (cost === 0) return 0;
+  return Math.min(
+    100,
+    (parseFloat(asset.accumulatedDepreciation) / cost) * 100
+  );
+}
+
+// ─── Asset Form ────────────────────────────────────────────────────────────────
+function AssetForm({
+  initial,
+  onSubmit,
+  loading,
+  onCancel,
+}: {
+  initial: FixedAssetFormData;
+  onSubmit: (d: FixedAssetFormData) => void;
+  loading: boolean;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState<FixedAssetFormData>(initial);
+
+  useEffect(() => {
+    setForm(initial);
+  }, [initial]);
+
+  const set = (key: keyof FixedAssetFormData, value: string) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(form);
   };
-  return map[cat] || "bg-gray-100 text-gray-800";
-};
 
-const statusColor = (status: string) => {
-  const map: Record<string, string> = {
-    active: "bg-green-100 text-green-800",
-    fully_depreciated: "bg-yellow-100 text-yellow-800",
-    disposed: "bg-red-100 text-red-800",
-    sold: "bg-blue-100 text-blue-800",
-  };
-  return map[status] || "bg-gray-100 text-gray-800";
-};
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Name */}
+      <div className="space-y-1">
+        <label className="text-sm font-medium text-nexabook-900">
+          Asset Name <span className="text-red-500">*</span>
+        </label>
+        <Input
+          value={form.name}
+          onChange={(e) => set("name", e.target.value)}
+          placeholder="e.g. Honda Generator 5KW"
+          required
+        />
+      </div>
 
-const statusLabel = (status: string) => {
-  const map: Record<string, string> = {
-    active: "Active",
-    fully_depreciated: "Fully Depreciated",
-    disposed: "Disposed",
-    sold: "Sold",
-  };
-  return map[status] || status;
-};
+      <div className="grid grid-cols-2 gap-3">
+        {/* Category */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-nexabook-900">
+            Category <span className="text-red-500">*</span>
+          </label>
+          <Select
+            value={form.category}
+            onValueChange={(v) => set("category", v)}
+            required
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select category" />
+            </SelectTrigger>
+            <SelectContent>
+              {CATEGORIES.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-const methodLabel = (method: string) => {
-  return method === "straight_line" ? "Straight Line" : "Declining Balance";
-};
+        {/* Purchase Date */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-nexabook-900">
+            Purchase Date <span className="text-red-500">*</span>
+          </label>
+          <Input
+            type="date"
+            value={form.purchaseDate}
+            onChange={(e) => set("purchaseDate", e.target.value)}
+            required
+          />
+        </div>
+      </div>
 
-export default function AssetRegisterPage() {
-  const [assets, setAssets] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+      <div className="grid grid-cols-2 gap-3">
+        {/* Purchase Cost */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-nexabook-900">
+            Purchase Cost (PKR) <span className="text-red-500">*</span>
+          </label>
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.purchaseCost}
+            onChange={(e) => set("purchaseCost", e.target.value)}
+            placeholder="0.00"
+            required
+          />
+        </div>
 
-  // Form state
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("Machinery");
-  const [purchaseDate, setPurchaseDate] = useState("");
-  const [purchaseCost, setPurchaseCost] = useState("");
-  const [usefulLife, setUsefulLife] = useState("");
-  const [depreciationMethod, setDepreciationMethod] = useState("straight_line");
-  const [salvageValue, setSalvageValue] = useState("0");
-  const [notes, setNotes] = useState("");
+        {/* Salvage Value */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-nexabook-900">
+            Salvage / Residual Value (PKR)
+          </label>
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.salvageValue}
+            onChange={(e) => set("salvageValue", e.target.value)}
+            placeholder="0.00"
+          />
+        </div>
+      </div>
 
-  // Load assets from database
-  const loadAssets = useCallback(async () => {
+      <div className="grid grid-cols-2 gap-3">
+        {/* Useful Life */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-nexabook-900">
+            Useful Life (Years) <span className="text-red-500">*</span>
+          </label>
+          <Input
+            type="number"
+            min="1"
+            max="50"
+            value={form.usefulLifeYears}
+            onChange={(e) => set("usefulLifeYears", e.target.value)}
+            placeholder="e.g. 5"
+            required
+          />
+        </div>
+
+        {/* Depreciation Method */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-nexabook-900">
+            Depreciation Method
+          </label>
+          <Select
+            value={form.depreciationMethod}
+            onValueChange={(v) => set("depreciationMethod", v)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="straight_line">Straight Line (SLM)</SelectItem>
+              <SelectItem value="declining_balance">
+                Declining Balance (DBM)
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Notes */}
+      <div className="space-y-1">
+        <label className="text-sm font-medium text-nexabook-900">Notes</label>
+        <Input
+          value={form.notes || ""}
+          onChange={(e) => set("notes", e.target.value)}
+          placeholder="Optional notes..."
+        />
+      </div>
+
+      {/* Preview */}
+      {form.purchaseCost && form.usefulLifeYears && (
+        <div className="bg-nexabook-50 border border-nexabook-200 rounded-lg p-3 text-sm text-nexabook-700">
+          <span className="font-medium">Monthly Depreciation (SLM): </span>
+          PKR{" "}
+          {formatPKR(
+            (parseFloat(form.purchaseCost || "0") -
+              parseFloat(form.salvageValue || "0")) /
+              (parseInt(form.usefulLifeYears || "1") * 12)
+          )}
+        </div>
+      )}
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={loading}
+          className="bg-nexabook-600 hover:bg-nexabook-700 text-white"
+        >
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+          ) : null}
+          Save Asset
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+// ─── Main Page ─────────────────────────────────────────────────────────────────
+export default function FixedAssetsRegisterPage() {
+  const [assets, setAssets] = useState<FixedAsset[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [formLoading, setFormLoading] = useState(false);
+  const [message, setMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  // Dialogs
+  const [showCreate, setShowCreate] = useState(false);
+  const [editAsset, setEditAsset] = useState<FixedAsset | null>(null);
+  const [viewAsset, setViewAsset] = useState<FixedAsset | null>(null);
+  const [deleteAsset, setDeleteAsset] = useState<FixedAsset | null>(null);
+
+  const loadAssets = async () => {
     setLoading(true);
-    const res = await getFixedAssets();
-    if (res.success && res.data) {
-      setAssets(res.data);
+    const result = await getFixedAssets(searchQuery || undefined);
+    if (result.success && result.data) {
+      setAssets(result.data as FixedAsset[]);
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
     loadAssets();
-  }, [loadAssets]);
+  }, []);
 
-  const resetForm = () => {
-    setName("");
-    setCategory("Machinery");
-    setPurchaseDate("");
-    setPurchaseCost("");
-    setUsefulLife("");
-    setDepreciationMethod("straight_line");
-    setSalvageValue("0");
-    setNotes("");
+  useEffect(() => {
+    const t = setTimeout(() => loadAssets(), 400);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const showMsg = (type: "success" | "error", text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 4000);
   };
 
-  const handleAdd = async () => {
-    if (!name || !purchaseCost || !purchaseDate || !usefulLife) return;
-    
-    const cost = parseFloat(purchaseCost);
-    const life = parseInt(usefulLife);
-    const salvage = parseFloat(salvageValue) || 0;
-    
-    if (isNaN(cost) || cost <= 0 || isNaN(life) || life <= 0) return;
-    if (salvage >= cost) {
-      alert("Salvage value must be less than purchase cost");
-      return;
-    }
-
-    setSubmitting(true);
-    const res = await createFixedAsset({
-      name,
-      category,
-      purchaseDate,
-      purchaseCost: cost.toString(),
-      usefulLifeYears: life.toString(),
-      salvageValue: salvage.toString(),
-      depreciationMethod,
-      notes,
-    });
-
-    if (res.success) {
-      await loadAssets();
-      resetForm();
-      setDialogOpen(false);
+  const handleCreate = async (data: FixedAssetFormData) => {
+    setFormLoading(true);
+    const result = await createFixedAsset(data);
+    setFormLoading(false);
+    if (result.success) {
+      showMsg("success", "Asset created successfully");
+      setShowCreate(false);
+      loadAssets();
     } else {
-      alert(res.error || "Failed to create asset");
+      showMsg("error", result.error || "Failed to create asset");
     }
-    setSubmitting(false);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this asset?")) return;
-    
-    const res = await deleteFixedAsset(id);
-    if (res.success) {
-      await loadAssets();
+  const handleUpdate = async (data: FixedAssetFormData) => {
+    if (!editAsset) return;
+    setFormLoading(true);
+    const result = await updateFixedAsset(editAsset.id, data);
+    setFormLoading(false);
+    if (result.success) {
+      showMsg("success", "Asset updated successfully");
+      setEditAsset(null);
+      loadAssets();
     } else {
-      alert(res.error || "Failed to delete asset");
+      showMsg("error", result.error || "Failed to update asset");
     }
   };
 
-  // Calculate totals
-  const totalCost = assets.reduce((s, a) => s + parseFloat(a.purchaseCost || "0"), 0);
-  const totalAccumulatedDep = assets.reduce((s, a) => s + parseFloat(a.accumulatedDepreciation || "0"), 0);
-  const totalBookValue = assets.reduce((s, a) => {
-    const cost = parseFloat(a.purchaseCost || "0");
-    const accDep = parseFloat(a.accumulatedDepreciation || "0");
-    return s + (cost - accDep);
-  }, 0);
+  const handleDelete = async () => {
+    if (!deleteAsset) return;
+    setFormLoading(true);
+    const result = await deleteFixedAsset(deleteAsset.id);
+    setFormLoading(false);
+    if (result.success) {
+      showMsg("success", "Asset deleted successfully");
+      setDeleteAsset(null);
+      loadAssets();
+    } else {
+      showMsg("error", result.error || "Failed to delete asset");
+    }
+  };
+
+  // Stats
+  const totalCost = assets.reduce((s, a) => s + parseFloat(a.purchaseCost), 0);
+  const totalAccumDep = assets.reduce(
+    (s, a) => s + parseFloat(a.accumulatedDepreciation),
+    0
+  );
+  const totalBookValue = totalCost - totalAccumDep;
+  const activeCount = assets.filter((a) => a.status === "active").length;
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-nexabook-900">Asset Register</h1>
-            <p className="text-nexabook-600 mt-1">Track and manage company fixed assets</p>
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+      >
+        <div>
+          <div className="flex items-center gap-2 text-sm text-nexabook-500 mb-1">
+            <span>Fixed Assets</span>
+            <span>/</span>
+            <span className="text-nexabook-700 font-medium">Asset Register</span>
           </div>
-          <div className="flex gap-2">
-            {assets.length > 0 && (
-              <ReportExportButtons reportTitle="Asset Register" tableId="asset-register-table" />
-            )}
-            <Button 
-              onClick={() => { resetForm(); setDialogOpen(true); }} 
-              className="bg-nexabook-900 hover:bg-nexabook-800"
-            >
-              <Plus className="h-4 w-4 mr-2" />Add Asset
-            </Button>
-          </div>
+          <h1 className="text-2xl font-bold text-nexabook-900 flex items-center gap-2">
+            <Building2 className="h-6 w-6 text-nexabook-600" />
+            Asset Register
+          </h1>
+          <p className="text-nexabook-500 text-sm mt-1">
+            Manage all fixed assets and their depreciation details
+          </p>
         </div>
+        <Button
+          onClick={() => setShowCreate(true)}
+          className="bg-nexabook-600 hover:bg-nexabook-700 text-white"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Add Asset
+        </Button>
       </motion.div>
 
-      {/* Summary Cards */}
-      {assets.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card className="enterprise-card">
-            <CardContent className="p-5">
-              <p className="text-xs text-nexabook-500 uppercase tracking-wide">Total Cost</p>
-              <p className="text-xl font-bold text-nexabook-900 mt-1">
-                {formatCurrency(totalCost)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="enterprise-card">
-            <CardContent className="p-5">
-              <p className="text-xs text-nexabook-500 uppercase tracking-wide">Accumulated Depreciation</p>
-              <p className="text-xl font-bold text-red-700 mt-1">
-                {formatCurrency(totalAccumulatedDep)}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="enterprise-card">
-            <CardContent className="p-5">
-              <p className="text-xs text-nexabook-500 uppercase tracking-wide">Total Book Value</p>
-              <p className="text-xl font-bold text-green-700 mt-1">
-                {formatCurrency(totalBookValue)}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Loading State */}
-      {loading && (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-nexabook-500" />
-        </div>
-      )}
-
-      {/* Assets Table */}
-      {!loading && (
-        <Card className="enterprise-card">
-          <CardHeader>
-            <CardTitle className="text-nexabook-900">Registered Assets</CardTitle>
-            <CardDescription>{assets.length} asset{assets.length !== 1 ? "s" : ""} registered</CardDescription>
-          </CardHeader>
-          {assets.length === 0 ? (
-            <CardContent className="p-12 text-center">
-              <Building2 className="h-16 w-16 mx-auto mb-4 text-nexabook-200" />
-              <h3 className="text-lg font-medium text-nexabook-700">No assets registered</h3>
-              <p className="text-sm text-nexabook-500 mt-1">Click "Add Asset" to register your first fixed asset</p>
-            </CardContent>
+      {/* Notification */}
+      {message && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`flex items-center gap-2 px-4 py-3 rounded-lg border text-sm font-medium ${
+            message.type === "success"
+              ? "bg-green-50 border-green-200 text-green-800"
+              : "bg-red-50 border-red-200 text-red-800"
+          }`}
+        >
+          {message.type === "success" ? (
+            <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
           ) : (
-            <Table id="asset-register-table">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          )}
+          {message.text}
+          <button
+            onClick={() => setMessage(null)}
+            className="ml-auto opacity-70 hover:opacity-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </motion.div>
+      )}
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          {
+            label: "Total Assets",
+            value: assets.length.toString(),
+            sub: `${activeCount} active`,
+            icon: <Package className="h-5 w-5 text-nexabook-600" />,
+            color: "text-nexabook-900",
+          },
+          {
+            label: "Total Cost",
+            value: `PKR ${formatPKR(totalCost)}`,
+            sub: "Purchase value",
+            icon: <DollarSign className="h-5 w-5 text-blue-600" />,
+            color: "text-blue-700",
+          },
+          {
+            label: "Accumulated Dep.",
+            value: `PKR ${formatPKR(totalAccumDep)}`,
+            sub: "Total depreciated",
+            icon: <TrendingDown className="h-5 w-5 text-orange-500" />,
+            color: "text-orange-700",
+          },
+          {
+            label: "Net Book Value",
+            value: `PKR ${formatPKR(totalBookValue)}`,
+            sub: "Current value",
+            icon: <Building2 className="h-5 w-5 text-green-600" />,
+            color: "text-green-700",
+          },
+        ].map((s) => (
+          <Card key={s.label} className="border border-nexabook-100">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-nexabook-500 font-medium">{s.label}</p>
+                {s.icon}
+              </div>
+              <p className={`text-lg font-bold ${s.color} truncate`}>{s.value}</p>
+              <p className="text-xs text-nexabook-400 mt-0.5">{s.sub}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Search */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-nexabook-400" />
+        <Input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search assets..."
+          className="pl-9"
+        />
+      </div>
+
+      {/* Table */}
+      <Card className="border border-nexabook-100">
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex justify-center items-center py-20">
+              <Loader2 className="h-6 w-6 animate-spin text-nexabook-400" />
+            </div>
+          ) : assets.length === 0 ? (
+            <div className="text-center py-16 text-nexabook-400">
+              <Building2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p className="font-medium">No assets found</p>
+              <p className="text-sm mt-1">Add your first fixed asset to get started</p>
+            </div>
+          ) : (
+            <Table>
               <TableHeader>
                 <TableRow className="bg-nexabook-50">
-                  <TableHead className="text-nexabook-900">Asset Name</TableHead>
-                  <TableHead className="text-nexabook-900">Category</TableHead>
-                  <TableHead className="text-right text-nexabook-900">Purchase Cost</TableHead>
-                  <TableHead className="text-nexabook-900">Purchase Date</TableHead>
-                  <TableHead className="text-right text-nexabook-900">Life (Yrs)</TableHead>
-                  <TableHead className="text-nexabook-900">Method</TableHead>
-                  <TableHead className="text-right text-nexabook-900">Book Value</TableHead>
-                  <TableHead className="text-nexabook-900">Status</TableHead>
-                  <TableHead className="w-10 print:hidden"></TableHead>
+                  <TableHead>Asset Name</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Purchase Date</TableHead>
+                  <TableHead className="text-right">Cost (PKR)</TableHead>
+                  <TableHead className="text-right">Accum. Dep.</TableHead>
+                  <TableHead className="text-right">Book Value</TableHead>
+                  <TableHead className="text-center">Dep. %</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {assets.map(asset => {
-                  const cost = parseFloat(asset.purchaseCost || "0");
-                  const accDep = parseFloat(asset.accumulatedDepreciation || "0");
-                  const bookValue = cost - accDep;
-                  
+                {assets.map((asset, idx) => {
+                  const bookValue = getBookValue(asset);
+                  const depPct = getDepreciationPercent(asset);
                   return (
-                    <TableRow key={asset.id}>
-                      <TableCell className="font-medium text-nexabook-900">{asset.name}</TableCell>
+                    <motion.tr
+                      key={asset.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.03 }}
+                      className="border-b border-nexabook-50 hover:bg-nexabook-50/50"
+                    >
                       <TableCell>
-                        <Badge className={categoryColor(asset.category)}>
-                          {asset.category}
-                        </Badge>
+                        <div className="font-medium text-nexabook-900">{asset.name}</div>
+                        <div className="text-xs text-nexabook-400 capitalize">
+                          {asset.depreciationMethod === "straight_line" ? "SLM" : "DBM"} ·{" "}
+                          {asset.usefulLifeYears} yrs
+                        </div>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        {formatCurrency(cost)}
-                      </TableCell>
-                      <TableCell className="text-sm text-nexabook-600">
-                        {new Date(asset.purchaseDate).toLocaleDateString("en-PK", { 
-                          year: "numeric", 
-                          month: "short", 
-                          day: "numeric" 
+                      <TableCell className="text-nexabook-600 text-sm">{asset.category}</TableCell>
+                      <TableCell className="text-nexabook-600 text-sm">
+                        {new Date(asset.purchaseDate).toLocaleDateString("en-PK", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
                         })}
                       </TableCell>
-                      <TableCell className="text-right text-sm text-nexabook-700">
-                        {asset.usefulLifeYears}
+                      <TableCell className="text-right font-medium">
+                        {formatPKR(parseFloat(asset.purchaseCost))}
                       </TableCell>
-                      <TableCell className="text-sm text-nexabook-600">
-                        {methodLabel(asset.depreciationMethod)}
+                      <TableCell className="text-right text-orange-600">
+                        {formatPKR(parseFloat(asset.accumulatedDepreciation))}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm font-semibold text-green-700">
-                        {formatCurrency(Math.max(parseFloat(asset.salvageValue || "0"), bookValue))}
+                      <TableCell className="text-right font-semibold text-green-700">
+                        {formatPKR(bookValue)}
                       </TableCell>
-                      <TableCell>
-                        <Badge className={statusColor(asset.status)}>
-                          {statusLabel(asset.status)}
+                      <TableCell className="text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <div className="w-16 h-1.5 bg-nexabook-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-orange-400 rounded-full"
+                              style={{ width: `${depPct}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-nexabook-500">{depPct.toFixed(0)}%</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${STATUS_COLORS[asset.status] || "bg-gray-100 text-gray-700"}`}
+                        >
+                          {STATUS_LABELS[asset.status] || asset.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="print:hidden">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-7 w-7 p-0 text-red-500 hover:text-red-700" 
-                          onClick={() => handleDelete(asset.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-nexabook-500 hover:text-nexabook-700"
+                            onClick={() => setViewAsset(asset)}
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-nexabook-500 hover:text-blue-700"
+                            onClick={() => setEditAsset(asset)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-nexabook-500 hover:text-red-600"
+                            onClick={() => setDeleteAsset(asset)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </TableCell>
-                    </TableRow>
+                    </motion.tr>
                   );
                 })}
               </TableBody>
             </Table>
           )}
-        </Card>
-      )}
+        </CardContent>
+      </Card>
 
-      {/* Add Asset Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-xl">
+      {/* ── Create Dialog ── */}
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle className="text-nexabook-900">Add New Asset</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-nexabook-600" />
+              Add New Asset
+            </DialogTitle>
+            <DialogDescription>
+              Enter the details of the fixed asset to add to your register.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="col-span-2 space-y-2">
-              <Label className="text-nexabook-700">Asset Name *</Label>
-              <Input 
-                value={name} 
-                onChange={e => setName(e.target.value)} 
-                placeholder="e.g. CNC Machine #1"
-                className="border-slate-200"
-              />
+          <AssetForm
+            initial={EMPTY_FORM}
+            onSubmit={handleCreate}
+            loading={formLoading}
+            onCancel={() => setShowCreate(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Dialog ── */}
+      <Dialog open={!!editAsset} onOpenChange={(o) => !o && setEditAsset(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-blue-600" />
+              Edit Asset
+            </DialogTitle>
+          </DialogHeader>
+          {editAsset && (
+            <AssetForm
+              initial={{
+                name: editAsset.name,
+                category: editAsset.category,
+                purchaseDate: new Date(editAsset.purchaseDate)
+                  .toISOString()
+                  .split("T")[0],
+                purchaseCost: editAsset.purchaseCost,
+                usefulLifeYears: editAsset.usefulLifeYears.toString(),
+                salvageValue: editAsset.salvageValue,
+                depreciationMethod: editAsset.depreciationMethod,
+                notes: editAsset.notes || "",
+              }}
+              onSubmit={handleUpdate}
+              loading={formLoading}
+              onCancel={() => setEditAsset(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── View Dialog ── */}
+      <Dialog open={!!viewAsset} onOpenChange={(o) => !o && setViewAsset(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-nexabook-600" />
+              Asset Details
+            </DialogTitle>
+          </DialogHeader>
+          {viewAsset && (
+            <div className="space-y-3 text-sm">
+              {[
+                ["Asset Name", viewAsset.name],
+                ["Category", viewAsset.category],
+                [
+                  "Purchase Date",
+                  new Date(viewAsset.purchaseDate).toLocaleDateString("en-PK"),
+                ],
+                ["Purchase Cost", `PKR ${formatPKR(parseFloat(viewAsset.purchaseCost))}`],
+                ["Salvage Value", `PKR ${formatPKR(parseFloat(viewAsset.salvageValue))}`],
+                ["Useful Life", `${viewAsset.usefulLifeYears} years`],
+                [
+                  "Method",
+                  viewAsset.depreciationMethod === "straight_line"
+                    ? "Straight Line (SLM)"
+                    : "Declining Balance (DBM)",
+                ],
+                [
+                  "Accumulated Depreciation",
+                  `PKR ${formatPKR(parseFloat(viewAsset.accumulatedDepreciation))}`,
+                ],
+                [
+                  "Net Book Value",
+                  `PKR ${formatPKR(getBookValue(viewAsset))}`,
+                ],
+                ["Status", STATUS_LABELS[viewAsset.status] || viewAsset.status],
+                ...(viewAsset.notes ? [["Notes", viewAsset.notes]] : []),
+              ].map(([label, val]) => (
+                <div key={label} className="flex justify-between border-b border-nexabook-50 pb-2">
+                  <span className="text-nexabook-500">{label}</span>
+                  <span className="font-medium text-nexabook-900 text-right max-w-[55%]">{val}</span>
+                </div>
+              ))}
             </div>
-            <div className="space-y-2">
-              <Label className="text-nexabook-700">Category</Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="border-slate-200">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map(c => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-nexabook-700">Purchase Date *</Label>
-              <Input 
-                type="date" 
-                value={purchaseDate} 
-                onChange={e => setPurchaseDate(e.target.value)}
-                className="border-slate-200"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-nexabook-700">Purchase Cost (PKR) *</Label>
-              <Input 
-                type="number" 
-                step="0.01" 
-                value={purchaseCost} 
-                onChange={e => setPurchaseCost(e.target.value)} 
-                placeholder="0.00"
-                className="border-slate-200"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-nexabook-700">Useful Life (Years) *</Label>
-              <Input 
-                type="number" 
-                value={usefulLife} 
-                onChange={e => setUsefulLife(e.target.value)} 
-                placeholder="e.g. 10"
-                className="border-slate-200"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-nexabook-700">Depreciation Method</Label>
-              <Select value={depreciationMethod} onValueChange={setDepreciationMethod}>
-                <SelectTrigger className="border-slate-200">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {METHODS.map(m => (
-                    <SelectItem key={m} value={m}>
-                      {methodLabel(m)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-nexabook-700">Salvage Value (PKR)</Label>
-              <Input 
-                type="number" 
-                step="0.01" 
-                value={salvageValue} 
-                onChange={e => setSalvageValue(e.target.value)} 
-                placeholder="0.00"
-                className="border-slate-200"
-              />
-            </div>
-            <div className="col-span-2 space-y-2">
-              <Label className="text-nexabook-700">Notes (Optional)</Label>
-              <Input 
-                value={notes} 
-                onChange={e => setNotes(e.target.value)} 
-                placeholder="Additional details..."
-                className="border-slate-200"
-              />
-            </div>
-          </div>
+          )}
           <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline">Cancel</Button>
-            </DialogClose>
-            <Button 
-              onClick={handleAdd} 
-              disabled={submitting || !name || !purchaseCost || !purchaseDate || !usefulLife}
-              className="bg-nexabook-900 hover:bg-nexabook-800"
+            <Button variant="outline" onClick={() => setViewAsset(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirm ── */}
+      <Dialog open={!!deleteAsset} onOpenChange={(o) => !o && setDeleteAsset(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="h-5 w-5" />
+              Delete Asset
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete{" "}
+              <span className="font-semibold text-nexabook-900">
+                {deleteAsset?.name}
+              </span>
+              ? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteAsset(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={formLoading}
             >
-              {submitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Adding...
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Asset
-                </>
-              )}
+              {formLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

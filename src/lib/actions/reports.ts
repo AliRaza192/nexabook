@@ -1428,3 +1428,802 @@ export async function getWithholdingTaxReport(dateFrom: string, dateTo: string) 
     return { success: false, error: "Failed to generate WHT report" };
   }
 }
+
+
+// ============= Sales Invoice Detail Report =============
+
+export async function getSalesInvoiceDetailReport(dateFrom: string, dateTo: string, customerId?: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const fromDate = new Date(dateFrom);
+    const toDate = new Date(dateTo);
+    toDate.setHours(23, 59, 59, 999);
+
+    const conditions = [
+      eq(invoices.orgId, orgId),
+      gte(invoices.issueDate, fromDate),
+      lte(invoices.issueDate, toDate)
+    ];
+
+    if (customerId && customerId !== 'all') {
+      conditions.push(eq(invoices.customerId, customerId));
+    }
+
+    const reportData = await db
+      .select({
+        id: invoices.id,
+        invoiceNumber: invoices.invoiceNumber,
+        issueDate: invoices.issueDate,
+        customerName: customers.name,
+        grossAmount: invoices.grossAmount,
+        discountAmount: invoices.discountAmount,
+        taxAmount: invoices.taxAmount,
+        netAmount: invoices.netAmount,
+        receivedAmount: invoices.receivedAmount,
+        status: invoices.status,
+        itemCount: sql<number>`count(${invoiceItems.id})`
+      })
+      .from(invoices)
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .leftJoin(invoiceItems, eq(invoices.id, invoiceItems.invoiceId))
+      .where(and(...conditions))
+      .groupBy(invoices.id, customers.name)
+      .orderBy(desc(invoices.issueDate));
+
+    return { success: true, data: reportData };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Sales Invoice Detail Report" };
+  }
+}
+
+// ============= Customer Balance Report =============
+export async function getCustomerBalanceReport() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const data = await db
+      .select({
+        id: customers.id,
+        name: customers.name,
+        balance: customers.balance,
+      })
+      .from(customers)
+      .where(and(eq(customers.orgId, orgId), eq(customers.isActive, true)))
+      .orderBy(customers.name);
+
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Customer Balance report" };
+  }
+}
+
+// ============= Purchase Invoice Detail Report =============
+export async function getPurchaseInvoiceDetailReport(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const data = await db
+      .select({
+        id: purchaseInvoices.id,
+        billNumber: purchaseInvoices.billNumber,
+        date: purchaseInvoices.date,
+        vendorName: vendors.name,
+        netAmount: purchaseInvoices.netAmount,
+        status: purchaseInvoices.status,
+      })
+      .from(purchaseInvoices)
+      .leftJoin(vendors, eq(purchaseInvoices.vendorId, vendors.id))
+      .where(and(
+        eq(purchaseInvoices.orgId, orgId),
+        gte(purchaseInvoices.date, new Date(dateFrom)),
+        lte(purchaseInvoices.date, new Date(dateTo))
+      ))
+      .orderBy(desc(purchaseInvoices.date));
+
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: "Failed to generate Purchase Detail report" };
+  }
+}
+
+// ============= General Ledger Report =============
+export async function getGeneralLedgerReport(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const data = await db
+      .select({
+        accountName: chartOfAccounts.name,
+        date: journalEntries.entryDate,
+        description: journalEntryLines.description,
+        debit: journalEntryLines.debitAmount,
+        credit: journalEntryLines.creditAmount,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .innerJoin(chartOfAccounts, eq(journalEntryLines.accountId, chartOfAccounts.id))
+      .where(and(
+        eq(journalEntryLines.orgId, orgId),
+        gte(journalEntries.entryDate, new Date(dateFrom)),
+        lte(journalEntries.entryDate, new Date(dateTo))
+      ))
+      .orderBy(chartOfAccounts.code, journalEntries.entryDate);
+
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: "Failed to generate General Ledger" };
+  }
+}
+
+
+
+import {
+  salesReturns,
+  salesReturnItems,
+  customerPayments,
+  vendorPayments,
+} from "@/db/schema";
+import { or, ilike, sum, count } from "drizzle-orm";
+
+// ============= 1. Sales Invoice Detail Report =============
+
+export async function getSalesInvoiceDetailReport(
+  dateFrom: string,
+  dateTo: string,
+  customerId?: string,
+  status?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    const conditions = [
+      eq(invoices.orgId, orgId),
+      gte(invoices.issueDate, from),
+      lte(invoices.issueDate, to),
+    ];
+    if (customerId) conditions.push(eq(invoices.customerId, customerId));
+    if (status) conditions.push(eq(invoices.status, status as any));
+
+    const rows = await db
+      .select({
+        id: invoices.id,
+        invoiceNumber: invoices.invoiceNumber,
+        issueDate: invoices.issueDate,
+        dueDate: invoices.dueDate,
+        customerName: customers.name,
+        customerPhone: customers.phone,
+        grossAmount: invoices.grossAmount,
+        discountAmount: invoices.discountAmount,
+        taxAmount: invoices.taxAmount,
+        shippingCharges: invoices.shippingCharges,
+        netAmount: invoices.netAmount,
+        receivedAmount: invoices.receivedAmount,
+        balanceAmount: invoices.balanceAmount,
+        status: invoices.status,
+        orderBooker: invoices.orderBooker,
+        reference: invoices.reference,
+      })
+      .from(invoices)
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .where(and(...conditions))
+      .orderBy(desc(invoices.issueDate));
+
+    const totals = rows.reduce(
+      (acc, r) => ({
+        grossAmount: acc.grossAmount + parseFloat(r.grossAmount || "0"),
+        discountAmount: acc.discountAmount + parseFloat(r.discountAmount || "0"),
+        taxAmount: acc.taxAmount + parseFloat(r.taxAmount || "0"),
+        netAmount: acc.netAmount + parseFloat(r.netAmount || "0"),
+        receivedAmount: acc.receivedAmount + parseFloat(r.receivedAmount || "0"),
+        balanceAmount: acc.balanceAmount + parseFloat(r.balanceAmount || "0"),
+      }),
+      { grossAmount: 0, discountAmount: 0, taxAmount: 0, netAmount: 0, receivedAmount: 0, balanceAmount: 0 }
+    );
+
+    return { success: true, data: { rows, totals, dateFrom, dateTo } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Sales Invoice Detail Report" };
+  }
+}
+
+// ============= 2. Customer Balance Report =============
+
+export async function getCustomerBalanceReport(
+  customerId?: string,
+  dateAsOf?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const asOf = dateAsOf ? new Date(dateAsOf) : new Date();
+    asOf.setHours(23, 59, 59, 999);
+
+    const conditions = [eq(customers.orgId, orgId), eq(customers.isActive, true)];
+    if (customerId) conditions.push(eq(customers.id, customerId));
+
+    const customerRows = await db
+      .select({
+        id: customers.id,
+        name: customers.name,
+        phone: customers.phone,
+        email: customers.email,
+        city: customers.city,
+        openingBalance: customers.openingBalance,
+        balance: customers.balance,
+      })
+      .from(customers)
+      .where(and(...conditions))
+      .orderBy(customers.name);
+
+    // For each customer, calculate: totalInvoiced, totalReceived, balance
+    const result = await Promise.all(
+      customerRows.map(async (c) => {
+        const [inv] = await db
+          .select({
+            total: sql<number>`COALESCE(SUM(${invoices.netAmount}),0)`,
+            received: sql<number>`COALESCE(SUM(${invoices.receivedAmount}),0)`,
+          })
+          .from(invoices)
+          .where(
+            and(
+              eq(invoices.orgId, orgId),
+              eq(invoices.customerId, c.id),
+              lte(invoices.issueDate, asOf)
+            )
+          );
+
+        const totalInvoiced = parseFloat(String(inv.total));
+        const totalReceived = parseFloat(String(inv.received));
+        const openingBal = parseFloat(c.openingBalance || "0");
+        const balance = openingBal + totalInvoiced - totalReceived;
+
+        return {
+          ...c,
+          totalInvoiced,
+          totalReceived,
+          openingBalance: openingBal,
+          balance,
+        };
+      })
+    );
+
+    const grandTotal = result.reduce(
+      (acc, r) => ({
+        totalInvoiced: acc.totalInvoiced + r.totalInvoiced,
+        totalReceived: acc.totalReceived + r.totalReceived,
+        balance: acc.balance + r.balance,
+      }),
+      { totalInvoiced: 0, totalReceived: 0, balance: 0 }
+    );
+
+    return { success: true, data: { rows: result, grandTotal, asOf: dateAsOf } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Customer Balance Report" };
+  }
+}
+
+// ============= 3. Sale Return Report =============
+
+export async function getSaleReturnReport(
+  dateFrom: string,
+  dateTo: string,
+  customerId?: string,
+  status?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    const conditions = [
+      eq(salesReturns.orgId, orgId),
+      gte(salesReturns.returnDate, from),
+      lte(salesReturns.returnDate, to),
+    ];
+    if (customerId) conditions.push(eq(salesReturns.customerId, customerId));
+    if (status) conditions.push(eq(salesReturns.status, status));
+
+    const rows = await db
+      .select({
+        id: salesReturns.id,
+        returnNumber: salesReturns.returnNumber,
+        returnDate: salesReturns.returnDate,
+        customerName: customers.name,
+        customerPhone: customers.phone,
+        invoiceId: salesReturns.invoiceId,
+        reason: salesReturns.reason,
+        reasonDetails: salesReturns.reasonDetails,
+        grossAmount: salesReturns.grossAmount,
+        discountAmount: salesReturns.discountAmount,
+        taxAmount: salesReturns.taxAmount,
+        netAmount: salesReturns.netAmount,
+        refundAmount: salesReturns.refundAmount,
+        status: salesReturns.status,
+        notes: salesReturns.notes,
+      })
+      .from(salesReturns)
+      .leftJoin(customers, eq(salesReturns.customerId, customers.id))
+      .where(and(...conditions))
+      .orderBy(desc(salesReturns.returnDate));
+
+    // Get invoice numbers separately
+    const invoiceIds = rows
+      .filter((r) => r.invoiceId)
+      .map((r) => r.invoiceId as string);
+    let invoiceMap: Record<string, string> = {};
+    if (invoiceIds.length > 0) {
+      const invRows = await db
+        .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber })
+        .from(invoices)
+        .where(inArray(invoices.id, invoiceIds));
+      invoiceMap = Object.fromEntries(invRows.map((i) => [i.id, i.invoiceNumber]));
+    }
+
+    const enriched = rows.map((r) => ({
+      ...r,
+      invoiceNumber: r.invoiceId ? invoiceMap[r.invoiceId] || "—" : "—",
+    }));
+
+    const totals = enriched.reduce(
+      (acc, r) => ({
+        grossAmount: acc.grossAmount + parseFloat(r.grossAmount || "0"),
+        netAmount: acc.netAmount + parseFloat(r.netAmount || "0"),
+        refundAmount: acc.refundAmount + parseFloat(r.refundAmount || "0"),
+      }),
+      { grossAmount: 0, netAmount: 0, refundAmount: 0 }
+    );
+
+    return { success: true, data: { rows: enriched, totals, dateFrom, dateTo } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Sale Return Report" };
+  }
+}
+
+// ============= 4. Receive Payment Report =============
+
+export async function getReceivePaymentReport(
+  dateFrom: string,
+  dateTo: string,
+  customerId?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    const conditions = [
+      eq(customerPayments.orgId, orgId),
+      gte(customerPayments.paymentDate, from),
+      lte(customerPayments.paymentDate, to),
+    ];
+    if (customerId) conditions.push(eq(customerPayments.customerId, customerId));
+
+    const rows = await db
+      .select({
+        id: customerPayments.id,
+        paymentNumber: customerPayments.paymentNumber,
+        paymentDate: customerPayments.paymentDate,
+        customerName: customers.name,
+        customerPhone: customers.phone,
+        paymentMethod: customerPayments.paymentMethod,
+        amount: customerPayments.amount,
+        reference: customerPayments.reference,
+        notes: customerPayments.notes,
+      })
+      .from(customerPayments)
+      .leftJoin(customers, eq(customerPayments.customerId, customers.id))
+      .where(and(...conditions))
+      .orderBy(desc(customerPayments.paymentDate));
+
+    const totalAmount = rows.reduce((s, r) => s + parseFloat(r.amount || "0"), 0);
+
+    // Group by payment method
+    const byMethod: Record<string, number> = {};
+    rows.forEach((r) => {
+      const m = r.paymentMethod || "other";
+      byMethod[m] = (byMethod[m] || 0) + parseFloat(r.amount || "0");
+    });
+
+    return {
+      success: true,
+      data: { rows, totalAmount, byMethod, dateFrom, dateTo },
+    };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Receive Payment Report" };
+  }
+}
+
+// ============= 5. Purchase Invoice Detail Report =============
+
+export async function getPurchaseInvoiceDetailReport(
+  dateFrom: string,
+  dateTo: string,
+  vendorId?: string,
+  status?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    const conditions = [
+      eq(purchaseInvoices.orgId, orgId),
+      gte(purchaseInvoices.date, from),
+      lte(purchaseInvoices.date, to),
+    ];
+    if (vendorId) conditions.push(eq(purchaseInvoices.vendorId, vendorId));
+    if (status) conditions.push(eq(purchaseInvoices.status, status));
+
+    const rows = await db
+      .select({
+        id: purchaseInvoices.id,
+        billNumber: purchaseInvoices.billNumber,
+        date: purchaseInvoices.date,
+        dueDate: purchaseInvoices.dueDate,
+        vendorName: vendors.name,
+        vendorPhone: vendors.phone,
+        grossAmount: purchaseInvoices.grossAmount,
+        discountTotal: purchaseInvoices.discountTotal,
+        taxTotal: purchaseInvoices.taxTotal,
+        netAmount: purchaseInvoices.netAmount,
+        status: purchaseInvoices.status,
+        reference: purchaseInvoices.reference,
+      })
+      .from(purchaseInvoices)
+      .leftJoin(vendors, eq(purchaseInvoices.vendorId, vendors.id))
+      .where(and(...conditions))
+      .orderBy(desc(purchaseInvoices.date));
+
+    const totals = rows.reduce(
+      (acc, r) => ({
+        grossAmount: acc.grossAmount + parseFloat(r.grossAmount || "0"),
+        discountTotal: acc.discountTotal + parseFloat(r.discountTotal || "0"),
+        taxTotal: acc.taxTotal + parseFloat(r.taxTotal || "0"),
+        netAmount: acc.netAmount + parseFloat(r.netAmount || "0"),
+      }),
+      { grossAmount: 0, discountTotal: 0, taxTotal: 0, netAmount: 0 }
+    );
+
+    return { success: true, data: { rows, totals, dateFrom, dateTo } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Purchase Invoice Detail Report" };
+  }
+}
+
+// ============= 6. Vendor Balance Report =============
+
+export async function getVendorBalanceReport(
+  vendorId?: string,
+  dateAsOf?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const asOf = dateAsOf ? new Date(dateAsOf) : new Date();
+    asOf.setHours(23, 59, 59, 999);
+
+    const conditions = [eq(vendors.orgId, orgId), eq(vendors.isActive, true)];
+    if (vendorId) conditions.push(eq(vendors.id, vendorId));
+
+    const vendorRows = await db
+      .select({
+        id: vendors.id,
+        name: vendors.name,
+        phone: vendors.phone,
+        email: vendors.email,
+        openingBalance: vendors.openingBalance,
+        balance: vendors.balance,
+      })
+      .from(vendors)
+      .where(and(...conditions))
+      .orderBy(vendors.name);
+
+    const result = await Promise.all(
+      vendorRows.map(async (v) => {
+        const [pi] = await db
+          .select({
+            total: sql<number>`COALESCE(SUM(${purchaseInvoices.netAmount}),0)`,
+          })
+          .from(purchaseInvoices)
+          .where(
+            and(
+              eq(purchaseInvoices.orgId, orgId),
+              eq(purchaseInvoices.vendorId, v.id),
+              lte(purchaseInvoices.date, asOf)
+            )
+          );
+
+        const [vp] = await db
+          .select({
+            total: sql<number>`COALESCE(SUM(${vendorPayments.amount}),0)`,
+          })
+          .from(vendorPayments)
+          .where(
+            and(
+              eq(vendorPayments.orgId, orgId),
+              eq(vendorPayments.vendorId, v.id),
+              lte(vendorPayments.paymentDate, asOf)
+            )
+          );
+
+        const totalBilled = parseFloat(String(pi.total));
+        const totalPaid = parseFloat(String(vp.total));
+        const openingBal = parseFloat(v.openingBalance || "0");
+        const balance = openingBal + totalBilled - totalPaid;
+
+        return { ...v, totalBilled, totalPaid, openingBalance: openingBal, balance };
+      })
+    );
+
+    const grandTotal = result.reduce(
+      (acc, r) => ({
+        totalBilled: acc.totalBilled + r.totalBilled,
+        totalPaid: acc.totalPaid + r.totalPaid,
+        balance: acc.balance + r.balance,
+      }),
+      { totalBilled: 0, totalPaid: 0, balance: 0 }
+    );
+
+    return { success: true, data: { rows: result, grandTotal, asOf: dateAsOf } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Vendor Balance Report" };
+  }
+}
+
+// ============= 7. General Ledger Report (Account-wise) =============
+
+export async function getGeneralLedgerReport(
+  accountId: string,
+  dateFrom: string,
+  dateTo: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    // Get account info
+    const [account] = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(eq(chartOfAccounts.id, accountId), eq(chartOfAccounts.orgId, orgId)))
+      .limit(1);
+
+    if (!account) return { success: false, error: "Account not found" };
+
+    // Get opening balance (all entries before dateFrom)
+    const openingRows = await db
+      .select({
+        debit: sql<number>`COALESCE(SUM(${journalEntryLines.debitAmount}::numeric),0)`,
+        credit: sql<number>`COALESCE(SUM(${journalEntryLines.creditAmount}::numeric),0)`,
+      })
+      .from(journalEntryLines)
+      .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(
+        and(
+          eq(journalEntryLines.orgId, orgId),
+          eq(journalEntryLines.accountId, accountId),
+          lte(journalEntries.entryDate, new Date(from.getTime() - 1))
+        )
+      );
+
+    const openingDebit = parseFloat(String(openingRows[0]?.debit || 0));
+    const openingCredit = parseFloat(String(openingRows[0]?.credit || 0));
+    const openingBalance = openingDebit - openingCredit;
+
+    // Get period transactions
+    const lines = await db
+      .select({
+        id: journalEntryLines.id,
+        entryDate: journalEntries.entryDate,
+        entryNumber: journalEntries.entryNumber,
+        description: journalEntryLines.description,
+        referenceType: journalEntries.referenceType,
+        debitAmount: journalEntryLines.debitAmount,
+        creditAmount: journalEntryLines.creditAmount,
+      })
+      .from(journalEntryLines)
+      .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(
+        and(
+          eq(journalEntryLines.orgId, orgId),
+          eq(journalEntryLines.accountId, accountId),
+          gte(journalEntries.entryDate, from),
+          lte(journalEntries.entryDate, to)
+        )
+      )
+      .orderBy(journalEntries.entryDate, journalEntries.entryNumber);
+
+    // Build running balance
+    let runningBalance = openingBalance;
+    const enriched = lines.map((l) => {
+      const dr = parseFloat(l.debitAmount || "0");
+      const cr = parseFloat(l.creditAmount || "0");
+      runningBalance += dr - cr;
+      return { ...l, runningBalance };
+    });
+
+    const totalDebit = enriched.reduce((s, l) => s + parseFloat(l.debitAmount || "0"), 0);
+    const totalCredit = enriched.reduce((s, l) => s + parseFloat(l.creditAmount || "0"), 0);
+    const closingBalance = openingBalance + totalDebit - totalCredit;
+
+    return {
+      success: true,
+      data: {
+        account,
+        lines: enriched,
+        openingBalance,
+        totalDebit,
+        totalCredit,
+        closingBalance,
+        dateFrom,
+        dateTo,
+      },
+    };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate General Ledger Report" };
+  }
+}
+
+// ============= 8. Account Statement Report =============
+// (Summary of all accounts with period activity — management use)
+
+export async function getAccountStatementReport(
+  dateFrom: string,
+  dateTo: string,
+  accountType?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    const accConditions = [eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.isActive, true)];
+    if (accountType) accConditions.push(eq(chartOfAccounts.type, accountType));
+
+    const accounts = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(...accConditions))
+      .orderBy(chartOfAccounts.code);
+
+    const result = await Promise.all(
+      accounts.map(async (acc) => {
+        const [opening] = await db
+          .select({
+            debit: sql<number>`COALESCE(SUM(${journalEntryLines.debitAmount}::numeric),0)`,
+            credit: sql<number>`COALESCE(SUM(${journalEntryLines.creditAmount}::numeric),0)`,
+          })
+          .from(journalEntryLines)
+          .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+          .where(
+            and(
+              eq(journalEntryLines.orgId, orgId),
+              eq(journalEntryLines.accountId, acc.id),
+              lte(journalEntries.entryDate, new Date(from.getTime() - 1))
+            )
+          );
+
+        const [period] = await db
+          .select({
+            debit: sql<number>`COALESCE(SUM(${journalEntryLines.debitAmount}::numeric),0)`,
+            credit: sql<number>`COALESCE(SUM(${journalEntryLines.creditAmount}::numeric),0)`,
+          })
+          .from(journalEntryLines)
+          .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+          .where(
+            and(
+              eq(journalEntryLines.orgId, orgId),
+              eq(journalEntryLines.accountId, acc.id),
+              gte(journalEntries.entryDate, from),
+              lte(journalEntries.entryDate, to)
+            )
+          );
+
+        const openingBal =
+          parseFloat(String(opening.debit)) - parseFloat(String(opening.credit));
+        const periodDebit = parseFloat(String(period.debit));
+        const periodCredit = parseFloat(String(period.credit));
+        const closingBal = openingBal + periodDebit - periodCredit;
+
+        return {
+          id: acc.id,
+          code: acc.code,
+          name: acc.name,
+          type: acc.type,
+          subType: acc.subType,
+          openingBalance: openingBal,
+          periodDebit,
+          periodCredit,
+          closingBalance: closingBal,
+        };
+      })
+    );
+
+    // Filter out zero-activity accounts
+    const active = result.filter(
+      (r) => r.periodDebit !== 0 || r.periodCredit !== 0 || r.openingBalance !== 0
+    );
+
+    return { success: true, data: { rows: active, dateFrom, dateTo, accountType } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Account Statement Report" };
+  }
+}
+
+// ============= Helper: Get Vendors list (for filter dropdowns) =============
+
+export async function getVendors() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No org" };
+    const data = await db
+      .select({ id: vendors.id, name: vendors.name })
+      .from(vendors)
+      .where(and(eq(vendors.orgId, orgId), eq(vendors.isActive, true)))
+      .orderBy(vendors.name);
+    return { success: true, data };
+  } catch {
+    return { success: false, error: "Failed" };
+  }
+}
+
+// ============= Helper: Get Accounts list (for GL filter dropdown) =============
+
+export async function getChartOfAccountsList(type?: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No org" };
+    const conds = [eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.isActive, true)];
+    if (type) conds.push(eq(chartOfAccounts.type, type));
+    const data = await db
+      .select({ id: chartOfAccounts.id, name: chartOfAccounts.name, code: chartOfAccounts.code, type: chartOfAccounts.type })
+      .from(chartOfAccounts)
+      .where(and(...conds))
+      .orderBy(chartOfAccounts.code);
+    return { success: true, data };
+  } catch {
+    return { success: false, error: "Failed" };
+  }
+}
