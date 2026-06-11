@@ -2,583 +2,563 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Building2, Users, Save, Loader2, CheckCircle2, AlertCircle,
+  X, Pencil, ShieldCheck, UserCheck, UserX, Settings2,
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
 import {
-  Building2, Hash, Percent, Users, Save, Upload, Plus, Trash2, CheckCircle,
-  Shield, ShieldCheck, Info,
-} from "lucide-react";
-import { getCompanySettings, updateCompanySettings } from "@/lib/actions/accounts";
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  getCompanyProfile, updateCompanyProfile,
+  getOrgUsers, updateOrgUser, updateMyProfile,
+  deactivateUser, reactivateUser, getCurrentUserProfile,
+  type CompanyProfileData, type UpdateUserData,
+} from "@/lib/actions/settings";
 
-const NUMBER_FORMAT_KEY = 'nexabook-number-format';
+type Tab = "company" | "users" | "myprofile" | "numbering";
+
+const ROLE_COLORS: Record<string, string> = {
+  admin: "bg-purple-100 text-purple-800",
+  manager: "bg-blue-100 text-blue-800",
+  accountant: "bg-green-100 text-green-800",
+  staff: "bg-gray-100 text-gray-700",
+};
+
+const FISCAL_YEARS = [
+  { label: "Jan 1 – Dec 31", value: "01-01" },
+  { label: "Apr 1 – Mar 31", value: "04-01" },
+  { label: "Jul 1 – Jun 30 (Pakistan)", value: "07-01" },
+  { label: "Oct 1 – Sep 30", value: "10-01" },
+];
 
 export default function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<Tab>("company");
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
-  const [saveMessage, setSaveMessage] = useState("");
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const [form, setForm] = useState({
-    name: "",
-    slug: "",
-    ntn: "",
-    strn: "",
-    address: "",
-    city: "",
-    country: "Pakistan",
-    phone: "",
-    email: "",
-    website: "",
-    currency: "PKR",
-    fiscalYearStart: "07-01",
-    numberFormat: "south-asian" as "south-asian" | "international",
-    // Numbering Series
-    invoicePrefix: "INV",
-    orderPrefix: "SO",
-    quotationPrefix: "QT",
-    purchasePrefix: "PO",
-    billPrefix: "PI",
-    grnPrefix: "GRN",
-    numberingPadding: 5,
-    numberingIncludeYear: true,
+  // Company Profile
+  const [company, setCompany] = useState<CompanyProfileData & { id?: string }>({
+    name: "", email: "", phone: "", address: "", city: "", country: "Pakistan",
+    website: "", ntn: "", strn: "", currency: "PKR", fiscalYearStart: "07-01",
+    invoicePrefix: "INV", orderPrefix: "SO", quotationPrefix: "QT",
+    purchasePrefix: "PO", billPrefix: "PI", grnPrefix: "GRN",
+    numberingPadding: 5, numberingIncludeYear: false,
   });
 
-  // Check FBR compliance
-  const isFBRCompliant = form.ntn.trim() !== "" && form.strn.trim() !== "";
+  // Users
+  const [users, setUsers] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [editUser, setEditUser] = useState<any | null>(null);
+  const [editUserForm, setEditUserForm] = useState<UpdateUserData>({
+    fullName: "", phone: "", department: "", designation: "", role: "staff", isActive: true,
+  });
+
+  // My Profile
+  const [myProfile, setMyProfile] = useState({ fullName: "", phone: "", department: "", designation: "" });
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const res = await getCompanySettings();
-      if (res.success && res.data) {
-        const d = res.data as any;
-        setForm({
-          name: d.name || "",
-          slug: d.slug || "",
-          ntn: d.ntn || "",
-          strn: d.strn || "",
-          address: d.address || "",
-          city: d.city || "",
-          country: d.country || "Pakistan",
-          phone: d.phone || "",
-          email: d.email || "",
-          website: d.website || "",
-          currency: d.currency || "PKR",
-          fiscalYearStart: d.fiscalYearStart || "07-01",
-          numberFormat: ((typeof window !== 'undefined' ? localStorage.getItem(NUMBER_FORMAT_KEY) : null) || "south-asian") as "south-asian" | "international",
-          // Numbering Series
-          invoicePrefix: d.invoicePrefix || "INV",
-          orderPrefix: d.orderPrefix || "SO",
-          quotationPrefix: d.quotationPrefix || "QT",
-          purchasePrefix: d.purchasePrefix || "PO",
-          billPrefix: d.billPrefix || "PI",
-          grnPrefix: d.grnPrefix || "GRN",
-          numberingPadding: d.numberingPadding || 5,
-          numberingIncludeYear: d.numberingIncludeYear ?? true,
-        });
-      }
-      setLoading(false);
-    }
-    load();
+    loadAll();
   }, []);
 
-  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const value = e.target.value;
-    setForm(prev => ({ ...prev, [key]: value }));
-    
-    // Save number format to localStorage immediately
-    if (key === 'numberFormat' && typeof window !== 'undefined') {
-      localStorage.setItem(NUMBER_FORMAT_KEY, value);
-    }
-  };
-
-  const setSwitch = (key: string) => (checked: boolean) => {
-    setForm(prev => ({ ...prev, [key]: checked }));
-  };
-
-  const setNumber = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value);
-    if (!isNaN(value)) {
-      setForm(prev => ({ ...prev, [key]: value }));
-    }
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveStatus("idle");
-    setSaveMessage("");
-    try {
-      const res = await updateCompanySettings({
-        name: form.name,
-        ntn: form.ntn,
-        strn: form.strn,
-        address: form.address,
-        city: form.city,
-        phone: form.phone,
-        email: form.email,
-        website: form.website,
-        fiscalYearStart: form.fiscalYearStart,
-        currency: form.currency,
-        invoicePrefix: form.invoicePrefix,
-        orderPrefix: form.orderPrefix,
-        quotationPrefix: form.quotationPrefix,
-        purchasePrefix: form.purchasePrefix,
-        billPrefix: form.billPrefix,
-        grnPrefix: form.grnPrefix,
-        numberingPadding: form.numberingPadding,
-        numberingIncludeYear: form.numberingIncludeYear,
+  const loadAll = async () => {
+    const [compRes, usersRes, meRes] = await Promise.all([
+      getCompanyProfile(),
+      getOrgUsers(),
+      getCurrentUserProfile(),
+    ]);
+    if (compRes.success && compRes.data) {
+      const d = compRes.data as any;
+      setCompany({
+        name: d.name || "", email: d.email || "", phone: d.phone || "",
+        address: d.address || "", city: d.city || "", country: d.country || "Pakistan",
+        website: d.website || "", ntn: d.ntn || "", strn: d.strn || "",
+        currency: d.currency || "PKR", fiscalYearStart: d.fiscalYearStart || "07-01",
+        invoicePrefix: d.invoicePrefix || "INV", orderPrefix: d.orderPrefix || "SO",
+        quotationPrefix: d.quotationPrefix || "QT", purchasePrefix: d.purchasePrefix || "PO",
+        billPrefix: d.billPrefix || "PI", grnPrefix: d.grnPrefix || "GRN",
+        numberingPadding: d.numberingPadding || 5,
+        numberingIncludeYear: d.numberingIncludeYear || false,
+        logo: d.logo || "",
       });
-      if (res.success) {
-        setSaveStatus("success");
-        setSaveMessage(res.message || "Settings saved successfully!");
-      } else {
-        setSaveStatus("error");
-        setSaveMessage(res.error || "Failed to save settings");
-      }
-    } catch {
-      setSaveStatus("error");
-      setSaveMessage("An unexpected error occurred");
     }
+    if (usersRes.success && usersRes.data) setUsers(usersRes.data as any);
+    if (meRes.success && meRes.data) {
+      const me = meRes.data as any;
+      setCurrentUser(me);
+      setMyProfile({
+        fullName: me.fullName || "", phone: me.phone || "",
+        department: me.department || "", designation: me.designation || "",
+      });
+    }
+  };
+
+  const showMsg = (type: "success" | "error", text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 4000);
+  };
+
+  // ── Save Company Profile ──
+  const saveCompany = async () => {
+    setSaving(true);
+    const r = await updateCompanyProfile(company);
     setSaving(false);
-    setTimeout(() => setSaveStatus("idle"), 4000);
+    r.success ? showMsg("success", "Company profile updated") : showMsg("error", r.error || "Failed");
   };
 
-  const renderPreview = (prefix: string) => {
-    const year = new Date().getFullYear();
-    const padded = "1".padStart(form.numberingPadding, "0");
-    return `${prefix}${form.numberingIncludeYear ? `-${year}` : ""}-${padded}`;
+  // ── Save My Profile ──
+  const saveMyProfile = async () => {
+    setSaving(true);
+    const r = await updateMyProfile(myProfile);
+    setSaving(false);
+    r.success ? showMsg("success", "Profile updated") : showMsg("error", r.error || "Failed");
   };
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <p className="text-nexabook-500">Loading settings...</p>
-        </div>
-      </div>
-    );
-  }
+  // ── Edit User ──
+  const openEditUser = (u: any) => {
+    setEditUser(u);
+    setEditUserForm({
+      fullName: u.fullName, phone: u.phone || "",
+      department: u.department || "", designation: u.designation || "",
+      role: u.role, isActive: u.isActive,
+    });
+  };
+
+  const saveEditUser = async () => {
+    if (!editUser) return;
+    setSaving(true);
+    const r = await updateOrgUser(editUser.id, editUserForm);
+    setSaving(false);
+    if (r.success) {
+      showMsg("success", "User updated");
+      setEditUser(null);
+      loadAll();
+    } else {
+      showMsg("error", r.error || "Failed");
+    }
+  };
+
+  const handleToggleUser = async (u: any) => {
+    setSaving(true);
+    const r = u.isActive ? await deactivateUser(u.id) : await reactivateUser(u.id);
+    setSaving(false);
+    r.success ? (showMsg("success", `User ${u.isActive ? "deactivated" : "reactivated"}`), loadAll())
+      : showMsg("error", r.error || "Failed");
+  };
+
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "company", label: "Company Profile", icon: <Building2 className="h-4 w-4" /> },
+    { id: "numbering", label: "Document Numbering", icon: <Settings2 className="h-4 w-4" /> },
+    { id: "users", label: "User Management", icon: <Users className="h-4 w-4" /> },
+    { id: "myprofile", label: "My Profile", icon: <ShieldCheck className="h-4 w-4" /> },
+  ];
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-nexabook-900">System Settings</h1>
-            <p className="text-nexabook-600 mt-1">Configure company profile, numbering, tax, and user access</p>
-          </div>
-          {isFBRCompliant && (
-            <Badge className="bg-green-100 text-green-800 border-green-200 px-4 py-2">
-              <ShieldCheck className="h-4 w-4 mr-2" />
-              FBR Compliant
-            </Badge>
-          )}
-        </div>
+      {/* Header */}
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+        <h1 className="text-2xl font-bold text-nexabook-900 flex items-center gap-2">
+          <Settings2 className="h-6 w-6 text-nexabook-600" />
+          Settings
+        </h1>
+        <p className="text-nexabook-500 text-sm mt-1">Manage company information, users, and preferences</p>
       </motion.div>
 
-      {/* Save feedback */}
-      {saveStatus === "success" && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
-          <CheckCircle className="h-4 w-4" />{saveMessage}
-        </div>
+      {/* Notification */}
+      {message && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`flex items-center gap-2 px-4 py-3 rounded-lg border text-sm font-medium ${
+            message.type === "success" ? "bg-green-50 border-green-200 text-green-800" : "bg-red-50 border-red-200 text-red-800"
+          }`}
+        >
+          {message.type === "success" ? <CheckCircle2 className="h-4 w-4 flex-shrink-0" /> : <AlertCircle className="h-4 w-4 flex-shrink-0" />}
+          {message.text}
+          <button onClick={() => setMessage(null)} className="ml-auto"><X className="h-4 w-4" /></button>
+        </motion.div>
       )}
-      {saveStatus === "error" && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">
-          {saveMessage}
-        </div>
-      )}
 
-      <Tabs defaultValue="company">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="company"><Building2 className="h-4 w-4 mr-2" />Company Profile</TabsTrigger>
-          <TabsTrigger value="numbering"><Hash className="h-4 w-4 mr-2" />Numbering Series</TabsTrigger>
-          <TabsTrigger value="tax"><Percent className="h-4 w-4 mr-2" />Tax Settings</TabsTrigger>
-          <TabsTrigger value="users"><Users className="h-4 w-4 mr-2" />User Management</TabsTrigger>
-        </TabsList>
+      {/* Tabs */}
+      <div className="flex flex-wrap gap-2 border-b border-nexabook-100 pb-0">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === t.id
+                ? "border-nexabook-600 text-nexabook-900"
+                : "border-transparent text-nexabook-500 hover:text-nexabook-700"
+            }`}
+          >
+            {t.icon}{t.label}
+          </button>
+        ))}
+      </div>
 
-        {/* COMPANY PROFILE */}
-        <TabsContent value="company" className="space-y-6">
-          <Card>
-            <CardHeader><CardTitle>Company Information</CardTitle><CardDescription>Update your business details and branding</CardDescription></CardHeader>
-            <CardContent className="space-y-6">
-              {/* LogoUpload */}
-              <div className="flex items-center gap-6">
-                <div className="h-24 w-24 rounded-lg bg-nexabook-100 flex items-center justify-center border-2 border-dashed border-nexabook-300">
-                  <Building2 className="h-10 w-10 text-nexabook-400" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Company Logo</Label>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm"><Upload className="h-4 w-4 mr-2" />Upload Logo</Button>
-                    <Button variant="ghost" size="sm" className="text-red-600">Remove</Button>
-                  </div>
-                  <p className="text-xs text-nexabook-500">PNG, JPG up to 2MB. Recommended: 200x200px</p>
-                </div>
-              </div>
-
-              <Separator />
-
+      {/* ── Tab: Company Profile ── */}
+      {activeTab === "company" && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          <Card className="enterprise-card">
+            <CardHeader className="pb-3 border-b border-nexabook-50">
+              <CardTitle className="text-base font-semibold text-nexabook-900 flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-nexabook-600" />
+                Business Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Company Name*</Label>
-                  <Input value={form.name} onChange={set("name")} />
+                <div className="space-y-1 md:col-span-2">
+                  <Label>Business Name <span className="text-red-500">*</span></Label>
+                  <Input value={company.name} onChange={(e) => setCompany({ ...company, name: e.target.value })} placeholder="My Business Ltd." />
                 </div>
-                <div className="space-y-2">
-                  <Label>Slug</Label>
-                  <Input value={form.slug} disabled className="bg-nexabook-50" />
+                <div className="space-y-1">
+                  <Label>Email</Label>
+                  <Input type="email" value={company.email || ""} onChange={(e) => setCompany({ ...company, email: e.target.value })} placeholder="info@business.com" />
                 </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    NTN (National Tax Number)
-                    {form.ntn.trim() && <ShieldCheck className="h-4 w-4 text-green-600" />}
-                  </Label>
-                  <Input value={form.ntn} onChange={set("ntn")} placeholder="1234567-8" />
-                  <p className="text-xs text-nexabook-500">Required for FBR QR Code on invoices</p>
+                <div className="space-y-1">
+                  <Label>Phone</Label>
+                  <Input value={company.phone || ""} onChange={(e) => setCompany({ ...company, phone: e.target.value })} placeholder="+92 300 0000000" />
                 </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    STRN (Sales Tax Registration Number)
-                    {form.strn.trim() && <ShieldCheck className="h-4 w-4 text-green-600" />}
-                  </Label>
-                  <Input value={form.strn} onChange={set("strn")} placeholder="1234567890123" />
-                  <p className="text-xs text-nexabook-500">Required for FBR QR Code on invoices</p>
+                <div className="space-y-1 md:col-span-2">
+                  <Label>Address</Label>
+                  <Input value={company.address || ""} onChange={(e) => setCompany({ ...company, address: e.target.value })} placeholder="Street, Area" />
                 </div>
-                <div className="space-y-2"><Label>Phone</Label><Input value={form.phone} onChange={set("phone")} placeholder="+92-XXX-XXXXXXX" /></div>
-                <div className="space-y-2"><Label>Email</Label><Input type="email" value={form.email} onChange={set("email")} placeholder="info@company.com" /></div>
-                <div className="space-y-2"><Label>Website</Label><Input value={form.website} onChange={set("website")} placeholder="https://company.com" /></div>
-                <div className="space-y-2"><Label>Currency</Label>
-                  <select className="w-full rounded-md border border-nexabook-200 px-3 py-2" value={form.currency} onChange={set("currency")}>
-                    <option value="PKR">PKR - Pakistani Rupee</option>
-                    <option value="USD">USD - US Dollar</option>
-                    <option value="EUR">EUR - Euro</option>
-                    <option value="GBP">GBP - British Pound</option>
-                  </select>
+                <div className="space-y-1">
+                  <Label>City</Label>
+                  <Input value={company.city || ""} onChange={(e) => setCompany({ ...company, city: e.target.value })} placeholder="Karachi" />
                 </div>
-                <div className="space-y-2">
-                  <Label>Number Format</Label>
-                  <select 
-                    className="w-full rounded-md border border-nexabook-200 px-3 py-2" 
-                    value={form.numberFormat} 
-                    onChange={set("numberFormat")}
-                  >
-                    <option value="south-asian">South Asian (10,00,000) - Default for Pakistan</option>
-                    <option value="international">International (1,000,000)</option>
-                  </select>
-                  <p className="text-xs text-nexabook-500">
-                    {form.numberFormat === 'south-asian' 
-                      ? 'Example: Rs. 1,50,000.00 (1.5 Lakh)' 
-                      : 'Example: Rs. 150,000.00 (150 Thousand)'}
-                  </p>
+                <div className="space-y-1">
+                  <Label>Website</Label>
+                  <Input value={company.website || ""} onChange={(e) => setCompany({ ...company, website: e.target.value })} placeholder="https://yourbusiness.com" />
                 </div>
-              </div>
-
-              <div className="space-y-2"><Label>Address</Label><Textarea rows={3} value={form.address} onChange={set("address")} placeholder="Street, City, Province" /></div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2"><Label>City</Label><Input value={form.city} onChange={set("city")} placeholder="Karachi" /></div>
-                <div className="space-y-2"><Label>Country</Label><Input value={form.country} onChange={set("country")} /></div>
-                <div className="space-y-2"><Label>Fiscal Year Start</Label>
-                  <select className="w-full rounded-md border border-nexabook-200 px-3 py-2" value={form.fiscalYearStart} onChange={set("fiscalYearStart")}>
-                    <option value="01-01">January 1</option>
-                    <option value="04-01">April 1</option>
-                    <option value="07-01">July 1</option>
-                    <option value="10-01">October 1</option>
-                  </select>
+                <div className="space-y-1">
+                  <Label>NTN (Tax Number)</Label>
+                  <Input value={company.ntn || ""} onChange={(e) => setCompany({ ...company, ntn: e.target.value })} placeholder="1234567-8" />
+                </div>
+                <div className="space-y-1">
+                  <Label>STRN (Sales Tax Reg. No.)</Label>
+                  <Input value={company.strn || ""} onChange={(e) => setCompany({ ...company, strn: e.target.value })} placeholder="12-34-5678-901-12" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Currency</Label>
+                  <Select value={company.currency || "PKR"} onValueChange={(v) => setCompany({ ...company, currency: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="PKR">PKR — Pakistani Rupee</SelectItem>
+                      <SelectItem value="USD">USD — US Dollar</SelectItem>
+                      <SelectItem value="AED">AED — UAE Dirham</SelectItem>
+                      <SelectItem value="GBP">GBP — British Pound</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Fiscal Year Start</Label>
+                  <Select value={company.fiscalYearStart || "07-01"} onValueChange={(v) => setCompany({ ...company, fiscalYearStart: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {FISCAL_YEARS.map((f) => (
+                        <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-
-              <Button onClick={handleSave} disabled={saving} className="bg-nexabook-900 hover:bg-nexabook-800">
-                <Save className="h-4 w-4 mr-2" />{saving ? "Saving..." : "Save Changes"}
-              </Button>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        {/* NUMBERING SERIES */}
-        <TabsContent value="numbering" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Prefix Configuration</CardTitle>
-                  <CardDescription>Set custom prefixes for different document types</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Invoice Prefix</Label>
-                      <Input value={form.invoicePrefix} onChange={set("invoicePrefix")} maxLength={10} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Sale Order Prefix</Label>
-                      <Input value={form.orderPrefix} onChange={set("orderPrefix")} maxLength={10} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Quotation Prefix</Label>
-                      <Input value={form.quotationPrefix} onChange={set("quotationPrefix")} maxLength={10} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Purchase Order Prefix</Label>
-                      <Input value={form.purchasePrefix} onChange={set("purchasePrefix")} maxLength={10} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Purchase Bill Prefix</Label>
-                      <Input value={form.billPrefix} onChange={set("billPrefix")} maxLength={10} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>GRN Prefix</Label>
-                      <Input value={form.grnPrefix} onChange={set("grnPrefix")} maxLength={10} />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+          <div className="flex justify-end">
+            <Button onClick={saveCompany} disabled={saving} className="bg-nexabook-600 hover:bg-nexabook-700 text-white px-6">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Save Changes
+            </Button>
+          </div>
+        </motion.div>
+      )}
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Format Options</CardTitle>
-                  <CardDescription>Adjust how the sequence number is formatted</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Include Year</Label>
-                      <p className="text-xs text-nexabook-500">Adds the current year to the document ID (e.g., INV-2025-00001)</p>
-                    </div>
-                    <Switch 
-                      checked={form.numberingIncludeYear} 
-                      onCheckedChange={setSwitch("numberingIncludeYear")} 
+      {/* ── Tab: Document Numbering ── */}
+      {activeTab === "numbering" && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          <Card className="enterprise-card">
+            <CardHeader className="pb-3 border-b border-nexabook-50">
+              <CardTitle className="text-base font-semibold text-nexabook-900">Document Prefixes</CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {[
+                  { key: "invoicePrefix", label: "Sales Invoice", placeholder: "INV" },
+                  { key: "orderPrefix", label: "Sale Order", placeholder: "SO" },
+                  { key: "quotationPrefix", label: "Quotation", placeholder: "QT" },
+                  { key: "purchasePrefix", label: "Purchase Order", placeholder: "PO" },
+                  { key: "billPrefix", label: "Purchase Bill", placeholder: "PI" },
+                  { key: "grnPrefix", label: "GRN", placeholder: "GRN" },
+                ].map((f) => (
+                  <div key={f.key} className="space-y-1">
+                    <Label className="text-xs">{f.label}</Label>
+                    <Input
+                      value={(company as any)[f.key] || ""}
+                      onChange={(e) => setCompany({ ...company, [f.key]: e.target.value.toUpperCase() })}
+                      placeholder={f.placeholder}
+                      className="uppercase font-mono"
+                      maxLength={10}
                     />
                   </div>
-                  
-                  <Separator />
+                ))}
+              </div>
 
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <Label>Number Padding</Label>
-                      <Badge variant="secondary">{form.numberingPadding} Digits</Badge>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span className="text-xs text-nexabook-500">3</span>
-                      <input 
-                        type="range" 
-                        min="3" 
-                        max="8" 
-                        step="1"
-                        value={form.numberingPadding}
-                        onChange={setNumber("numberingPadding")}
-                        className="flex-1 accent-nexabook-900"
-                      />
-                      <span className="text-xs text-nexabook-500">8</span>
-                    </div>
-                    <p className="text-xs text-nexabook-500 italic">Determines the number of leading zeros (e.g., 5 digits = 00001)</p>
+              <div className="grid grid-cols-2 gap-4 pt-2 border-t border-nexabook-100">
+                <div className="space-y-1">
+                  <Label className="text-xs">Number Padding (digits)</Label>
+                  <Select
+                    value={String(company.numberingPadding || 5)}
+                    onValueChange={(v) => setCompany({ ...company, numberingPadding: parseInt(v) })}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[3, 4, 5, 6].map((n) => (
+                        <SelectItem key={n} value={String(n)}>{n} digits (e.g. {String(1).padStart(n, "0")})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Include Year in Number</Label>
+                  <Select
+                    value={company.numberingIncludeYear ? "yes" : "no"}
+                    onValueChange={(v) => setCompany({ ...company, numberingIncludeYear: v === "yes" })}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="no">No (INV-00001)</SelectItem>
+                      <SelectItem value="yes">Yes (INV-2026-00001)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="bg-nexabook-50 rounded-lg px-4 py-2.5 text-xs text-nexabook-600 border border-nexabook-100">
+                <span className="font-medium">Preview: </span>
+                {company.invoicePrefix || "INV"}
+                {company.numberingIncludeYear ? `-${new Date().getFullYear()}` : ""}
+                -{String(1).padStart(company.numberingPadding || 5, "0")}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex justify-end">
+            <Button onClick={saveCompany} disabled={saving} className="bg-nexabook-600 hover:bg-nexabook-700 text-white px-6">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Save Settings
+            </Button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Tab: User Management ── */}
+      {activeTab === "users" && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-nexabook-500">{users.length} users in your organization</p>
+            {currentUser?.role !== "admin" && (
+              <Badge className="bg-yellow-100 text-yellow-800 text-xs">Admin access required to edit users</Badge>
+            )}
+          </div>
+
+          <Card className="enterprise-card">
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-nexabook-50 border-b border-nexabook-200">
+                    {["Name", "Email", "Role", "Department", "Status", "Last Login", "Actions"].map((h) => (
+                      <th key={h} className="py-3 px-4 text-left font-semibold text-nexabook-700">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.length === 0 ? (
+                    <tr><td colSpan={7} className="text-center py-10 text-nexabook-400">No users found</td></tr>
+                  ) : (
+                    users.map((user, i) => (
+                      <motion.tr
+                        key={user.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: i * 0.04 }}
+                        className={`border-b border-nexabook-100 hover:bg-nexabook-50 ${!user.isActive ? "opacity-50" : ""}`}
+                      >
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-nexabook-200 flex items-center justify-center text-xs font-bold text-nexabook-700">
+                              {user.fullName?.charAt(0)?.toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="font-medium text-nexabook-900">{user.fullName}</p>
+                              {user.designation && <p className="text-xs text-nexabook-400">{user.designation}</p>}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-nexabook-600">{user.email}</td>
+                        <td className="py-3 px-4">
+                          <Badge className={`text-xs capitalize ${ROLE_COLORS[user.role] || "bg-gray-100 text-gray-700"}`}>{user.role}</Badge>
+                        </td>
+                        <td className="py-3 px-4 text-nexabook-500 text-xs">{user.department || "—"}</td>
+                        <td className="py-3 px-4">
+                          {user.isActive
+                            ? <span className="flex items-center gap-1 text-green-600 text-xs"><UserCheck className="h-3.5 w-3.5" />Active</span>
+                            : <span className="flex items-center gap-1 text-red-500 text-xs"><UserX className="h-3.5 w-3.5" />Inactive</span>}
+                        </td>
+                        <td className="py-3 px-4 text-nexabook-400 text-xs">
+                          {user.lastLoginAt
+                            ? new Date(user.lastLoginAt).toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" })
+                            : "Never"}
+                        </td>
+                        <td className="py-3 px-4">
+                          {currentUser?.role === "admin" && user.id !== currentUser?.id && (
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-nexabook-500 hover:text-blue-700"
+                                onClick={() => openEditUser(user)}>
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon"
+                                className={`h-7 w-7 ${user.isActive ? "text-nexabook-500 hover:text-red-600" : "text-nexabook-500 hover:text-green-600"}`}
+                                onClick={() => handleToggleUser(user)}>
+                                {user.isActive ? <UserX className="h-3.5 w-3.5" /> : <UserCheck className="h-3.5 w-3.5" />}
+                              </Button>
+                            </div>
+                          )}
+                          {user.id === currentUser?.id && (
+                            <span className="text-xs text-nexabook-400 italic">You</span>
+                          )}
+                        </td>
+                      </motion.tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+            <strong>Note:</strong> To invite new users, share your Clerk-based signup link. New users who sign up will automatically be assigned to your organization with "staff" role. Admin can then change their role from here.
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Tab: My Profile ── */}
+      {activeTab === "myprofile" && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          <Card className="enterprise-card max-w-xl">
+            <CardHeader className="pb-3 border-b border-nexabook-50">
+              <CardTitle className="text-base font-semibold text-nexabook-900 flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-nexabook-600" />
+                My Profile
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              {currentUser && (
+                <div className="flex items-center gap-3 p-3 bg-nexabook-50 rounded-lg border border-nexabook-100">
+                  <div className="w-10 h-10 rounded-full bg-nexabook-200 flex items-center justify-center text-lg font-bold text-nexabook-700">
+                    {currentUser.fullName?.charAt(0)?.toUpperCase()}
                   </div>
-                </CardContent>
-              </Card>
+                  <div>
+                    <p className="font-medium text-nexabook-900">{currentUser.fullName}</p>
+                    <p className="text-xs text-nexabook-500">{currentUser.email}</p>
+                    <Badge className={`text-xs capitalize mt-1 ${ROLE_COLORS[currentUser.role] || ""}`}>{currentUser.role}</Badge>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4">
+                <div className="space-y-1">
+                  <Label>Full Name</Label>
+                  <Input value={myProfile.fullName} onChange={(e) => setMyProfile({ ...myProfile, fullName: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Phone</Label>
+                  <Input value={myProfile.phone} onChange={(e) => setMyProfile({ ...myProfile, phone: e.target.value })} placeholder="+92 300 0000000" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Department</Label>
+                  <Input value={myProfile.department} onChange={(e) => setMyProfile({ ...myProfile, department: e.target.value })} placeholder="Accounts, Sales, etc." />
+                </div>
+                <div className="space-y-1">
+                  <Label>Designation</Label>
+                  <Input value={myProfile.designation} onChange={(e) => setMyProfile({ ...myProfile, designation: e.target.value })} placeholder="Manager, Accountant, etc." />
+                </div>
+              </div>
+
+              <div className="text-xs text-nexabook-400 bg-nexabook-50 rounded p-2">
+                Email and role can only be changed by an admin.
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex justify-start">
+            <Button onClick={saveMyProfile} disabled={saving} className="bg-nexabook-600 hover:bg-nexabook-700 text-white px-6">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Save Profile
+            </Button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Edit User Dialog ── */}
+      <Dialog open={!!editUser} onOpenChange={(o) => !o && setEditUser(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-nexabook-600" />
+              Edit User — {editUser?.fullName}
+            </DialogTitle>
+            <DialogDescription>{editUser?.email}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Full Name</Label>
+              <Input value={editUserForm.fullName} onChange={(e) => setEditUserForm({ ...editUserForm, fullName: e.target.value })} />
             </div>
-
-            <div className="space-y-6">
-              <Card className="bg-nexabook-900 text-white border-nexabook-800">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Info className="h-5 w-5 text-nexabook-300" />
-                    Live Preview
-                  </CardTitle>
-                  <CardDescription className="text-nexabook-400">See how your IDs will look</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-3">
-                    <div className="p-3 bg-nexabook-800/50 rounded-lg border border-nexabook-700">
-                      <p className="text-[10px] uppercase tracking-wider text-nexabook-400 mb-1 font-semibold">Sales Invoice</p>
-                      <code className="text-lg font-mono text-nexabook-100">{renderPreview(form.invoicePrefix)}</code>
-                    </div>
-                    <div className="p-3 bg-nexabook-800/50 rounded-lg border border-nexabook-700">
-                      <p className="text-[10px] uppercase tracking-wider text-nexabook-400 mb-1 font-semibold">Sale Order</p>
-                      <code className="text-lg font-mono text-nexabook-100">{renderPreview(form.orderPrefix)}</code>
-                    </div>
-                    <div className="p-3 bg-nexabook-800/50 rounded-lg border border-nexabook-700">
-                      <p className="text-[10px] uppercase tracking-wider text-nexabook-400 mb-1 font-semibold">Purchase Bill</p>
-                      <code className="text-lg font-mono text-nexabook-100">{renderPreview(form.billPrefix)}</code>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Button 
-                onClick={handleSave} 
-                disabled={saving} 
-                className="w-full bg-nexabook-900 hover:bg-nexabook-800 border-nexabook-700 h-12 text-lg shadow-lg"
-              >
-                <Save className="h-5 w-5 mr-2" />{saving ? "Saving..." : "Save All Changes"}
-              </Button>
+            <div className="space-y-1">
+              <Label>Phone</Label>
+              <Input value={editUserForm.phone || ""} onChange={(e) => setEditUserForm({ ...editUserForm, phone: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Department</Label>
+              <Input value={editUserForm.department || ""} onChange={(e) => setEditUserForm({ ...editUserForm, department: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Designation</Label>
+              <Input value={editUserForm.designation || ""} onChange={(e) => setEditUserForm({ ...editUserForm, designation: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label>Role</Label>
+              <Select value={editUserForm.role} onValueChange={(v) => setEditUserForm({ ...editUserForm, role: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="accountant">Accountant</SelectItem>
+                  <SelectItem value="staff">Staff</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        </TabsContent>
-
-        {/* TAX SETTINGS */}
-        <TabsContent value="tax" className="space-y-6">
-          {/* FBR Compliance Status */}
-          <Card className={isFBRCompliant ? "border-green-200 bg-green-50/30" : "border-amber-200 bg-amber-50/30"}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {isFBRCompliant ? (
-                  <>
-                    <ShieldCheck className="h-5 w-5 text-green-600" />
-                    FBR Compliance Status
-                  </>
-                ) : (
-                  <>
-                    <Shield className="h-5 w-5 text-amber-600" />
-                    FBR Compliance Required
-                  </>
-                )}
-              </CardTitle>
-              <CardDescription>
-                {isFBRCompliant 
-                  ? "Your organization is configured for FBR-compliant invoicing with QR codes"
-                  : "Configure NTN and STRN in Company Profile to enable FBR QR codes on invoices"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-6">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`h-3 w-3 rounded-full ${form.ntn.trim() ? "bg-green-600" : "bg-gray-300"}`} />
-                    <span className="text-sm font-medium">NTN: {form.ntn || "Not configured"}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className={`h-3 w-3 rounded-full ${form.strn.trim() ? "bg-green-600" : "bg-gray-300"}`} />
-                    <span className="text-sm font-medium">STRN: {form.strn || "Not configured"}</span>
-                  </div>
-                </div>
-                {isFBRCompliant && (
-                  <Badge className="bg-green-600 text-white">
-                    <ShieldCheck className="h-3 w-3 mr-1" />
-                    Compliant
-                  </Badge>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Global Tax Configuration</CardTitle><CardDescription>Set default GST and WHT rates applied across the system</CardDescription></CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <Label className="text-base font-semibold">GST (Goods & Services Tax) Rates</Label>
-                {[
-                  { label: "Standard GST Rate", value: "18", desc: "Applied to most goods and services" },
-                  { label: "Reduced GST Rate", value: "5", desc: "For essential items and basic goods" },
-                  { label: "Zero Rated", value: "0", desc: "For exports and exempt supplies" },
-                ].map((tax, idx) => (
-                  <div key={idx} className="grid grid-cols-12 gap-4 items-center p-4 border rounded-lg">
-                    <div className="col-span-6">
-                      <p className="font-medium">{tax.label}</p>
-                      <p className="text-xs text-nexabook-500">{tax.desc}</p>
-                    </div>
-                    <div className="col-span-2"><Input defaultValue={tax.value} className="h-9 text-right" /><span className="text-sm text-nexabook-500">%</span></div>
-                    <div className="col-span-4 flex items-center gap-2 justify-end">
-                      <Switch defaultChecked />
-                      <span className="text-sm text-nexabook-600">Enabled</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <Separator />
-
-              <div className="space-y-4">
-                <Label className="text-base font-semibold">Withholding Tax (WHT) Rates</Label>
-                {[
-                  { label: "WHT on Goods", value: "6.5", desc: "Applicable on purchase of goods" },
-                  { label: "WHT on Services", value: "10", desc: "Applicable on service payments" },
-                  { label: "WHT on Rent", value: "15", desc: "Applicable on rental payments" },
-                  { label: "WHT on Contracts", value: "7", desc: "Applicable on execution contracts" },
-                ].map((wht, idx) => (
-                  <div key={idx} className="grid grid-cols-12 gap-4 items-center p-4 border rounded-lg">
-                    <div className="col-span-6">
-                      <p className="font-medium">{wht.label}</p>
-                      <p className="text-xs text-nexabook-500">{wht.desc}</p>
-                    </div>
-                    <div className="col-span-2"><Input defaultValue={wht.value} className="h-9 text-right" /><span className="text-sm text-nexabook-500">%</span></div>
-                    <div className="col-span-4 flex items-center gap-2 justify-end">
-                      <Switch defaultChecked={idx < 2} />
-                      <span className="text-sm text-nexabook-600">Enabled</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <Button onClick={handleSave} disabled={saving} className="bg-nexabook-900 hover:bg-nexabook-800">
-                <Save className="h-4 w-4 mr-2" />Save Tax Configuration
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* USER MANAGEMENT / RBAC */}
-        <TabsContent value="users" className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div><CardTitle>User Access Control</CardTitle><CardDescription>Manage roles and permissions (RBAC)</CardDescription></div>
-              <Button className="bg-nexabook-900 hover:bg-nexabook-800"><Plus className="h-4 w-4 mr-2" />Invite User</Button>
-            </CardHeader>
-            <CardContent>
-              {/* Roles Definition */}
-              <div className="mb-6">
-                <Label className="text-base font-semibold mb-4 block">Role Definitions</Label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {[
-                    { role: "Admin", color: "bg-red-100 text-red-800", perms: "Full Access", users: 2 },
-                    { role: "Manager", color: "bg-blue-100 text-blue-800", perms: "Read/Write + Approvals", users: 3 },
-                    { role: "Staff", color: "bg-green-100 text-green-800", perms: "Limited Read/Write", users: 5 },
-                    { role: "Accountant", color: "bg-purple-100 text-purple-800", perms: "Accounts Module Only", users: 1 },
-                  ].map((r, idx) => (
-                    <Card key={idx}>
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <Badge className={r.color}>{r.role}</Badge>
-                          <span className="text-xs text-nexabook-500">{r.users} users</span>
-                        </div>
-                        <p className="text-sm text-nexabook-600">{r.perms}</p>
-                        <div className="flex gap-2 mt-3">
-                          <Button variant="outline" size="sm" className="flex-1 h-8 text-xs">Edit Permissions</Button>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0"><Trash2 className="h-3 w-3 text-red-500" /></Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-
-              <Separator className="my-6" />
-
-              {/* Active Users Table — Placeholder */}
-              <Label className="text-base font-semibold mb-4 block">Active Users</Label>
-              <div className="border rounded-lg overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-nexabook-50">
-                    <tr><th className="text-left px-4 py-3 text-sm font-medium text-nexabook-600">User</th><th className="text-left px-4 py-3 text-sm font-medium text-nexabook-600">Email</th><th className="text-left px-4 py-3 text-sm font-medium text-nexabook-600">Role</th><th className="text-left px-4 py-3 text-sm font-medium text-nexabook-600">Status</th><th className="text-right px-4 py-3 text-sm font-medium text-nexabook-600">Actions</th></tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-sm text-nexabook-500">
-                        User management via Clerk Dashboard. Connect your Clerk instance to manage users, roles, and invitations.
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditUser(null)}>Cancel</Button>
+            <Button onClick={saveEditUser} disabled={saving} className="bg-nexabook-600 hover:bg-nexabook-700 text-white">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

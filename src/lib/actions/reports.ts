@@ -2227,3 +2227,382 @@ export async function getChartOfAccountsList(type?: string) {
     return { success: false, error: "Failed" };
   }
 }
+
+
+
+// ============= 9. Product Sales Report =============
+
+export async function getProductSalesReport(
+  dateFrom: string,
+  dateTo: string,
+  productId?: string,
+  customerId?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    const invConditions = [
+      eq(invoices.orgId, orgId),
+      gte(invoices.issueDate, from),
+      lte(invoices.issueDate, to),
+      inArray(invoices.status, ["approved", "paid", "partial"]),
+    ];
+    if (customerId) invConditions.push(eq(invoices.customerId, customerId));
+
+    // Get all invoice items in period with product + customer info
+    const rows = await db
+      .select({
+        productId: products.id,
+        productName: products.name,
+        sku: products.sku,
+        category: productCategories.name,
+        invoiceDate: invoices.issueDate,
+        invoiceNumber: invoices.invoiceNumber,
+        customerName: customers.name,
+        quantity: invoiceItems.quantity,
+        unitPrice: invoiceItems.unitPrice,
+        discountPct: invoiceItems.discountPercentage,
+        lineTotal: invoiceItems.lineTotal,
+        costPrice: products.costPrice,
+      })
+      .from(invoiceItems)
+      .innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id))
+      .leftJoin(products, eq(invoiceItems.productId, products.id))
+      .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .where(and(...invConditions, productId ? eq(invoiceItems.productId, productId) : sql`1=1`))
+      .orderBy(products.name, desc(invoices.issueDate));
+
+    // Aggregate by product
+    const productMap: Record<string, any> = {};
+    for (const r of rows) {
+      const key = r.productId || r.productName;
+      if (!productMap[key]) {
+        productMap[key] = {
+          productId: r.productId,
+          productName: r.productName || r.invoiceNumber,
+          sku: r.sku,
+          category: r.category || "—",
+          totalQty: 0,
+          totalRevenue: 0,
+          totalCost: 0,
+          grossProfit: 0,
+          invoiceCount: 0,
+          transactions: [],
+        };
+      }
+      const qty = parseFloat(r.quantity);
+      const lineTotal = parseFloat(r.lineTotal || "0");
+      const cost = qty * parseFloat(r.costPrice || "0");
+      productMap[key].totalQty += qty;
+      productMap[key].totalRevenue += lineTotal;
+      productMap[key].totalCost += cost;
+      productMap[key].grossProfit += lineTotal - cost;
+      productMap[key].invoiceCount += 1;
+      productMap[key].transactions.push({
+        date: r.invoiceDate,
+        invoiceNumber: r.invoiceNumber,
+        customer: r.customerName,
+        qty,
+        unitPrice: parseFloat(r.unitPrice || "0"),
+        lineTotal,
+      });
+    }
+
+    const summary = Object.values(productMap).sort(
+      (a: any, b: any) => b.totalRevenue - a.totalRevenue
+    );
+
+    const totals = summary.reduce(
+      (acc: any, p: any) => ({
+        totalQty: acc.totalQty + p.totalQty,
+        totalRevenue: acc.totalRevenue + p.totalRevenue,
+        totalCost: acc.totalCost + p.totalCost,
+        grossProfit: acc.grossProfit + p.grossProfit,
+      }),
+      { totalQty: 0, totalRevenue: 0, totalCost: 0, grossProfit: 0 }
+    );
+
+    return { success: true, data: { summary, totals, dateFrom, dateTo } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Product Sales Report" };
+  }
+}
+
+// ============= 10. Discount Summary Report =============
+
+export async function getDiscountSummaryReport(
+  dateFrom: string,
+  dateTo: string,
+  customerId?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    const conditions = [
+      eq(invoices.orgId, orgId),
+      gte(invoices.issueDate, from),
+      lte(invoices.issueDate, to),
+      inArray(invoices.status, ["approved", "paid", "partial"]),
+    ];
+    if (customerId) conditions.push(eq(invoices.customerId, customerId));
+
+    const rows = await db
+      .select({
+        invoiceId: invoices.id,
+        invoiceNumber: invoices.invoiceNumber,
+        issueDate: invoices.issueDate,
+        customerName: customers.name,
+        grossAmount: invoices.grossAmount,
+        discountAmount: invoices.discountAmount,
+        netAmount: invoices.netAmount,
+        // Line item level discount
+        productName: products.name,
+        itemQty: invoiceItems.quantity,
+        itemUnitPrice: invoiceItems.unitPrice,
+        itemDiscountPct: invoiceItems.discountPercentage,
+        itemLineTotal: invoiceItems.lineTotal,
+      })
+      .from(invoices)
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .leftJoin(invoiceItems, eq(invoiceItems.invoiceId, invoices.id))
+      .leftJoin(products, eq(invoiceItems.productId, products.id))
+      .where(and(...conditions))
+      .orderBy(desc(invoices.issueDate));
+
+    // Group by invoice
+    const invoiceMap: Record<string, any> = {};
+    for (const r of rows) {
+      if (!invoiceMap[r.invoiceId]) {
+        invoiceMap[r.invoiceId] = {
+          invoiceId: r.invoiceId,
+          invoiceNumber: r.invoiceNumber,
+          issueDate: r.issueDate,
+          customerName: r.customerName,
+          grossAmount: parseFloat(r.grossAmount || "0"),
+          discountAmount: parseFloat(r.discountAmount || "0"),
+          netAmount: parseFloat(r.netAmount || "0"),
+          discountPct:
+            parseFloat(r.grossAmount || "0") > 0
+              ? (parseFloat(r.discountAmount || "0") /
+                  parseFloat(r.grossAmount || "0")) *
+                100
+              : 0,
+          items: [],
+        };
+      }
+      if (r.productName && parseFloat(r.itemDiscountPct || "0") > 0) {
+        invoiceMap[r.invoiceId].items.push({
+          productName: r.productName,
+          qty: parseFloat(r.itemQty || "0"),
+          unitPrice: parseFloat(r.itemUnitPrice || "0"),
+          discountPct: parseFloat(r.itemDiscountPct || "0"),
+          discountAmt:
+            (parseFloat(r.itemUnitPrice || "0") *
+              parseFloat(r.itemQty || "0") *
+              parseFloat(r.itemDiscountPct || "0")) /
+            100,
+          lineTotal: parseFloat(r.itemLineTotal || "0"),
+        });
+      }
+    }
+
+    const invoiceRows = Object.values(invoiceMap).filter(
+      (i: any) => i.discountAmount > 0
+    );
+
+    const totals = invoiceRows.reduce(
+      (acc: any, r: any) => ({
+        grossAmount: acc.grossAmount + r.grossAmount,
+        discountAmount: acc.discountAmount + r.discountAmount,
+        netAmount: acc.netAmount + r.netAmount,
+      }),
+      { grossAmount: 0, discountAmount: 0, netAmount: 0 }
+    );
+
+    return { success: true, data: { rows: invoiceRows, totals, dateFrom, dateTo } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Discount Summary Report" };
+  }
+}
+
+// ============= 11. Due Invoice Report =============
+
+export async function getDueInvoiceReport(
+  asOfDate?: string,
+  customerId?: string,
+  overdueDaysFilter?: number // 0=all, 1-30, 31-60, 61-90, 90+=91
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const asOf = asOfDate ? new Date(asOfDate) : new Date();
+    asOf.setHours(23, 59, 59, 999);
+
+    const conditions = [
+      eq(invoices.orgId, orgId),
+      inArray(invoices.status, ["approved", "partial"]),
+      lte(invoices.issueDate, asOf),
+    ];
+    if (customerId) conditions.push(eq(invoices.customerId, customerId));
+
+    const rows = await db
+      .select({
+        id: invoices.id,
+        invoiceNumber: invoices.invoiceNumber,
+        issueDate: invoices.issueDate,
+        dueDate: invoices.dueDate,
+        customerName: customers.name,
+        customerPhone: customers.phone,
+        netAmount: invoices.netAmount,
+        receivedAmount: invoices.receivedAmount,
+        balanceAmount: invoices.balanceAmount,
+        status: invoices.status,
+      })
+      .from(invoices)
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .where(and(...conditions))
+      .orderBy(invoices.dueDate);
+
+    // Enrich with overdue days
+    const today = new Date();
+    const enriched = rows
+      .filter((r) => parseFloat(r.balanceAmount || "0") > 0)
+      .map((r) => {
+        const due = r.dueDate ? new Date(r.dueDate) : new Date(r.issueDate);
+        const diffMs = today.getTime() - due.getTime();
+        const overdueDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+        return { ...r, overdueDays, dueDate: due };
+      })
+      .filter((r) => {
+        if (!overdueDaysFilter || overdueDaysFilter === 0) return true;
+        if (overdueDaysFilter === 1) return r.overdueDays >= 1 && r.overdueDays <= 30;
+        if (overdueDaysFilter === 31) return r.overdueDays >= 31 && r.overdueDays <= 60;
+        if (overdueDaysFilter === 61) return r.overdueDays >= 61 && r.overdueDays <= 90;
+        if (overdueDaysFilter === 91) return r.overdueDays > 90;
+        return true;
+      });
+
+    // Aging buckets
+    const aging = {
+      current: enriched.filter((r) => r.overdueDays === 0).reduce((s, r) => s + parseFloat(r.balanceAmount || "0"), 0),
+      days1to30: enriched.filter((r) => r.overdueDays >= 1 && r.overdueDays <= 30).reduce((s, r) => s + parseFloat(r.balanceAmount || "0"), 0),
+      days31to60: enriched.filter((r) => r.overdueDays >= 31 && r.overdueDays <= 60).reduce((s, r) => s + parseFloat(r.balanceAmount || "0"), 0),
+      days61to90: enriched.filter((r) => r.overdueDays >= 61 && r.overdueDays <= 90).reduce((s, r) => s + parseFloat(r.balanceAmount || "0"), 0),
+      over90: enriched.filter((r) => r.overdueDays > 90).reduce((s, r) => s + parseFloat(r.balanceAmount || "0"), 0),
+    };
+
+    const totals = {
+      totalBalance: enriched.reduce((s, r) => s + parseFloat(r.balanceAmount || "0"), 0),
+      totalNet: enriched.reduce((s, r) => s + parseFloat(r.netAmount || "0"), 0),
+      totalReceived: enriched.reduce((s, r) => s + parseFloat(r.receivedAmount || "0"), 0),
+    };
+
+    return { success: true, data: { rows: enriched, totals, aging, asOf: asOfDate } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Due Invoice Report" };
+  }
+}
+
+// ============= 12. Sale Order Report =============
+
+export async function getSaleOrderReport(
+  dateFrom: string,
+  dateTo: string,
+  customerId?: string,
+  status?: string
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+
+    const conditions = [
+      eq(saleOrders.orgId, orgId),
+      gte(saleOrders.orderDate, from),
+      lte(saleOrders.orderDate, to),
+    ];
+    if (customerId) conditions.push(eq(saleOrders.customerId, customerId));
+    if (status) conditions.push(eq(saleOrders.status, status as any));
+
+    const rows = await db
+      .select({
+        id: saleOrders.id,
+        orderNumber: saleOrders.orderNumber,
+        orderDate: saleOrders.orderDate,
+        deliveryDate: saleOrders.deliveryDate,
+        customerName: customers.name,
+        customerPhone: customers.phone,
+        subject: saleOrders.subject,
+        orderBooker: saleOrders.orderBooker,
+        grossAmount: saleOrders.grossAmount,
+        discountAmount: saleOrders.discountAmount,
+        taxAmount: saleOrders.taxAmount,
+        netAmount: saleOrders.netAmount,
+        status: saleOrders.status,
+        reference: saleOrders.reference,
+      })
+      .from(saleOrders)
+      .leftJoin(customers, eq(saleOrders.customerId, customers.id))
+      .where(and(...conditions))
+      .orderBy(desc(saleOrders.orderDate));
+
+    const totals = rows.reduce(
+      (acc, r) => ({
+        grossAmount: acc.grossAmount + parseFloat(r.grossAmount || "0"),
+        discountAmount: acc.discountAmount + parseFloat(r.discountAmount || "0"),
+        taxAmount: acc.taxAmount + parseFloat(r.taxAmount || "0"),
+        netAmount: acc.netAmount + parseFloat(r.netAmount || "0"),
+      }),
+      { grossAmount: 0, discountAmount: 0, taxAmount: 0, netAmount: 0 }
+    );
+
+    // Status counts
+    const statusCounts: Record<string, number> = {};
+    rows.forEach((r) => {
+      statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
+    });
+
+    return { success: true, data: { rows, totals, statusCounts, dateFrom, dateTo } };
+  } catch (error) {
+    console.error(error);
+    return { success: false, error: "Failed to generate Sale Order Report" };
+  }
+}
+
+// ============= Helper: Get Products list =============
+
+export async function getProductsList() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No org" };
+    const data = await db
+      .select({ id: products.id, name: products.name, sku: products.sku })
+      .from(products)
+      .where(and(eq(products.orgId, orgId), eq(products.isActive, true)))
+      .orderBy(products.name);
+    return { success: true, data };
+  } catch {
+    return { success: false, error: "Failed" };
+  }
+}
