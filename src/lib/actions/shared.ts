@@ -32,6 +32,7 @@ async function seedDefaultChartOfAccounts(orgId: string): Promise<void> {
     { code: "2100", name: "Accounts Payable", type: "liability", subType: "accounts_payable", description: "Money owed to suppliers" },
     { code: "2200", name: "Sales Tax Payable", type: "liability", subType: "tax_payable", description: "Sales tax collected but not remitted" },
     { code: "2210", name: "Income Tax Payable", type: "liability", subType: "income_tax_payable", description: "Income tax owed" },
+    { code: "2250", name: "WHT Payable", type: "liability", subType: "wht_payable", description: "Withholding tax deducted from vendor payments" },
     { code: "2300", name: "Salaries Payable", type: "liability", subType: "salaries_payable", description: "Salaries owed to employees" },
     { code: "2310", name: "EOBI Payable", type: "liability", subType: "eobi_payable", description: "EOBI contributions payable" },
 

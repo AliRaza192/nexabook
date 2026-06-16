@@ -1220,6 +1220,8 @@ export const vendorPayments = pgTable('vendor_payments', {
   paymentDate: timestamp('payment_date').notNull(),
   paymentMethod: paymentMethodEnum('payment_method').notNull(),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  whtAmount: decimal('wht_amount', { precision: 12, scale: 2 }).default('0'),
+  whtRate: decimal('wht_rate', { precision: 5, scale: 2 }).default('0'),
   reference: varchar('reference', { length: 100 }).default(''),
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),

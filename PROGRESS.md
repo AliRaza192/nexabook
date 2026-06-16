@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
-## Status: ✅ Complete — Phase A
-## Current Phase: A1 — Done
-## Last Completed: A11 — FIFO/WAC Real Implementation
+## Status: ✅ In Progress — Phase B
+## Current Phase: B1 — WHT Management
+## Last Completed: B1 — Withholding Tax Management
 
 ---
 
@@ -22,7 +22,7 @@
 
 ## PHASE B — COMPLIANCE & TAX FEATURES (Estimated: 5-7 days)
 
-- [ ] B1: WHT (Withholding Tax) Management
+- [x] B1: WHT (Withholding Tax) Management
 - [ ] B2: Provincial Sales Tax (SRB/PRA/KPRA/BRA)
 - [ ] B3: Input/Output Tax GL Separation
 - [ ] B4: FBR E-Invoicing Integration

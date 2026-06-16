@@ -1632,6 +1632,8 @@ export interface VendorPaymentFormData {
   paymentDate: string;
   paymentMethod: 'cash' | 'bank_transfer' | 'cheque' | 'online' | 'credit_card' | 'other';
   amount: string;
+  whtAmount?: string;
+  whtRate?: string;
   reference?: string;
   allocations?: Array<{ invoiceId: string; amount: string }>;
   notes?: string;
@@ -1685,6 +1687,14 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.vendorId || !data.amount) return { success: false, error: "Vendor and amount are required" };
 
+    const paymentAmount = parseFloat(data.amount);
+    const whtAmount = data.whtAmount ? parseFloat(data.whtAmount) : 0;
+    const whtRate = data.whtRate ? parseFloat(data.whtRate) : 0;
+    const netPayment = paymentAmount - whtAmount;
+
+    if (netPayment < 0)
+      return { success: false, error: "WHT amount cannot exceed payment amount" };
+
     const paymentNumber = await generateVendorPaymentNumber(orgId);
 
     const [newPayment] = await db.insert(vendorPayments).values({
@@ -1694,6 +1704,8 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
       paymentDate: new Date(data.paymentDate),
       paymentMethod: data.paymentMethod,
       amount: data.amount,
+      whtAmount: whtAmount > 0 ? String(whtAmount) : '0',
+      whtRate: whtRate > 0 ? String(whtRate) : '0',
       reference: data.reference || '',
       notes: data.notes || null,
     }).returning();
@@ -1707,19 +1719,10 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
           purchaseInvoiceId: alloc.invoiceId,
           allocatedAmount: alloc.amount,
         });
-
-        // Update purchase invoice balance
-        const [inv] = await db.select().from(purchaseInvoices).where(eq(purchaseInvoices.id, alloc.invoiceId)).limit(1);
-        if (inv) {
-          const currentNet = parseFloat(inv.netAmount || '0');
-          const allocated = parseFloat(alloc.amount);
-          // We track payment allocations separately; netAmount stays as original
-          // Update vendor balance
-        }
       }
     }
 
-    // Create journal entry: Debit Accounts Payable, Credit Cash/Bank
+    // Create journal entry: Debit Accounts Payable, Credit Cash/Bank, Credit WHT Payable
     const entryNumber = await (async () => {
       const res = await db.select({ entryNumber: journalEntries.entryNumber }).from(journalEntries).where(eq(journalEntries.orgId, orgId)).orderBy(desc(journalEntries.createdAt)).limit(1);
       let nextNum = 1;
@@ -1732,7 +1735,14 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
     const [apAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.name, 'Accounts Payable'))).limit(1);
 
     if (cashBankAccount && apAccount) {
-      if (!validateJournalBalance([{ debitAmount: data.amount, creditAmount: "0" }, { debitAmount: "0", creditAmount: data.amount }]))
+      const lines = [
+        { debitAmount: String(paymentAmount), creditAmount: '0' },
+        { debitAmount: '0', creditAmount: String(netPayment) },
+      ];
+      if (whtAmount > 0) {
+        lines.push({ debitAmount: '0', creditAmount: String(whtAmount) });
+      }
+      if (!validateJournalBalance(lines))
         throw new Error("Journal entry out of balance");
 
       const [journalEntry] = await db.insert(journalEntries).values({
@@ -1741,34 +1751,52 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
         entryDate: new Date(data.paymentDate),
         referenceType: 'vendor_payment',
         referenceId: newPayment.id,
-        description: `Vendor Payment ${paymentNumber}`,
+        description: `Vendor Payment ${paymentNumber}${whtAmount > 0 ? ` (WHT: ${whtAmount.toFixed(2)})` : ''}`,
       }).returning();
 
-      // Debit: Accounts Payable (reduce liability)
+      // Debit: Accounts Payable (full invoice amount)
       await db.insert(journalEntryLines).values({
         orgId,
         journalEntryId: journalEntry.id,
         accountId: apAccount.id,
         description: `Debit - Accounts Payable`,
-        debitAmount: data.amount,
+        debitAmount: String(paymentAmount),
         creditAmount: '0',
       });
 
-      // Credit: Cash/Bank (reduce asset)
+      // Credit: Cash/Bank (net of WHT)
       await db.insert(journalEntryLines).values({
         orgId,
         journalEntryId: journalEntry.id,
         accountId: cashBankAccount.id,
         description: `Credit - ${cashBankAccount.name}`,
         debitAmount: '0',
-        creditAmount: data.amount,
+        creditAmount: String(netPayment),
       });
+
+      // Credit: WHT Payable (WHT amount)
+      if (whtAmount > 0) {
+        const [whtAccount] = await db.select().from(chartOfAccounts).where(
+          and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'wht_payable'))
+        ).limit(1);
+
+        if (whtAccount) {
+          await db.insert(journalEntryLines).values({
+            orgId,
+            journalEntryId: journalEntry.id,
+            accountId: whtAccount.id,
+            description: `Credit - WHT Payable (${whtRate > 0 ? whtRate + '%' : 'Fixed'})`,
+            debitAmount: '0',
+            creditAmount: String(whtAmount),
+          });
+        }
+      }
     }
 
-    // Update vendor balance (reduce payable)
+    // Update vendor balance (reduce payable by full amount)
     const [vendor] = await db.select().from(vendors).where(eq(vendors.id, data.vendorId)).limit(1);
     if (vendor) {
-      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${parseFloat(data.amount)}, 0)` }).where(eq(vendors.id, data.vendorId));
+      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${paymentAmount}, 0)` }).where(eq(vendors.id, data.vendorId));
     }
 
     revalidatePath('/purchases/payments');

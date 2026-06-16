@@ -302,4 +302,4 @@ Examples:
 
 ---
 
-**Current Status: Phase A complete — "next" bolte hi Phase B (B1: WHT Management) shuru karunga.**
+**Current Status: B1 complete — "next" bolte hi B2 (Provincial Sales Tax) shuru karunga.**

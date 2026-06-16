@@ -41,7 +41,8 @@ export default function WHTPage() {
     return formatPKR(value, 'south-asian');
   };
 
-  const whtAmount = reportData?.withholdingTax || 0;
+  const totalWHT = reportData?.totalWHT || 0;
+  const transactions = reportData?.transactions || [];
 
   return (
     <ReportLayout
@@ -84,7 +85,7 @@ export default function WHTPage() {
                   </div>
                   <div>
                     <p className="text-xs text-nexabook-600">Total WHT</p>
-                    <p className="text-xl font-bold text-amber-700">{formatCurrency(whtAmount)}</p>
+                    <p className="text-xl font-bold text-amber-700">{formatCurrency(totalWHT)}</p>
                   </div>
                 </div>
               </CardContent>
@@ -98,7 +99,7 @@ export default function WHTPage() {
                   <div>
                     <p className="text-xs text-nexabook-600">WHT Status</p>
                     <p className="text-lg font-bold text-green-700">
-                      {whtAmount > 0 ? "Recorded" : "No WHT"}
+                      {totalWHT > 0 ? "Recorded" : "No WHT"}
                     </p>
                   </div>
                 </div>
@@ -130,42 +131,51 @@ export default function WHTPage() {
               <Table id="wht-table">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-right">Amount (PKR)</TableHead>
+                    <TableHead>Voucher</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Vendor</TableHead>
+                    <TableHead>NTN</TableHead>
+                    <TableHead className="text-right">Payment</TableHead>
+                    <TableHead className="text-right">WHT Rate</TableHead>
+                    <TableHead className="text-right">WHT Amount</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <motion.tr
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                  >
-                    <TableCell className="font-medium text-nexabook-900">
-                      Total Withholding Tax Deducted
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-base px-4 py-1.5">
-                        {formatCurrency(whtAmount)}
-                      </Badge>
-                    </TableCell>
-                  </motion.tr>
-                  <motion.tr
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 }}
-                  >
-                    <TableCell className="text-nexabook-600">
-                      WHT Rate (Standard)
-                    </TableCell>
-                    <TableCell className="text-right text-nexabook-600">
-                      As per applicable tax slabs
-                    </TableCell>
-                  </motion.tr>
+                  {transactions.length > 0 ? transactions.map((tx: any, i: number) => (
+                    <motion.tr
+                      key={tx.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.03 }}
+                    >
+                      <TableCell className="font-medium text-nexabook-900">{tx.paymentNumber}</TableCell>
+                      <TableCell className="text-nexabook-600">{new Date(tx.paymentDate).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-nexabook-900">{tx.vendorName}</TableCell>
+                      <TableCell className="text-nexabook-600">{tx.vendorNtn || '-'}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(tx.paymentAmount)}</TableCell>
+                      <TableCell className="text-right">{tx.whtRate > 0 ? `${tx.whtRate}%` : '-'}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                          {formatCurrency(tx.whtAmount)}
+                        </Badge>
+                      </TableCell>
+                    </motion.tr>
+                  )) : (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-8 text-nexabook-500">
+                        No withholding tax transactions found for the selected period
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
-              {whtAmount === 0 && (
-                <div className="mt-4 p-4 bg-nexabook-50 rounded-lg text-center">
-                  <p className="text-sm text-nexabook-600">
-                    No withholding tax transactions found for the selected period. WHT is calculated from vendor payments based on applicable tax rates.
-                  </p>
+              {transactions.length > 0 && (
+                <div className="mt-4 flex justify-end">
+                  <div className="bg-amber-50 rounded-lg px-6 py-3 border border-amber-200">
+                    <p className="text-sm text-amber-700">
+                      Total WHT Deducted: <span className="font-bold text-lg">{formatCurrency(totalWHT)}</span>
+                    </p>
+                  </div>
                 </div>
               )}
             </CardContent>

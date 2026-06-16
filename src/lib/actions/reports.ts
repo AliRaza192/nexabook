@@ -1426,8 +1426,58 @@ export async function getWithholdingTaxReport(dateFrom: string, dateTo: string) 
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    // Placeholder - would calculate WHT from vendor payments
-    return { success: true, data: { dateFrom, dateTo, withholdingTax: 0 } };
+    const fromDate = new Date(dateFrom);
+    const toDate = new Date(dateTo);
+    toDate.setHours(23, 59, 59, 999);
+
+    const payments = await db
+      .select({
+        id: vendorPayments.id,
+        paymentNumber: vendorPayments.paymentNumber,
+        paymentDate: vendorPayments.paymentDate,
+        amount: vendorPayments.amount,
+        whtAmount: vendorPayments.whtAmount,
+        whtRate: vendorPayments.whtRate,
+        vendorName: vendors.name,
+        vendorNtn: vendors.ntn,
+        reference: vendorPayments.reference,
+      })
+      .from(vendorPayments)
+      .leftJoin(vendors, eq(vendorPayments.vendorId, vendors.id))
+      .where(
+        and(
+          eq(vendorPayments.orgId, orgId),
+          gte(vendorPayments.paymentDate, fromDate),
+          lte(vendorPayments.paymentDate, toDate),
+          sql`COALESCE(${vendorPayments.whtAmount}, '0')::numeric > 0`,
+        ),
+      )
+      .orderBy(desc(vendorPayments.paymentDate));
+
+    let totalWHT = 0;
+    for (const p of payments) {
+      totalWHT += parseFloat(p.whtAmount || '0');
+    }
+
+    return {
+      success: true,
+      data: {
+        dateFrom,
+        dateTo,
+        totalWHT,
+        transactions: payments.map(p => ({
+          id: p.id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.paymentDate,
+          vendorName: p.vendorName,
+          vendorNtn: p.vendorNtn,
+          paymentAmount: parseFloat(p.amount || '0'),
+          whtAmount: parseFloat(p.whtAmount || '0'),
+          whtRate: parseFloat(p.whtRate || '0'),
+          reference: p.reference,
+        })),
+      },
+    };
   } catch (error) {
     return { success: false, error: "Failed to generate WHT report" };
   }
