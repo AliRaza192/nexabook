@@ -302,4 +302,4 @@ Examples:
 
 ---
 
-**Current Status: B3 complete — "next" bolte hi B4 (FBR E-Invoicing Integration) shuru karunga.**
+**Current Status: Phase B complete — "next" bolte hi Phase C (C1: Multi-Currency Support) shuru karunga.**

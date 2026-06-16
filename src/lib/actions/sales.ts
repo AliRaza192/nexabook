@@ -33,6 +33,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
 import { validateJournalBalance } from "../accounting";
+import { submitInvoiceToFBR } from "../fbr-api";
 import {
   convertToBaseUnit,
   updateWarehouseStock,
@@ -976,6 +977,61 @@ export async function approveInvoice(invoiceId: string) {
 
       return { success: true };
     });
+
+    // FBR Submission (non-blocking — failure doesn't revert approval)
+    try {
+      const [org] = await db
+        .select({ ntn: organizations.ntn, strn: organizations.strn })
+        .from(organizations)
+        .where(eq(organizations.id, orgId))
+        .limit(1);
+
+      if (org?.ntn && org?.strn) {
+        const [customer] = await db
+          .select({ name: customers.name, ntn: customers.ntn, strn: customers.strn, address: customers.address })
+          .from(customers)
+          .where(eq(customers.id, invoice.customerId))
+          .limit(1);
+
+        const fbrPayload = {
+          ntn: org.ntn,
+          strn: org.strn,
+          invoiceNumber: invoice.invoiceNumber,
+          invoiceDate: invoice.issueDate.toISOString().split("T")[0],
+          customerName: customer?.name || "",
+          customerNtn: customer?.ntn || undefined,
+          customerStrn: customer?.strn || undefined,
+          customerAddress: customer?.address || undefined,
+          totalAmount: parseFloat(invoice.grossAmount || "0"),
+          taxAmount: parseFloat(invoice.taxAmount || "0"),
+          netAmount: parseFloat(invoice.netAmount || "0"),
+          items: items.map((item) => ({
+            description: item.description,
+            quantity: parseFloat(item.quantity),
+            unitPrice: parseFloat(item.unitPrice),
+            taxRate: parseFloat(item.taxRate || "0"),
+            taxType: item.taxType || "GST",
+            lineTotal: parseFloat(item.lineTotal),
+          })),
+        };
+
+        const fbrResult = await submitInvoiceToFBR(fbrPayload);
+
+        await db
+          .update(invoices)
+          .set({
+            fbrSubmissionId: fbrResult.submissionId || null,
+            fbrInvoiceNumber: fbrResult.fbrInvoiceNumber || null,
+            fbrStatus: fbrResult.success ? "submitted" : "failed",
+            fbrResponse: fbrResult.rawResponse || fbrResult.error || null,
+            fbrSubmittedAt: new Date(),
+          })
+          .where(eq(invoices.id, invoiceId));
+      }
+    } catch (fbrError) {
+      // Log but don't fail — invoice is already approved
+      console.error("FBR submission failed (non-blocking):", fbrError);
+    }
 
     revalidatePath("/sales/invoices");
     return { success: true, message: "Invoice approved successfully" };

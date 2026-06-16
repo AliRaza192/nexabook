@@ -392,6 +392,11 @@ export const invoices = pgTable('invoices', {
   emailSentAt: timestamp('email_sent_at'),
   isPosted: boolean('is_posted').notNull().default(false),
   journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
+  fbrSubmissionId: varchar('fbr_submission_id', { length: 100 }),
+  fbrInvoiceNumber: varchar('fbr_invoice_number', { length: 100 }),
+  fbrStatus: varchar('fbr_status', { length: 20 }),
+  fbrResponse: text('fbr_response'),
+  fbrSubmittedAt: timestamp('fbr_submitted_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

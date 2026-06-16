@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
 ## Status: ✅ In Progress — Phase B
-## Current Phase: B3 — Input/Output Tax GL Separation
-## Last Completed: B3 — Input/Output Tax GL Separation
+## Current Phase: B4 — FBR E-Invoicing Integration
+## Last Completed: B4 — FBR E-Invoicing Integration
 
 ---
 
@@ -25,7 +25,7 @@
 - [x] B1: WHT (Withholding Tax) Management
 - [x] B2: Provincial Sales Tax (SRB/PRA/KPRA/BRA)
 - [x] B3: Input/Output Tax GL Separation
-- [ ] B4: FBR E-Invoicing Integration
+- [x] B4: FBR E-Invoicing Integration
 
 ## PHASE C — ENTERPRISE FEATURES (Estimated: 10-14 days)
 
