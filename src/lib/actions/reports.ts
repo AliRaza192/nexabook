@@ -32,8 +32,12 @@ import {
   manufacturingBoms,
   jobOrders,
   bomItems,
+  salesReturns,
+  salesReturnItems,
+  customerPayments,
+  vendorPayments,
 } from "@/db/schema";
-import { eq, and, gte, lte, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, desc, sql, inArray, or, ilike, sum, count } from "drizzle-orm";
 import { getCurrentOrgId } from "./shared";
 
 // ============= Profit & Loss Report =============
@@ -1432,143 +1436,7 @@ export async function getWithholdingTaxReport(dateFrom: string, dateTo: string) 
 
 // ============= Sales Invoice Detail Report =============
 
-export async function getSalesInvoiceDetailReport(dateFrom: string, dateTo: string, customerId?: string) {
-  try {
-    const orgId = await getCurrentOrgId();
-    if (!orgId) return { success: false, error: "No organization found" };
 
-    const fromDate = new Date(dateFrom);
-    const toDate = new Date(dateTo);
-    toDate.setHours(23, 59, 59, 999);
-
-    const conditions = [
-      eq(invoices.orgId, orgId),
-      gte(invoices.issueDate, fromDate),
-      lte(invoices.issueDate, toDate)
-    ];
-
-    if (customerId && customerId !== 'all') {
-      conditions.push(eq(invoices.customerId, customerId));
-    }
-
-    const reportData = await db
-      .select({
-        id: invoices.id,
-        invoiceNumber: invoices.invoiceNumber,
-        issueDate: invoices.issueDate,
-        customerName: customers.name,
-        grossAmount: invoices.grossAmount,
-        discountAmount: invoices.discountAmount,
-        taxAmount: invoices.taxAmount,
-        netAmount: invoices.netAmount,
-        receivedAmount: invoices.receivedAmount,
-        status: invoices.status,
-        itemCount: sql<number>`count(${invoiceItems.id})`
-      })
-      .from(invoices)
-      .leftJoin(customers, eq(invoices.customerId, customers.id))
-      .leftJoin(invoiceItems, eq(invoices.id, invoiceItems.invoiceId))
-      .where(and(...conditions))
-      .groupBy(invoices.id, customers.name)
-      .orderBy(desc(invoices.issueDate));
-
-    return { success: true, data: reportData };
-  } catch (error) {
-    return { success: false, error: "Failed to generate Sales Invoice Detail Report" };
-  }
-}
-
-// ============= Customer Balance Report =============
-export async function getCustomerBalanceReport() {
-  try {
-    const orgId = await getCurrentOrgId();
-    if (!orgId) return { success: false, error: "No organization found" };
-
-    const data = await db
-      .select({
-        id: customers.id,
-        name: customers.name,
-        balance: customers.balance,
-      })
-      .from(customers)
-      .where(and(eq(customers.orgId, orgId), eq(customers.isActive, true)))
-      .orderBy(customers.name);
-
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: "Failed to generate Customer Balance report" };
-  }
-}
-
-// ============= Purchase Invoice Detail Report =============
-export async function getPurchaseInvoiceDetailReport(dateFrom: string, dateTo: string) {
-  try {
-    const orgId = await getCurrentOrgId();
-    if (!orgId) return { success: false, error: "No organization found" };
-
-    const data = await db
-      .select({
-        id: purchaseInvoices.id,
-        billNumber: purchaseInvoices.billNumber,
-        date: purchaseInvoices.date,
-        vendorName: vendors.name,
-        netAmount: purchaseInvoices.netAmount,
-        status: purchaseInvoices.status,
-      })
-      .from(purchaseInvoices)
-      .leftJoin(vendors, eq(purchaseInvoices.vendorId, vendors.id))
-      .where(and(
-        eq(purchaseInvoices.orgId, orgId),
-        gte(purchaseInvoices.date, new Date(dateFrom)),
-        lte(purchaseInvoices.date, new Date(dateTo))
-      ))
-      .orderBy(desc(purchaseInvoices.date));
-
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: "Failed to generate Purchase Detail report" };
-  }
-}
-
-// ============= General Ledger Report =============
-export async function getGeneralLedgerReport(dateFrom: string, dateTo: string) {
-  try {
-    const orgId = await getCurrentOrgId();
-    if (!orgId) return { success: false, error: "No organization found" };
-
-    const data = await db
-      .select({
-        accountName: chartOfAccounts.name,
-        date: journalEntries.entryDate,
-        description: journalEntryLines.description,
-        debit: journalEntryLines.debitAmount,
-        credit: journalEntryLines.creditAmount,
-      })
-      .from(journalEntryLines)
-      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
-      .innerJoin(chartOfAccounts, eq(journalEntryLines.accountId, chartOfAccounts.id))
-      .where(and(
-        eq(journalEntryLines.orgId, orgId),
-        gte(journalEntries.entryDate, new Date(dateFrom)),
-        lte(journalEntries.entryDate, new Date(dateTo))
-      ))
-      .orderBy(chartOfAccounts.code, journalEntries.entryDate);
-
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: "Failed to generate General Ledger" };
-  }
-}
-
-
-
-import {
-  salesReturns,
-  salesReturnItems,
-  customerPayments,
-  vendorPayments,
-} from "@/db/schema";
-import { or, ilike, sum, count } from "drizzle-orm";
 
 // ============= 1. Sales Invoice Detail Report =============
 

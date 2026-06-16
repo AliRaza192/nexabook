@@ -13,6 +13,7 @@ import { eq, and, desc, ilike, or, sql, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
+import { validateJournalBalance } from "../accounting";
 
 // ==========================================
 // FIXED ASSETS
@@ -545,8 +546,12 @@ export async function postDepreciation(
       .returning();
 
     // Create journal entry lines
+    if (!validateJournalBalance([
+      { debitAmount: monthlyDepreciation.toFixed(2), creditAmount: "0" },
+      { debitAmount: "0", creditAmount: monthlyDepreciation.toFixed(2) },
+    ])) throw new Error("Journal entry out of balance");
+
     // Debit: Depreciation Expense
-    // Credit: Accumulated Depreciation
     await db.insert(journalEntryLines).values({
       orgId,
       journalEntryId: journalEntry.id,
@@ -556,6 +561,7 @@ export async function postDepreciation(
       description: `Depreciation expense - ${asset.name}`,
     });
 
+    // Credit: Accumulated Depreciation
     await db.insert(journalEntryLines).values({
       orgId,
       journalEntryId: journalEntry.id,

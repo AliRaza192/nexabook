@@ -16,6 +16,7 @@ import { eq, and, desc, asc, ilike, or, sql, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
+import { validateJournalBalance } from "../accounting";
 
 // Helper: Get current user name
 async function getCurrentUserName(): Promise<string | null> {
@@ -706,6 +707,17 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
 
     // Create journal entry lines
     if (salaryExpenseAccount && salariesPayableAccount) {
+      const totalTax = calculations.reduce((sum, c) => sum + c.incomeTax + c.eobiDeduction, 0);
+
+      const lineAmounts: { debitAmount: string; creditAmount: string }[] = [
+        { debitAmount: totalGross.toFixed(2), creditAmount: '0' },
+        { debitAmount: '0', creditAmount: totalNet.toFixed(2) },
+      ];
+      if (totalTax > 0) {
+        lineAmounts.push({ debitAmount: '0', creditAmount: totalTax.toFixed(2) });
+      }
+      if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance");
+
       // Debit: Salaries & Wages Expense
       await db.insert(journalEntryLines).values({
         orgId,
@@ -727,7 +739,6 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
       });
 
       // Credit: Tax Deductions Payable (if applicable)
-      const totalTax = calculations.reduce((sum, c) => sum + c.incomeTax + c.eobiDeduction, 0);
       if (totalTax > 0) {
         const [taxPayableAccount] = await db
           .select()

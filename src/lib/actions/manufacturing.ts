@@ -14,6 +14,7 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentOrgId } from "./shared";
+import { validateJournalBalance } from "../accounting";
 
 // ============= BOM Server Actions =============
 
@@ -586,6 +587,30 @@ export async function completeJobOrder(jobOrderId: string) {
         .limit(1);
 
       if (inventoryAccount.length > 0) {
+        // Calculate total raw material cost and collect validation pairs
+        let totalRawMaterialCost = 0;
+        const validationLines: { debitAmount: string; creditAmount: string }[] = [
+          { debitAmount: totalValue.toFixed(2), creditAmount: '0' },
+        ];
+        for (const comp of components) {
+          const qty = parseFloat(comp.requiredQty);
+          const costPrice = parseFloat(comp.component?.costPrice || '0');
+          const lineValue = qty * costPrice;
+          totalRawMaterialCost += lineValue;
+          validationLines.push({ debitAmount: '0', creditAmount: lineValue.toFixed(2) });
+        }
+
+        const variance = totalValue - totalRawMaterialCost;
+        if (Math.abs(variance) > 0.01) {
+          if (variance > 0) {
+            validationLines.push({ debitAmount: variance.toFixed(2), creditAmount: '0' });
+          } else {
+            validationLines.push({ debitAmount: '0', creditAmount: Math.abs(variance).toFixed(2) });
+          }
+        }
+
+        if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance");
+
         // Debit entry for finished goods
         await db.insert(journalEntryLines).values({
           orgId,
@@ -596,15 +621,12 @@ export async function completeJobOrder(jobOrderId: string) {
           creditAmount: '0',
         });
 
-        // Calculate total raw material cost (monetary value, NOT quantity)
-        let totalRawMaterialCost = 0;
+        // Credit: Raw Material with monetary value
         for (const comp of components) {
           const qty = parseFloat(comp.requiredQty);
           const costPrice = parseFloat(comp.component?.costPrice || '0');
           const lineValue = qty * costPrice;
-          totalRawMaterialCost += lineValue;
 
-          // Credit: Raw Material with monetary value
           await db.insert(journalEntryLines).values({
             orgId,
             journalEntryId: journalEntry.id,
@@ -617,10 +639,8 @@ export async function completeJobOrder(jobOrderId: string) {
 
         // Balance the journal entry: if finished goods value differs from
         // raw material cost, post the difference to the same inventory account
-        const variance = totalValue - totalRawMaterialCost;
         if (Math.abs(variance) > 0.01) {
           if (variance > 0) {
-            // Finished goods worth more than raw materials — additional debit
             await db.insert(journalEntryLines).values({
               orgId,
               journalEntryId: journalEntry.id,
@@ -630,7 +650,6 @@ export async function completeJobOrder(jobOrderId: string) {
               creditAmount: '0',
             });
           } else {
-            // Finished goods worth less — additional credit
             await db.insert(journalEntryLines).values({
               orgId,
               journalEntryId: journalEntry.id,
@@ -805,6 +824,15 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
         .limit(1);
 
       if (inventoryAccount.length > 0) {
+        const validationLines: { debitAmount: string; creditAmount: string }[] = [
+          { debitAmount: '0', creditAmount: totalValue.toFixed(2) },
+        ];
+        for (const comp of components) {
+          const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
+          validationLines.push({ debitAmount: qtyToAdd.toFixed(2), creditAmount: '0' });
+        }
+        if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance");
+
         // Credit: Inventory Asset (Finished Goods)
         await db.insert(journalEntryLines).values({
           orgId,

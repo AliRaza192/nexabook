@@ -10,6 +10,7 @@ import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
+import { validateJournalBalance } from "../accounting";
 
 // ==========================================
 // BANK ACCOUNTS
@@ -138,6 +139,13 @@ export async function addBankAccount(data: BankAccountFormData) {
 
       if (openingBalance > 0) {
         // Debit Bank, Credit Opening Equity
+        const lines = [
+          { debitAmount: data.openingBalance, creditAmount: "0" },
+          { debitAmount: "0", creditAmount: data.openingBalance },
+        ];
+        if (!validateJournalBalance(lines)) {
+          throw new Error("Journal entry out of balance");
+        }
         await db.insert(journalEntryLines).values({
           orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: data.openingBalance, creditAmount: "0", description: "Bank opening balance"
         });
@@ -352,6 +360,13 @@ export async function approveBankDeposit(depositId: string) {
     const bankAccountId = await findAccountByType(orgId, "asset", "Bank");
     const cashAccountId = await findAccountByType(orgId, "asset", "Cash");
 
+    const lines = [
+      { debitAmount: deposit.amount, creditAmount: "0" },
+      { debitAmount: "0", creditAmount: deposit.amount },
+    ];
+    if (!validateJournalBalance(lines)) {
+      throw new Error("Journal entry out of balance");
+    }
     await db.insert(journalEntryLines).values({
       orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: deposit.amount, creditAmount: "0", description: "Bank deposit"
     });
@@ -516,6 +531,13 @@ export async function approveFundsTransfer(transferId: string) {
       })
       .returning();
 
+    const lines = [
+      { debitAmount: transfer.amount, creditAmount: "0" },
+      { debitAmount: "0", creditAmount: transfer.amount },
+    ];
+    if (!validateJournalBalance(lines)) {
+      throw new Error("Journal entry out of balance");
+    }
     await db.insert(journalEntryLines).values([
       { orgId, journalEntryId: journalEntry.id, accountId: transfer.toBankAccountId, debitAmount: transfer.amount, creditAmount: "0", description: "Funds transfer to" },
       { orgId, journalEntryId: journalEntry.id, accountId: transfer.fromBankAccountId, debitAmount: "0", creditAmount: transfer.amount, description: "Funds transfer from" },
@@ -912,6 +934,13 @@ export async function createContraEntry(data: ContraEntryFormData) {
     // Create journal entry lines
     // Debit: To Account (receiving)
     // Credit: From Account (sending)
+    const lines = [
+      { debitAmount: data.amount, creditAmount: '0' },
+      { debitAmount: '0', creditAmount: data.amount },
+    ];
+    if (!validateJournalBalance(lines)) {
+      throw new Error("Journal entry out of balance");
+    }
     await db.insert(journalEntryLines).values({
       orgId,
       journalEntryId: journalEntry.id,

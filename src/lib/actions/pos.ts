@@ -16,7 +16,8 @@ import {
 import { eq, and, desc, or, ilike, sum, gte, lte, sql, count as countFn } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId, generateDocumentNumber } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
+import { validateJournalBalance } from "../accounting";
 
 // POS Shift interfaces
 export interface PosShift {
@@ -165,6 +166,11 @@ export async function startShift(openingAmount: number) {
           description: `POS Shift Opening - Rs. ${openingAmount.toFixed(2)}`,
         })
         .returning();
+
+      if (!validateJournalBalance([
+        { debitAmount: openingAmount.toFixed(2), creditAmount: '0' },
+        { debitAmount: '0', creditAmount: openingAmount.toFixed(2) },
+      ])) throw new Error("Journal entry out of balance");
 
       // Debit: POS Cash
       await db.insert(journalEntryLines).values({
@@ -458,6 +464,15 @@ export async function processPosSale(saleData: PosSaleData) {
       .limit(1);
 
     if (posCashAccount && salesRevenue) {
+      const lineAmounts: { debitAmount: string; creditAmount: string }[] = [
+        { debitAmount: netAmount.toFixed(2), creditAmount: '0' },
+        { debitAmount: '0', creditAmount: (grossAmount - globalDiscount - totalDiscount).toFixed(2) },
+      ];
+      if (totalTax > 0 && salesTaxPayable) {
+        lineAmounts.push({ debitAmount: '0', creditAmount: totalTax.toFixed(2) });
+      }
+      if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance");
+
       // Debit: POS Cash
       await db.insert(journalEntryLines).values({
         orgId,
@@ -536,24 +551,6 @@ async function getDefaultWalkInCustomer(orgId: string): Promise<string> {
     .returning();
 
   return newCustomer.id;
-}
-
-// Helper: Generate journal entry number
-async function generateJournalEntryNumber(orgId: string): Promise<string> {
-  const result = await db
-    .select({ entryNumber: journalEntries.entryNumber })
-    .from(journalEntries)
-    .where(eq(journalEntries.orgId, orgId))
-    .orderBy(desc(journalEntries.createdAt))
-    .limit(1);
-
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].entryNumber) {
-    const match = result[0].entryNumber.match(/\d+$/);
-    if (match) nextNumber = parseInt(match[0]) + 1;
-  }
-
-  return `JE-${String(nextNumber).padStart(5, '0')}`;
 }
 
 // Get POS products

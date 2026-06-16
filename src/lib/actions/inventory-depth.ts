@@ -3,12 +3,13 @@
 import { db } from "@/db";
 import {
   stockMovements, stockAdjustments, stockAdjustmentLines, stockValuationLogs,
-  products,
+  products, chartOfAccounts, journalEntries, journalEntryLines, productBatches,
 } from "@/db/schema";
-import { eq, and, desc, ilike, or, asc } from "drizzle-orm";
+import { eq, and, desc, ilike, or, asc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
+import { validateJournalBalance } from "../accounting";
 
 // ==========================================
 // STOCK MOVEMENTS
@@ -315,13 +316,106 @@ export async function approveStockAdjustment(adjustmentId: string) {
 
     const { userId } = await auth();
 
-    await db
-      .update(stockAdjustments)
-      .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
-      .where(and(eq(stockAdjustments.id, adjustmentId), eq(stockAdjustments.orgId, orgId)));
+    const [adjustment] = await db
+      .select()
+      .from(stockAdjustments)
+      .where(and(eq(stockAdjustments.id, adjustmentId), eq(stockAdjustments.orgId, orgId)))
+      .limit(1);
+
+    if (!adjustment) return { success: false, error: "Adjustment not found" };
+    if (adjustment.approvalStatus === "approved") return { success: false, error: "Already approved" };
+
+    const lines = await db
+      .select()
+      .from(stockAdjustmentLines)
+      .where(eq(stockAdjustmentLines.stockAdjustmentId, adjustmentId));
+
+    let totalPositive = 0;
+    let totalNegative = 0;
+    for (const line of lines) {
+      const diff = parseFloat(line.difference || "0");
+      const val = parseFloat(line.totalValue || "0");
+      if (diff > 0) totalPositive += val;
+      else if (diff < 0) totalNegative += val;
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(stockAdjustments)
+        .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
+        .where(eq(stockAdjustments.id, adjustmentId));
+
+      const [invAccount] = await tx
+        .select()
+        .from(chartOfAccounts)
+        .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, "inventory")))
+        .limit(1);
+
+      if (!invAccount) throw new Error("Inventory account not found");
+
+      if (totalNegative > 0) {
+        const [lossAccount] = await tx
+          .select()
+          .from(chartOfAccounts)
+          .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, "inventory_write_off")))
+          .limit(1);
+        if (!lossAccount) throw new Error("Loss on Inventory Write-off account not found");
+
+        const [je] = await tx.insert(journalEntries).values({
+          orgId,
+          entryNumber: `SA-${Date.now()}`,
+          entryDate: new Date(),
+          description: `Stock adjustment (loss): ${adjustment.adjustmentNumber}`,
+          referenceType: "stock_adjustment",
+          referenceId: adjustmentId,
+          status: "posted",
+          sourceType: "inventory",
+        }).returning();
+
+        if (!validateJournalBalance([
+          { debitAmount: totalNegative.toFixed(2), creditAmount: "0" },
+          { debitAmount: "0", creditAmount: totalNegative.toFixed(2) },
+        ])) throw new Error("Journal entry out of balance");
+
+        await tx.insert(journalEntryLines).values([
+          { orgId, journalEntryId: je.id, accountId: lossAccount.id, description: "Loss on Inventory Write-off", debitAmount: totalNegative.toFixed(2), creditAmount: "0" },
+          { orgId, journalEntryId: je.id, accountId: invAccount.id, description: "Inventory decrease", debitAmount: "0", creditAmount: totalNegative.toFixed(2) },
+        ]);
+      }
+
+      if (totalPositive > 0) {
+        const [incomeAccount] = await tx
+          .select()
+          .from(chartOfAccounts)
+          .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, "inventory_adjustment_income")))
+          .limit(1);
+        if (!incomeAccount) throw new Error("Inventory Adjustment Income account not found");
+
+        const [je] = await tx.insert(journalEntries).values({
+          orgId,
+          entryNumber: `SA-${Date.now() + 1}`,
+          entryDate: new Date(),
+          description: `Stock adjustment (gain): ${adjustment.adjustmentNumber}`,
+          referenceType: "stock_adjustment",
+          referenceId: adjustmentId,
+          status: "posted",
+          sourceType: "inventory",
+        }).returning();
+
+        if (!validateJournalBalance([
+          { debitAmount: totalPositive.toFixed(2), creditAmount: "0" },
+          { debitAmount: "0", creditAmount: totalPositive.toFixed(2) },
+        ])) throw new Error("Journal entry out of balance");
+
+        await tx.insert(journalEntryLines).values([
+          { orgId, journalEntryId: je.id, accountId: invAccount.id, description: "Inventory increase", debitAmount: totalPositive.toFixed(2), creditAmount: "0" },
+          { orgId, journalEntryId: je.id, accountId: incomeAccount.id, description: "Inventory Adjustment Income", debitAmount: "0", creditAmount: totalPositive.toFixed(2) },
+        ]);
+      }
+    });
 
     revalidatePath("/inventory/stock");
-    return { success: true, message: "Stock adjustment approved" };
+    return { success: true, message: "Stock adjustment approved and GL posted" };
   } catch (error) {
     return { success: false, error: "Failed to approve stock adjustment" };
   }
@@ -348,22 +442,67 @@ export async function runStockValuation(method: "fifo" | "weighted_average", val
     const valuationDetails: any[] = [];
 
     for (const product of allProducts) {
-      const stock = product.currentStock || 0;
-      const costPrice = product.costPrice ? parseFloat(product.costPrice) : 0;
+      if (method === "fifo") {
+        // FIFO: value stock using batch-level costs ordered by creation date
+        const batches = await db
+          .select({
+            currentQty: productBatches.currentQty,
+            costPrice: productBatches.costPrice,
+            batchNo: productBatches.batchNo,
+          })
+          .from(productBatches)
+          .where(
+            and(
+              eq(productBatches.orgId, orgId),
+              eq(productBatches.productId, product.id),
+              sql`${productBatches.currentQty} > 0`,
+            ),
+          )
+          .orderBy(asc(productBatches.createdAt));
 
-      // For simplicity, we use cost price as weighted average
-      // In a real FIFO implementation, you'd track individual purchase batches
-      const productValue = stock * costPrice;
-      totalValue += productValue;
+        let productTotalValue = 0;
+        let totalStock = 0;
 
-      valuationDetails.push({
-        productId: product.id,
-        productName: product.name,
-        sku: product.sku,
-        stock,
-        unitCost: costPrice,
-        totalValue: productValue,
-      });
+        for (const batch of batches) {
+          const qty = parseFloat(batch.currentQty || "0");
+          const cost = parseFloat(batch.costPrice || "0");
+          productTotalValue += qty * cost;
+          totalStock += qty;
+        }
+
+        totalValue += productTotalValue;
+        const unitCost = totalStock > 0 ? productTotalValue / totalStock : 0;
+
+        valuationDetails.push({
+          productId: product.id,
+          productName: product.name,
+          sku: product.sku,
+          stock: totalStock,
+          unitCost,
+          totalValue: productTotalValue,
+          batchCount: batches.length,
+          batches: batches.map(b => ({
+            batchNo: b.batchNo,
+            qty: parseFloat(b.currentQty || "0"),
+            cost: parseFloat(b.costPrice || "0"),
+          })),
+        });
+      } else {
+        // Weighted Average: use product.costPrice maintained via WAC on purchase
+        const stock = parseFloat(product.currentStock || "0");
+        const costPrice = parseFloat(product.costPrice || "0");
+        const productValue = stock * costPrice;
+        totalValue += productValue;
+
+        valuationDetails.push({
+          productId: product.id,
+          productName: product.name,
+          sku: product.sku,
+          stock,
+          unitCost: costPrice,
+          totalValue: productValue,
+        });
+      }
     }
 
     const { userId } = await auth();
@@ -421,20 +560,50 @@ export async function getCurrentInventoryValue() {
     const productDetails: any[] = [];
 
     for (const product of allProducts) {
-      const stock = product.currentStock || 0;
-      const costPrice = product.costPrice ? parseFloat(product.costPrice) : 0;
-      const value = stock * costPrice;
+      const stock = parseFloat(product.currentStock || "0");
+      if (stock <= 0) continue;
 
-      totalValue += value;
-      totalItems += stock > 0 ? 1 : 0;
+      // Use batch-level costs for accurate valuation
+      const batches = await db
+        .select({
+          currentQty: productBatches.currentQty,
+          costPrice: productBatches.costPrice,
+        })
+        .from(productBatches)
+        .where(
+          and(
+            eq(productBatches.orgId, orgId),
+            eq(productBatches.productId, product.id),
+            sql`${productBatches.currentQty} > 0`,
+          ),
+        );
+
+      let productValue = 0;
+      let totalBatchQty = 0;
+
+      for (const batch of batches) {
+        const qty = parseFloat(batch.currentQty || "0");
+        const cost = parseFloat(batch.costPrice || "0");
+        productValue += qty * cost;
+        totalBatchQty += qty;
+      }
+
+      // Fallback to product.costPrice if no batches tracked
+      if (totalBatchQty === 0) {
+        const costPrice = parseFloat(product.costPrice || "0");
+        productValue = stock * costPrice;
+      }
+
+      totalValue += productValue;
+      totalItems++;
 
       productDetails.push({
         id: product.id,
         name: product.name,
         sku: product.sku,
         currentStock: stock,
-        costPrice,
-        totalValue: value,
+        costPrice: totalBatchQty > 0 ? productValue / totalBatchQty : parseFloat(product.costPrice || "0"),
+        totalValue: productValue,
       });
     }
 

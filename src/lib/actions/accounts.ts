@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
 import { requireRole } from "./shared";
+import { validateJournalBalance } from "../accounting";
 
 export interface JournalEntryLine {
   accountId: string;
@@ -165,7 +166,7 @@ export async function seedInitialCOA() {
 // subType mapping
     const subTypeMap: Record<string, string> = {
       "1000": "cash", "1010": "bank", "1020": "bank", "1030": "cash",
-      "1100": "accounts_receivable", "1200": "inventory",
+      "1100": "accounts_receivable", "1200": "inventory", "1210": "input_tax",
       "1400": "prepaid", "1500": "fixed_assets", "1600": "fixed_assets",
       "2000": "accounts_payable", "2200": "tax_payable",
       "2210": "income_tax_payable", "2300": "income_tax_payable",
@@ -173,12 +174,12 @@ export async function seedInitialCOA() {
       "3000": "capital", "3100": "retained_earnings",
       "3500": "current_year_pl",
       "4000": "sales_revenue", "4100": "service_revenue",
-      "4300": "other_income", "4900": "discount_allowed",
+      "4300": "other_income", "4400": "inventory_adjustment_income", "4900": "discount_allowed",
       "5000": "cogs", "5010": "cogs",
       "5100": "salary_expense", "5110": "salary_expense",
       "5200": "rent_expense", "5300": "utilities",
       "5500": "depreciation", "5600": "misc_expense",
-      "6900": "misc_expense",
+      "6700": "inventory_write_off", "6900": "misc_expense",
     };
 
     const accountsToInsert = defaultAccounts.map((account) => ({
@@ -262,6 +263,9 @@ export async function createJournalEntry(data: JournalEntryData) {
       .returning();
 
     // Create journal entry lines
+    if (!validateJournalBalance(data.lines.map(l => ({ debitAmount: l.debit || '0', creditAmount: l.credit || '0' })))) {
+      throw new Error("Journal entry out of balance");
+    }
     for (const line of data.lines) {
       await db.insert(journalEntryLines).values({
         orgId,
@@ -710,7 +714,7 @@ async function getNextVoucherNumber(orgId: string, voucherType: VoucherType): Pr
   const result = await db
     .select({ count: sql<number>`count(*)` })
     .from(journalEntries)
-    .where(sql`${journalEntries.orgId} = ${orgId} AND ${journalEntries.entryNumber} LIKE '${voucherType}-%'`);
+    .where(sql`${journalEntries.orgId} = ${orgId} AND ${journalEntries.entryNumber} LIKE ${voucherType + '-%'}`);
 
   const count = (result[0]?.count as number) || 0;
   return `${voucherType}-${String(count + 1).padStart(5, '0')}`;

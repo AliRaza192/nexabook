@@ -8,6 +8,7 @@ import {
   decimal,
   boolean,
   pgEnum,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -656,7 +657,9 @@ export const journalEntries = pgTable('journal_entries', {
   postedAt: timestamp('posted_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueEntryNumber: unique('uq_journal_entries_entry_number').on(table.orgId, table.entryNumber),
+}));
 
 // ==========================================
 // TAX RATES TABLE

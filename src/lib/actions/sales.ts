@@ -11,6 +11,7 @@ import {
   journalEntries,
   journalEntryLines,
   stockMovements,
+  productBatches,
   saleOrders,
   orderItems,
   quotations,
@@ -30,7 +31,8 @@ import {
 import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId, generateDocumentNumber } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
+import { validateJournalBalance } from "../accounting";
 import {
   convertToBaseUnit,
   updateWarehouseStock,
@@ -533,27 +535,6 @@ export async function getInvoiceWithDetails(
   }
 }
 
-// Generate journal entry number
-async function generateJournalEntryNumber(orgId: string): Promise<string> {
-  const result = await db
-    .select({ entryNumber: journalEntries.entryNumber })
-    .from(journalEntries)
-    .where(eq(journalEntries.orgId, orgId))
-    .orderBy(desc(journalEntries.createdAt))
-    .limit(1);
-
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].entryNumber) {
-    const match = result[0].entryNumber.match(/\d+$/);
-    if (match) {
-      const lastNumber = parseInt(match[0]);
-      nextNumber = lastNumber + 1;
-    }
-  }
-
-  return `JE-${String(nextNumber).padStart(5, "0")}`;
-}
-
 // Create invoice (Draft/Pending - does not update inventory yet)
 export async function createInvoice(data: InvoiceFormData) {
   try {
@@ -731,10 +712,21 @@ export async function approveInvoice(invoiceId: string) {
 
           if (product) {
             const quantity = parseFloat(item.quantity);
-            const costPrice = parseFloat(product.costPrice || "0");
+            let unitCost = parseFloat(product.costPrice || "0");
+
+            // Use batch-specific cost if batchId is provided
+            if (item.batchId) {
+              const [batch] = await tx
+                .select({ costPrice: productBatches.costPrice })
+                .from(productBatches)
+                .where(eq(productBatches.id, item.batchId))
+                .limit(1);
+              if (batch && batch.costPrice)
+                unitCost = parseFloat(batch.costPrice);
+            }
 
             // Calculate COGS for this item
-            totalCOGS += quantity * costPrice;
+            totalCOGS += quantity * unitCost;
 
             // Handle Stock
             let baseQuantity = quantity;
@@ -773,8 +765,8 @@ export async function approveInvoice(invoiceId: string) {
               movementType: "out",
               reason: "sale",
               quantity: String(baseQuantity),
-              unitCost: product.costPrice || "0",
-              totalValue: (baseQuantity * costPrice).toFixed(2),
+              unitCost: String(unitCost),
+              totalValue: (baseQuantity * unitCost).toFixed(2),
               referenceType: "invoice",
               referenceId: invoiceId,
               referenceNumber: invoice.invoiceNumber,
@@ -848,12 +840,35 @@ export async function approveInvoice(invoiceId: string) {
           ),
         )
         .limit(1);
+      const [shippingAcc] = await tx
+        .select()
+        .from(chartOfAccounts)
+        .where(
+          and(
+            eq(chartOfAccounts.orgId, orgId),
+            eq(chartOfAccounts.subType, "shipping_revenue"),
+          ),
+        )
+        .limit(1);
+      const [otherIncomeAcc] = await tx
+        .select()
+        .from(chartOfAccounts)
+        .where(
+          and(
+            eq(chartOfAccounts.orgId, orgId),
+            eq(chartOfAccounts.subType, "other_income"),
+          ),
+        )
+        .limit(1);
 
       if (!ar || !rev || !cogsAcc || !invAcc)
         throw new Error("Required accounting accounts missing.");
 
       // 4. Posting Lines
-      await tx.insert(journalEntryLines).values([
+      const shippingVal = parseFloat(invoice.shippingCharges || "0");
+      const roundOffVal = parseFloat(invoice.roundOff || "0");
+
+      const lines = [
         {
           orgId,
           journalEntryId: journalEntry.id,
@@ -873,7 +888,6 @@ export async function approveInvoice(invoiceId: string) {
             parseFloat(invoice.discountAmount || "0")
           ).toFixed(2),
         },
-        // NEW: COGS Entries
         {
           orgId,
           journalEntryId: journalEntry.id,
@@ -890,20 +904,57 @@ export async function approveInvoice(invoiceId: string) {
           debitAmount: "0",
           creditAmount: totalCOGS.toFixed(2),
         },
-      ]);
+      ];
 
       if (parseFloat(invoice.taxAmount || "0") > 0 && tax) {
-        await tx
-          .insert(journalEntryLines)
-          .values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: tax.id,
-            description: `Tax Invoice ${invoice.invoiceNumber}`,
-            debitAmount: "0",
-            creditAmount: invoice.taxAmount,
-          });
+        lines.push({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: tax.id,
+          description: `Tax Invoice ${invoice.invoiceNumber}`,
+          debitAmount: "0",
+          creditAmount: invoice.taxAmount,
+        });
       }
+
+      if (shippingVal > 0) {
+        if (!shippingAcc) throw new Error("Shipping Revenue account not found in Chart of Accounts.");
+        
+        lines.push({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: shippingAcc.id,
+          description: `Shipping Revenue Invoice ${invoice.invoiceNumber}`,
+          debitAmount: "0",
+          creditAmount: invoice.shippingCharges,
+        });
+      }
+
+      if (roundOffVal > 0) {
+        if (!otherIncomeAcc) throw new Error("Other Income account not found for rounding.");
+        lines.push({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: otherIncomeAcc.id,
+          description: `Rounding Gain Invoice ${invoice.invoiceNumber}`,
+          debitAmount: "0",
+          creditAmount: invoice.roundOff,
+        });
+      } else if (roundOffVal < 0) {
+        if (!otherIncomeAcc) throw new Error("Other Income account not found for rounding.");
+        lines.push({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: otherIncomeAcc.id,
+          description: `Rounding Loss Invoice ${invoice.invoiceNumber}`,
+          debitAmount: invoice.roundOff.replace("-", ""),
+          creditAmount: "0",
+        });
+      }
+
+      if (!validateJournalBalance(lines)) throw new Error("Journal entry out of balance");
+
+      await tx.insert(journalEntryLines).values(lines);
 
       return { success: true };
     });
@@ -965,6 +1016,58 @@ export async function deleteInvoice(invoiceId: string) {
     const orgId = await getCurrentOrgId();
     if (!orgId) {
       return { success: false, error: "No organization found" };
+    }
+
+    const [invoice] = await db
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
+      .limit(1);
+
+    if (!invoice) return { success: false, error: "Invoice not found" };
+
+    // If invoice has a journal entry, create reversal
+    if (invoice.journalEntryId) {
+      const [je] = await db
+        .select()
+        .from(journalEntries)
+        .where(eq(journalEntries.id, invoice.journalEntryId))
+        .limit(1);
+
+      if (je && je.status !== "reversed") {
+        const lines = await db
+          .select()
+          .from(journalEntryLines)
+          .where(eq(journalEntryLines.journalEntryId, invoice.journalEntryId));
+
+        const reversalLines = lines.map((l) => ({
+          orgId,
+          journalEntryId: "", // set after insert
+          accountId: l.accountId,
+          description: `Reversal: ${l.description}`,
+          debitAmount: l.creditAmount,
+          creditAmount: l.debitAmount,
+        }));
+
+        const entryNumber = await generateJournalEntryNumber(orgId);
+        const [revEntry] = await db.insert(journalEntries).values({
+          orgId,
+          entryNumber,
+          entryDate: new Date(),
+          description: `Reversal of Invoice ${invoice.invoiceNumber}`,
+          referenceType: "reversal",
+          referenceId: invoiceId,
+          status: "posted",
+          sourceType: "invoice",
+        }).returning();
+
+        reversalLines.forEach((l) => { l.journalEntryId = revEntry.id; });
+        await db.insert(journalEntryLines).values(reversalLines);
+
+        await db.update(journalEntries)
+          .set({ status: "reversed" })
+          .where(eq(journalEntries.id, invoice.journalEntryId));
+      }
     }
 
     // Delete invoice items first
@@ -2572,6 +2675,12 @@ export async function approveSalesReturn(returnId: string) {
           description: `Sales Return ${salesReturn.returnNumber} - Stock Reversal & Refund`,
         })
         .returning();
+      const returnLines = [
+        { debitAmount: "0", creditAmount: salesReturn.refundAmount },
+        { debitAmount: salesReturn.refundAmount, creditAmount: "0" },
+      ];
+      if (!validateJournalBalance(returnLines)) throw new Error("Journal entry out of balance");
+
       await db
         .insert(journalEntryLines)
         .values({
@@ -2711,13 +2820,14 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
         }
       }
     }
-    const [cashAccount] = await db
+    const paymentSubType = data.paymentMethod === 'cash' ? 'cash' : 'bank';
+    const [cashBankAccount] = await db
       .select()
       .from(chartOfAccounts)
       .where(
         and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, "cash"),
+          eq(chartOfAccounts.subType, paymentSubType),
         ),
       )
       .limit(1);
@@ -2731,7 +2841,7 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
         ),
       )
       .limit(1);
-    if (cashAccount && arAccount) {
+    if (cashBankAccount && arAccount) {
       const entryNumber = await (async () => {
         const result = await db
           .select({ entryNumber: journalEntries.entryNumber })
@@ -2757,13 +2867,19 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
           description: `Customer Payment ${paymentNumber}`,
         })
         .returning();
+      const paymentLines = [
+        { debitAmount: data.amount, creditAmount: "0" },
+        { debitAmount: "0", creditAmount: data.amount },
+      ];
+      if (!validateJournalBalance(paymentLines)) throw new Error("Journal entry out of balance");
+
       await db
         .insert(journalEntryLines)
         .values({
           orgId,
           journalEntryId: journalEntry.id,
-          accountId: cashAccount.id,
-          description: `Debit - ${cashAccount.name}`,
+          accountId: cashBankAccount.id,
+          description: `Debit - ${cashBankAccount.name}`,
           debitAmount: data.amount,
           creditAmount: "0",
         });

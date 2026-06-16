@@ -27,31 +27,12 @@ import {
 import { eq, and, or, ilike, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId, generateDocumentNumber } from "./shared";
+import { validateJournalBalance } from "../accounting";
+import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
 import { convertToBaseUnit, updateWarehouseStock, updateBatchStock } from "./inventory";
 
 
 // Generate journal entry number
-async function generateJournalEntryNumber(orgId: string): Promise<string> {
-  const result = await db
-    .select({ entryNumber: journalEntries.entryNumber })
-    .from(journalEntries)
-    .where(eq(journalEntries.orgId, orgId))
-    .orderBy(desc(journalEntries.createdAt))
-    .limit(1);
-
-  let nextNumber = 1;
-  if (result.length > 0 && result[0].entryNumber) {
-    const match = result[0].entryNumber.match(/\d+$/);
-    if (match) {
-      const lastNumber = parseInt(match[0]);
-      nextNumber = lastNumber + 1;
-    }
-  }
-
-  return `JE-${String(nextNumber).padStart(5, '0')}`;
-}
-
 // ==================== VENDOR ACTIONS ====================
 
 export interface VendorFormData {
@@ -368,7 +349,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
       for (const item of items) {
         if (item.productId) {
           const [product] = await tx
-            .select({ currentStock: products.currentStock, isBatchTracked: products.isBatchTracked })
+            .select({ currentStock: products.currentStock, costPrice: products.costPrice, isBatchTracked: products.isBatchTracked })
             .from(products)
             .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
             .limit(1);
@@ -414,10 +395,16 @@ export async function approvePurchaseInvoice(invoiceId: string) {
               await updateWarehouseStock(tx, invoice.warehouseId, item.productId, baseQuantity);
             }
 
-            const newStock = (available + baseQuantity).toFixed(2);
+            const newStock = available + baseQuantity;
+            const currentCostPrice = parseFloat(product.costPrice || "0");
+            const incomingUnitPrice = parseFloat(item.unitPrice);
+            const newCostPrice = available > 0
+              ? ((available * currentCostPrice) + (baseQuantity * incomingUnitPrice)) / newStock
+              : incomingUnitPrice;
+
             await tx
               .update(products)
-              .set({ currentStock: newStock, costPrice: item.unitPrice })
+              .set({ currentStock: newStock.toFixed(2), costPrice: newCostPrice.toFixed(2) })
               .where(eq(products.id, item.productId));
 
             // Log stock movement
@@ -487,7 +474,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, 'Input Tax')
+          eq(chartOfAccounts.subType, 'input_tax')
         ))
         .limit(1);
 
@@ -498,10 +485,18 @@ export async function approvePurchaseInvoice(invoiceId: string) {
       // 5. Create Journal Entry Lines
       const taxAmount = parseFloat(invoice.taxTotal || '0');
       const discountAmount = parseFloat(invoice.discountTotal || '0');
+      const inventoryDebitAmount = (parseFloat(invoice.grossAmount || '0') - discountAmount).toFixed(2);
+
+      // Validate journal balance before posting
+      const purchaseLines: { debitAmount: string; creditAmount: string }[] = [
+        { debitAmount: inventoryDebitAmount, creditAmount: "0" },
+      ];
+      if (taxAmount > 0) purchaseLines.push({ debitAmount: invoice.taxTotal, creditAmount: "0" });
+      purchaseLines.push({ debitAmount: "0", creditAmount: invoice.netAmount });
+      if (!validateJournalBalance(purchaseLines)) throw new Error("Journal entry out of balance");
 
       // Debit: Inventory (Asset) — grossAmount minus any discount
       // Purchase discounts reduce the cost of inventory
-      const inventoryDebitAmount = (parseFloat(invoice.grossAmount || '0') - discountAmount).toFixed(2);
       await tx.insert(journalEntryLines).values({
         orgId,
         journalEntryId: journalEntry.id,
@@ -607,7 +602,25 @@ export async function revisePurchaseInvoice(invoiceId: string) {
         }
       }
 
-      // 3. Create reversal journal entry
+      // 3. Mark original journal entry as reversed
+      const [originalJE] = await tx
+        .select()
+        .from(journalEntries)
+        .where(and(
+          eq(journalEntries.orgId, orgId),
+          eq(journalEntries.referenceType, 'purchase'),
+          eq(journalEntries.referenceId, invoiceId)
+        ))
+        .limit(1);
+
+      if (originalJE) {
+        await tx
+          .update(journalEntries)
+          .set({ status: 'reversed' })
+          .where(eq(journalEntries.id, originalJE.id));
+      }
+
+      // 4. Create reversal journal entry
       const entryNumber = await generateJournalEntryNumber(orgId);
 
       const [journalEntry] = await tx
@@ -643,6 +656,9 @@ export async function revisePurchaseInvoice(invoiceId: string) {
       if (!inventoryAccount || !vendorPayable) {
         throw new Error('Required accounts not found');
       }
+
+      if (!validateJournalBalance([{ debitAmount: invoice.netAmount, creditAmount: "0" }, { debitAmount: "0", creditAmount: invoice.netAmount }]))
+        throw new Error("Journal entry out of balance");
 
       // Reverse: Credit Inventory, Debit Vendor Payable
       await tx.insert(journalEntryLines).values({
@@ -762,6 +778,9 @@ export async function recordExpense(data: ExpenseFormData) {
         description: `Expense: ${data.description || data.reference || 'Recorded'}`,
       })
       .returning();
+
+    if (!validateJournalBalance([{ debitAmount: data.amount, creditAmount: "0" }, { debitAmount: "0", creditAmount: data.amount }]))
+      throw new Error("Journal entry out of balance");
 
     // Debit: Expense Account
     await db.insert(journalEntryLines).values({
@@ -1568,6 +1587,9 @@ export async function approvePurchaseReturn(id: string) {
       const [purchaseReturnsAccount] = await tx.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), or(eq(chartOfAccounts.name, 'Purchase Returns & Allowances'), eq(chartOfAccounts.name, 'Purchases')))).limit(1);
 
       if (accountsPayable && purchaseReturnsAccount) {
+        if (!validateJournalBalance([{ debitAmount: purchaseReturn.refundAmount, creditAmount: "0" }, { debitAmount: "0", creditAmount: purchaseReturn.refundAmount }]))
+          throw new Error("Journal entry out of balance");
+
         // Debit: Accounts Payable (reduce liability)
         await tx.insert(journalEntryLines).values({
           orgId,
@@ -1705,10 +1727,14 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
       return `JE-${String(nextNum).padStart(5, '0')}`;
     })();
 
-    const [cashAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), or(ilike(chartOfAccounts.name, '%cash%'), ilike(chartOfAccounts.name, '%bank%')))).limit(1);
+    const paymentSubType = data.paymentMethod === 'cash' ? 'cash' : 'bank';
+    const [cashBankAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, paymentSubType))).limit(1);
     const [apAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.name, 'Accounts Payable'))).limit(1);
 
-    if (cashAccount && apAccount) {
+    if (cashBankAccount && apAccount) {
+      if (!validateJournalBalance([{ debitAmount: data.amount, creditAmount: "0" }, { debitAmount: "0", creditAmount: data.amount }]))
+        throw new Error("Journal entry out of balance");
+
       const [journalEntry] = await db.insert(journalEntries).values({
         orgId,
         entryNumber,
@@ -1732,8 +1758,8 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
       await db.insert(journalEntryLines).values({
         orgId,
         journalEntryId: journalEntry.id,
-        accountId: cashAccount.id,
-        description: `Credit - ${cashAccount.name}`,
+        accountId: cashBankAccount.id,
+        description: `Credit - ${cashBankAccount.name}`,
         debitAmount: '0',
         creditAmount: data.amount,
       });

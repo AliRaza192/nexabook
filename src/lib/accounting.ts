@@ -300,6 +300,7 @@ export async function postPayrollToLedger(
     if (totalEobi > 0) lines.push({ orgId, journalEntryId: entry.id, accountId: eobiPayable.id, debitAmount: "0.00", creditAmount: totalEobi.toFixed(2), description: "EOBI Payable" });
     if (totalIncomeTax > 0) lines.push({ orgId, journalEntryId: entry.id, accountId: incomeTaxPayable.id, debitAmount: "0.00", creditAmount: totalIncomeTax.toFixed(2), description: "Income Tax Payable" });
 
+    if (!validateJournalBalance(lines)) throw new Error("Journal entry out of balance");
     await tx.insert(journalEntryLines).values(lines);
 
     await tx.update(payrollRuns)
