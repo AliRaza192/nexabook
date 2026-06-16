@@ -175,8 +175,8 @@ export async function seedInitialCOA() {
 // subType mapping
     const subTypeMap: Record<string, string> = {
       "1000": "cash", "1010": "bank", "1020": "bank", "1030": "cash",
-      "1100": "accounts_receivable", "1200": "inventory", "1210": "input_tax",
-      "1211": "input_tax_srb", "1212": "input_tax_pra", "1213": "input_tax_kpra", "1214": "input_tax_bra",
+      "1100": "accounts_receivable", "1200": "inventory", "1210": "tax_receivable",
+      "1211": "tax_receivable_srb", "1212": "tax_receivable_pra", "1213": "tax_receivable_kpra", "1214": "tax_receivable_bra",
       "1400": "prepaid", "1500": "fixed_assets", "1600": "fixed_assets",
       "2000": "accounts_payable", "2200": "tax_payable",
       "2201": "tax_payable_srb", "2202": "tax_payable_pra", "2203": "tax_payable_kpra", "2204": "tax_payable_bra",

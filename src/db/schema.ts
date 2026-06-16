@@ -102,10 +102,12 @@ export const chartOfAccounts = pgTable('chart_of_accounts', {
   name: varchar('name', { length: 255 }).notNull(),
   type: varchar('type', { length: 50 }).notNull(), // asset, liability, equity, income, expense
   parentId: uuid('parent_id'), // Self-reference, will be resolved later
-  subType: varchar('sub_type', { length: 50 }),
-  // accounts_receivable | accounts_payable | cash | bank |
-  // sales_revenue | service_revenue | tax_payable | 
-  // cogs | salary_expense | retained_earnings | capital
+subType: varchar('sub_type', { length: 50 }),
+// accounts_receivable | accounts_payable | cash | bank |
+// sales_revenue | service_revenue | tax_payable | tax_receivable |
+// input_tax | tax_receivable_srb | tax_payable_srb |
+// cogs | salary_expense | retained_earnings | capital |
+// wht_payable | eobi_payable
   balance: decimal('balance', { precision: 15, scale: 2 }).notNull().default('0'),
   isSystemAccount: boolean('is_system_account').notNull().default(false),
   description: text('description'),

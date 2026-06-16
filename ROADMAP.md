@@ -302,4 +302,4 @@ Examples:
 
 ---
 
-**Current Status: B2 complete — "next" bolte hi B3 (Input/Output Tax GL Separation) shuru karunga.**
+**Current Status: B3 complete — "next" bolte hi B4 (FBR E-Invoicing Integration) shuru karunga.**

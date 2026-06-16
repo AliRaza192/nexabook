@@ -488,11 +488,11 @@ export async function approvePurchaseInvoice(invoiceId: string) {
       }
 
       const inputTaxSubTypeMap: Record<string, string> = {
-        GST: "input_tax",
-        SRB: "input_tax_srb",
-        PRA: "input_tax_pra",
-        KPRA: "input_tax_kpra",
-        BRA: "input_tax_bra",
+        GST: "tax_receivable",
+        SRB: "tax_receivable_srb",
+        PRA: "tax_receivable_pra",
+        KPRA: "tax_receivable_kpra",
+        BRA: "tax_receivable_bra",
       };
 
       let totalTaxAmount = 0;

@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
 ## Status: ✅ In Progress — Phase B
-## Current Phase: B2 — Provincial Sales Tax
-## Last Completed: B2 — Provincial Sales Tax (SRB/PRA/KPRA/BRA)
+## Current Phase: B3 — Input/Output Tax GL Separation
+## Last Completed: B3 — Input/Output Tax GL Separation
 
 ---
 
@@ -24,7 +24,7 @@
 
 - [x] B1: WHT (Withholding Tax) Management
 - [x] B2: Provincial Sales Tax (SRB/PRA/KPRA/BRA)
-- [ ] B3: Input/Output Tax GL Separation
+- [x] B3: Input/Output Tax GL Separation
 - [ ] B4: FBR E-Invoicing Integration
 
 ## PHASE C — ENTERPRISE FEATURES (Estimated: 10-14 days)
