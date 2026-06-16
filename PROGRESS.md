@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
 ## Status: ✅ In Progress — Phase B
-## Current Phase: C2 — Bank Reconciliation
-## Last Completed: C2 — Bank Reconciliation
+## Current Phase: C3 — Serial Number Management
+## Last Completed: C3 — Serial Number Management
 
 ---
 
@@ -31,7 +31,7 @@
 
 - [x] C1: Multi-Currency Support
 - [x] C2: Bank Reconciliation (Statement Import)
-- [ ] C3: Serial Number Management
+- [x] C3: Serial Number Management
 - [ ] C4: Barcode Designer & Printing
 - [ ] C5: WhatsApp Integration
 

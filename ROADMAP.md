@@ -302,4 +302,4 @@ Examples:
 
 ---
 
-**Current Status: C2 complete — "next" bolte hi C3 (Serial Number Management) shuru karunga.**
+**Current Status: C3 complete — "next" bolte hi C4 (Barcode Designer & Printing) shuru karunga.**

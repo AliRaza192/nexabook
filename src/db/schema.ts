@@ -181,6 +181,29 @@ export const productBatches = pgTable('product_batches', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Serial Numbers (individual unit tracking)
+export const serialNumbers = pgTable('serial_numbers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  warehouseId: uuid('warehouse_id').references(() => warehouses.id).notNull(),
+  batchId: uuid('batch_id').references(() => productBatches.id),
+  serialNumber: varchar('serial_number', { length: 100 }).notNull(),
+  status: varchar('status', { length: 20 }).notNull().default('in_stock'), // in_stock, sold, returned, warranty, damaged
+  salePrice: decimal('sale_price', { precision: 12, scale: 2 }),
+  costPrice: decimal('cost_price', { precision: 12, scale: 2 }),
+  warrantyPeriod: integer('warranty_period'), // in months
+  warrantyStart: timestamp('warranty_start'),
+  warrantyEnd: timestamp('warranty_end'),
+  soldAt: timestamp('sold_at'),
+  soldToCustomerId: uuid('sold_to_customer_id').references(() => customers.id),
+  purchaseInvoiceId: uuid('purchase_invoice_id').references(() => purchaseInvoices.id),
+  saleInvoiceId: uuid('sale_invoice_id').references(() => invoices.id),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Products/Services
 export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -195,6 +218,7 @@ export const products = pgTable('products', {
   saleUomId: uuid('sale_uom_id').references(() => uoms.id),
   description: text('description'),
   isBatchTracked: boolean('is_batch_tracked').notNull().default(false),
+  isSerialTracked: boolean('is_serial_tracked').notNull().default(false),
   salePrice: decimal('sale_price', { precision: 12, scale: 2 }),
   costPrice: decimal('cost_price', { precision: 12, scale: 2 }),
   currentStock: decimal('current_stock', { precision: 12, scale: 2 }).default('0'),
@@ -412,6 +436,7 @@ export const invoiceItems = pgTable('invoice_items', {
   productId: uuid('product_id').references(() => products.id),
   uomId: uuid('uom_id').references(() => uoms.id),
   batchId: uuid('batch_id').references(() => productBatches.id),
+  serialNumberId: uuid('serial_number_id').references(() => serialNumbers.id),
   description: text('description').notNull(),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -777,6 +802,7 @@ export const purchaseItems = pgTable('purchase_items', {
   batchNo: varchar('batch_no', { length: 100 }),
   expiryDate: timestamp('expiry_date'),
   manufacturingDate: timestamp('manufacturing_date'),
+  serialNumberId: uuid('serial_number_id').references(() => serialNumbers.id),
   description: text('description').notNull(),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -1695,6 +1721,7 @@ export const stockMovements = pgTable('stock_movements', {
   referenceNumber: varchar('reference_number', { length: 50 }),
   runningBalance: decimal('running_balance', { precision: 10, scale: 2 }).notNull(),
   notes: text('notes'),
+  serialNumberId: uuid('serial_number_id').references(() => serialNumbers.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
