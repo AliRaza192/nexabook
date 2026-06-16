@@ -272,6 +272,8 @@ export interface InvoiceFormData {
   receivedAmount?: string;
   balanceAmount?: string;
   cashBankAccountId?: string;
+  currency?: string;
+  exchangeRate?: string;
   notes?: string;
   terms?: string;
   items: InvoiceLineItem[];

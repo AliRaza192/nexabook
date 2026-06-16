@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
 ## Status: ✅ In Progress — Phase B
-## Current Phase: B4 — FBR E-Invoicing Integration
-## Last Completed: B4 — FBR E-Invoicing Integration
+## Current Phase: C1 — Multi-Currency Support
+## Last Completed: C1 — Multi-Currency Support
 
 ---
 
@@ -29,7 +29,7 @@
 
 ## PHASE C — ENTERPRISE FEATURES (Estimated: 10-14 days)
 
-- [ ] C1: Multi-Currency Support
+- [x] C1: Multi-Currency Support
 - [ ] C2: Bank Reconciliation (Statement Import)
 - [ ] C3: Serial Number Management
 - [ ] C4: Barcode Designer & Printing

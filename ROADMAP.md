@@ -302,4 +302,4 @@ Examples:
 
 ---
 
-**Current Status: Phase B complete — "next" bolte hi Phase C (C1: Multi-Currency Support) shuru karunga.**
+**Current Status: C1 complete — "next" bolte hi C2 (Bank Reconciliation) shuru karunga.**

@@ -255,8 +255,13 @@ export default function SettingsPage() {
                     <SelectContent>
                       <SelectItem value="PKR">PKR — Pakistani Rupee</SelectItem>
                       <SelectItem value="USD">USD — US Dollar</SelectItem>
-                      <SelectItem value="AED">AED — UAE Dirham</SelectItem>
+                      <SelectItem value="EUR">EUR — Euro</SelectItem>
                       <SelectItem value="GBP">GBP — British Pound</SelectItem>
+                      <SelectItem value="AED">AED — UAE Dirham</SelectItem>
+                      <SelectItem value="SAR">SAR — Saudi Riyal</SelectItem>
+                      <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
+                      <SelectItem value="AUD">AUD — Australian Dollar</SelectItem>
+                      <SelectItem value="CNY">CNY — Chinese Yuan</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

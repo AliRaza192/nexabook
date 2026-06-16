@@ -177,6 +177,8 @@ export interface PurchaseInvoiceFormData {
   discountTotal: string;
   taxTotal: string;
   netAmount: string;
+  currency?: string;
+  exchangeRate?: string;
   notes?: string;
   items: PurchaseInvoiceLineItem[];
 }

@@ -392,6 +392,8 @@ export const invoices = pgTable('invoices', {
   emailSentAt: timestamp('email_sent_at'),
   isPosted: boolean('is_posted').notNull().default(false),
   journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
+  currency: varchar('currency', { length: 10 }).default('PKR'),
+  exchangeRate: decimal('exchange_rate', { precision: 10, scale: 4 }).default('1'),
   fbrSubmissionId: varchar('fbr_submission_id', { length: 100 }),
   fbrInvoiceNumber: varchar('fbr_invoice_number', { length: 100 }),
   fbrStatus: varchar('fbr_status', { length: 20 }),
@@ -696,6 +698,22 @@ export const taxRatesRelations = relations(taxRates, ({ one }) => ({
 export type TaxRate = typeof taxRates.$inferSelect;
 export type NewTaxRate = typeof taxRates.$inferInsert;
 
+// Exchange Rates
+export const exchangeRates = pgTable('exchange_rates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  fromCurrency: varchar('from_currency', { length: 10 }).notNull(),
+  toCurrency: varchar('to_currency', { length: 10 }).notNull().default('PKR'),
+  rate: decimal('rate', { precision: 14, scale: 6 }).notNull(),
+  effectiveDate: timestamp('effective_date').notNull().defaultNow(),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export type ExchangeRate = typeof exchangeRates.$inferSelect;
+export type NewExchangeRate = typeof exchangeRates.$inferInsert;
+
 // Journal Entry Lines
 export const journalEntryLines = pgTable('journal_entry_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -740,6 +758,8 @@ export const purchaseInvoices = pgTable('purchase_invoices', {
   taxTotal: decimal('tax_total', { precision: 12, scale: 2 }).notNull().default('0'),
   netAmount: decimal('net_amount', { precision: 12, scale: 2 }).notNull().default('0'),
   status: varchar('status', { length: 20 }).notNull().default('Draft'), // Draft, Approved, Revised
+  currency: varchar('currency', { length: 10 }).default('PKR'),
+  exchangeRate: decimal('exchange_rate', { precision: 10, scale: 4 }).default('1'),
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

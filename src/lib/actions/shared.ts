@@ -55,6 +55,7 @@ async function seedDefaultChartOfAccounts(orgId: string): Promise<void> {
     { code: "4200", name: "Shipping Revenue", type: "income", subType: "shipping_revenue", description: "Revenue from shipping charges" },
     { code: "4300", name: "Service Revenue", type: "income", subType: "service_revenue", description: "Revenue from services" },
     { code: "4400", name: "Inventory Adjustment Income", type: "income", subType: "inventory_adjustment_income", description: "Income from inventory adjustments (found/surplus)" },
+    { code: "4500", name: "Exchange Gain", type: "income", subType: "exchange_gain", description: "Gain from currency exchange rate fluctuations" },
 
     // Expense
     { code: "5000", name: "Cost of Goods Sold", type: "expense", subType: "cogs", description: "Direct cost of goods sold" },
@@ -64,6 +65,7 @@ async function seedDefaultChartOfAccounts(orgId: string): Promise<void> {
     { code: "6400", name: "Depreciation Expense", type: "expense", subType: "depreciation", description: "Asset depreciation" },
     { code: "6500", name: "Discount Allowed", type: "expense", subType: "discount_allowed", description: "Discounts given to customers" },
     { code: "6600", name: "Miscellaneous Expense", type: "expense", subType: "misc_expense", description: "Other expenses" },
+    { code: "6650", name: "Exchange Loss", type: "expense", subType: "exchange_loss", description: "Loss from currency exchange rate fluctuations" },
     { code: "6700", name: "Loss on Inventory Write-off", type: "expense", subType: "inventory_write_off", description: "Loss from damaged/lost/expired inventory" },
   ];
 
