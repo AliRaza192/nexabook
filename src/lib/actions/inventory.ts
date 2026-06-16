@@ -18,6 +18,7 @@ export interface ProductFormData {
   saleUomId?: string;
   description?: string;
   isBatchTracked: boolean;
+  isSerialTracked?: boolean;
   salePrice: string;
   costPrice: string;
   openingStock: string;
@@ -72,6 +73,7 @@ export interface ProductWithCategory {
   saleUomId: string | null;
   description: string | null;
   isBatchTracked: boolean;
+  isSerialTracked: boolean;
   salePrice: string | null;
   costPrice: string | null;
   currentStock: string | null;
@@ -127,6 +129,7 @@ export async function getProducts(searchQuery?: string, categoryId?: string) {
         saleUomId: products.saleUomId,
         description: products.description,
         isBatchTracked: products.isBatchTracked,
+        isSerialTracked: products.isSerialTracked,
         salePrice: products.salePrice,
         costPrice: products.costPrice,
         currentStock: products.currentStock,
@@ -190,6 +193,7 @@ export async function addProduct(data: ProductFormData) {
         saleUomId: data.saleUomId || null,
         description: data.description,
         isBatchTracked: data.isBatchTracked || false,
+        isSerialTracked: data.isSerialTracked || false,
         salePrice: data.salePrice,
         costPrice: data.costPrice,
         currentStock: data.openingStock,
@@ -333,6 +337,7 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
     if (data.saleUomId !== undefined) updateData.saleUomId = data.saleUomId;
     if (data.description !== undefined) updateData.description = data.description;
     if (data.isBatchTracked !== undefined) updateData.isBatchTracked = data.isBatchTracked;
+    if (data.isSerialTracked !== undefined) updateData.isSerialTracked = data.isSerialTracked;
     if (data.salePrice !== undefined) updateData.salePrice = data.salePrice;
     if (data.costPrice !== undefined) updateData.costPrice = data.costPrice;
     if (data.minStockLevel !== undefined) updateData.minStockLevel = data.minStockLevel;

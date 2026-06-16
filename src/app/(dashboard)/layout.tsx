@@ -127,6 +127,7 @@ const navItems: NavItem[] = [
       { name: "Stock Valuation", href: "/inventory/valuation" },
       { name: "Warehouses", href: "/inventory/warehouses" },
       { name: "Batches", href: "/inventory/batches" },
+      { name: "Barcodes", href: "/inventory/barcodes" },
     ],
   },
   {
