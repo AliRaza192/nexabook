@@ -7,6 +7,7 @@ import {
   integer,
   decimal,
   boolean,
+  jsonb,
   pgEnum,
   unique,
 } from 'drizzle-orm/pg-core';
@@ -1325,6 +1326,37 @@ export const bankAccounts = pgTable('bank_accounts', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+// Bank Statements (for reconciliation)
+export const bankStatements = pgTable('bank_statements', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id).notNull(),
+  statementDate: timestamp('statement_date').notNull(),
+  openingBalance: decimal('opening_balance', { precision: 14, scale: 2 }).notNull().default('0'),
+  closingBalance: decimal('closing_balance', { precision: 14, scale: 2 }).notNull().default('0'),
+  totalDeposits: decimal('total_deposits', { precision: 14, scale: 2 }).default('0'),
+  totalWithdrawals: decimal('total_withdrawals', { precision: 14, scale: 2 }).default('0'),
+  lines: jsonb('lines').$type<Array<{
+    id: string;
+    date: string;
+    description: string;
+    reference: string;
+    debit: number;
+    credit: number;
+    balance: number;
+    matched: boolean;
+    matchedTransactionId?: string;
+    matchedType?: string;
+  }>>().default([]),
+  status: varchar('status', { length: 20 }).notNull().default('pending'), // pending, matched, reconciled
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export type BankStatement = typeof bankStatements.$inferSelect;
+export type NewBankStatement = typeof bankStatements.$inferInsert;
 
 // Bank Deposits
 export const bankDeposits = pgTable('bank_deposits', {

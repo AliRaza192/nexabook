@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
 ## Status: ✅ In Progress — Phase B
-## Current Phase: C1 — Multi-Currency Support
-## Last Completed: C1 — Multi-Currency Support
+## Current Phase: C2 — Bank Reconciliation
+## Last Completed: C2 — Bank Reconciliation
 
 ---
 
@@ -30,7 +30,7 @@
 ## PHASE C — ENTERPRISE FEATURES (Estimated: 10-14 days)
 
 - [x] C1: Multi-Currency Support
-- [ ] C2: Bank Reconciliation (Statement Import)
+- [x] C2: Bank Reconciliation (Statement Import)
 - [ ] C3: Serial Number Management
 - [ ] C4: Barcode Designer & Printing
 - [ ] C5: WhatsApp Integration

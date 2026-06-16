@@ -302,4 +302,4 @@ Examples:
 
 ---
 
-**Current Status: C1 complete — "next" bolte hi C2 (Bank Reconciliation) shuru karunga.**
+**Current Status: C2 complete — "next" bolte hi C3 (Serial Number Management) shuru karunga.**
