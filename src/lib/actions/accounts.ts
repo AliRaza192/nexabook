@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { chartOfAccounts, organizations, profiles, journalEntries, journalEntryLines, auditLogs, invoices, purchaseInvoices } from "@/db/schema";
+import { chartOfAccounts, organizations, profiles, journalEntries, journalEntryLines, auditLogs, invoices, invoiceItems, purchaseInvoices, purchaseItems } from "@/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
@@ -77,6 +77,10 @@ export async function seedInitialCOA() {
       { code: "1110", name: "Allowance for Doubtful Accounts", type: "asset", description: "Estimated uncollectible receivables" },
       { code: "1200", name: "Inventory", type: "asset", description: "Goods available for sale" },
       { code: "1210", name: "Raw Materials", type: "asset", description: "Materials for production" },
+      { code: "1211", name: "SRB Input Tax", type: "asset", description: "Recoverable Sindh sales tax on services" },
+      { code: "1212", name: "PRA Input Tax", type: "asset", description: "Recoverable Punjab sales tax on services" },
+      { code: "1213", name: "KPRA Input Tax", type: "asset", description: "Recoverable KP sales tax on services" },
+      { code: "1214", name: "BRA Input Tax", type: "asset", description: "Recoverable Balochistan sales tax on services" },
       { code: "1220", name: "Work in Progress Inventory", type: "asset", description: "Partially completed goods" },
       { code: "1230", name: "Finished Goods Inventory", type: "asset", description: "Completed goods ready for sale" },
       { code: "1300", name: "Office Supplies", type: "asset", description: "Office supplies and materials" },
@@ -97,7 +101,11 @@ export async function seedInitialCOA() {
       // Liabilities (2000-2999)
       { code: "2000", name: "Accounts Payable", type: "liability", description: "Money owed to suppliers" },
       { code: "2100", name: "Credit Card Payable", type: "liability", description: "Credit card balance" },
-      { code: "2200", name: "Sales Tax Payable", type: "liability", description: "Sales tax collected but not remitted" },
+      { code: "2200", name: "Sales Tax Payable", type: "liability", description: "Sales tax collected but not remitted (GST)" },
+      { code: "2201", name: "SRB Payable", type: "liability", description: "Sindh sales tax on services payable" },
+      { code: "2202", name: "PRA Payable", type: "liability", description: "Punjab sales tax on services payable" },
+      { code: "2203", name: "KPRA Payable", type: "liability", description: "KP sales tax on services payable" },
+      { code: "2204", name: "BRA Payable", type: "liability", description: "Balochistan sales tax on services payable" },
       { code: "2210", name: "Income Tax Withheld", type: "liability", description: "Tax withheld from employee salaries" },
       { code: "2250", name: "WHT Payable", type: "liability", description: "Withholding tax deducted from vendor payments (Section 153)" },
       { code: "2300", name: "Income Tax Payable", type: "liability", description: "Income tax owed" },
@@ -168,8 +176,10 @@ export async function seedInitialCOA() {
     const subTypeMap: Record<string, string> = {
       "1000": "cash", "1010": "bank", "1020": "bank", "1030": "cash",
       "1100": "accounts_receivable", "1200": "inventory", "1210": "input_tax",
+      "1211": "input_tax_srb", "1212": "input_tax_pra", "1213": "input_tax_kpra", "1214": "input_tax_bra",
       "1400": "prepaid", "1500": "fixed_assets", "1600": "fixed_assets",
       "2000": "accounts_payable", "2200": "tax_payable",
+      "2201": "tax_payable_srb", "2202": "tax_payable_pra", "2203": "tax_payable_kpra", "2204": "tax_payable_bra",
       "2210": "income_tax_payable", "2250": "wht_payable", "2300": "income_tax_payable",
       "2410": "salaries_payable", "2800": "eobi_payable",
       "3000": "capital", "3100": "retained_earnings",
@@ -564,6 +574,13 @@ export interface MonthlyTaxBreakdown {
   net_tax: string;
 }
 
+export interface ProvincialTaxBreakdown {
+  province: string;
+  outputTax: number;
+  inputTax: number;
+  netPayable: number;
+}
+
 export async function getTaxSummary(
   dateFrom: string,
   dateTo: string
@@ -574,6 +591,7 @@ export async function getTaxSummary(
     inputTax: string;
     netTaxPayable: string;
     monthlyBreakdown: MonthlyTaxBreakdown[];
+    provincialBreakdown: ProvincialTaxBreakdown[];
   };
   error?: string;
 }> {
@@ -667,6 +685,55 @@ export async function getTaxSummary(
         net_tax: (v.output - v.input).toFixed(2),
       }));
 
+    // Provincial breakdown from invoice items (sales)
+    const salesTaxByType = await db
+      .select({
+        taxType: invoiceItems.taxType,
+        total: sql<string>`SUM(COALESCE(${invoiceItems.lineTotal} * ${invoiceItems.taxRate} / 100, 0))`,
+      })
+      .from(invoiceItems)
+      .innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id))
+      .where(and(
+        eq(invoices.orgId, orgId),
+        sql`${invoices.issueDate} >= ${from}`,
+        sql`${invoices.issueDate} <= ${to}`,
+        sql`${invoices.status} NOT IN ('draft', 'cancelled')`,
+      ))
+      .groupBy(invoiceItems.taxType);
+
+    // Provincial breakdown from purchase items
+    const purchaseTaxByType = await db
+      .select({
+        taxType: purchaseItems.taxType,
+        total: sql<string>`SUM(COALESCE(${purchaseItems.lineTotal} * ${purchaseItems.taxRate} / 100, 0))`,
+      })
+      .from(purchaseItems)
+      .innerJoin(purchaseInvoices, eq(purchaseItems.purchaseInvoiceId, purchaseInvoices.id))
+      .where(and(
+        eq(purchaseInvoices.orgId, orgId),
+        sql`${purchaseInvoices.date} >= ${from}`,
+        sql`${purchaseInvoices.date} <= ${to}`,
+        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`,
+      ))
+      .groupBy(purchaseItems.taxType);
+
+    const outputByProvince = new Map<string, number>();
+    const inputByProvince = new Map<string, number>();
+
+    for (const row of salesTaxByType) {
+      outputByProvince.set(row.taxType || 'GST', parseFloat(row.total || '0'));
+    }
+    for (const row of purchaseTaxByType) {
+      inputByProvince.set(row.taxType || 'GST', parseFloat(row.total || '0'));
+    }
+
+    const allProvinces = new Set([...outputByProvince.keys(), ...inputByProvince.keys()]);
+    const provincialBreakdown: ProvincialTaxBreakdown[] = Array.from(allProvinces).sort().map(p => {
+      const output = outputByProvince.get(p) || 0;
+      const input = inputByProvince.get(p) || 0;
+      return { province: p, outputTax: output, inputTax: input, netPayable: output - input };
+    });
+
     return {
       success: true,
       data: {
@@ -674,6 +741,7 @@ export async function getTaxSummary(
         inputTax: inputTax.toFixed(2),
         netTaxPayable: netTaxPayable.toFixed(2),
         monthlyBreakdown,
+        provincialBreakdown,
       },
     };
   } catch (error) {

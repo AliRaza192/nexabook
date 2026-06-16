@@ -810,16 +810,6 @@ export async function approveInvoice(invoiceId: string) {
           ),
         )
         .limit(1);
-      const [tax] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "tax_payable"),
-          ),
-        )
-        .limit(1);
       const [cogsAcc] = await tx
         .select()
         .from(chartOfAccounts)
@@ -868,6 +858,24 @@ export async function approveInvoice(invoiceId: string) {
       const shippingVal = parseFloat(invoice.shippingCharges || "0");
       const roundOffVal = parseFloat(invoice.roundOff || "0");
 
+      // Calculate tax per taxType from invoice items
+      const taxByType = new Map<string, number>();
+      for (const item of items) {
+        const lineTotal = parseFloat(item.lineTotal || "0");
+        const rate = parseFloat(item.taxRate || "0");
+        const itemTax = lineTotal * (rate / 100);
+        const tType = item.taxType || "GST";
+        taxByType.set(tType, (taxByType.get(tType) || 0) + itemTax);
+      }
+
+      const taxSubTypeMap: Record<string, string> = {
+        GST: "tax_payable",
+        SRB: "tax_payable_srb",
+        PRA: "tax_payable_pra",
+        KPRA: "tax_payable_kpra",
+        BRA: "tax_payable_bra",
+      };
+
       const lines = [
         {
           orgId,
@@ -906,15 +914,25 @@ export async function approveInvoice(invoiceId: string) {
         },
       ];
 
-      if (parseFloat(invoice.taxAmount || "0") > 0 && tax) {
-        lines.push({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: tax.id,
-          description: `Tax Invoice ${invoice.invoiceNumber}`,
-          debitAmount: "0",
-          creditAmount: invoice.taxAmount,
-        });
+      // Add tax lines per tax type
+      for (const [tType, amount] of taxByType.entries()) {
+        if (amount <= 0) continue;
+        const subType = taxSubTypeMap[tType] || "tax_payable";
+        const [[taxAcc]] = await Promise.all([
+          tx.select().from(chartOfAccounts)
+            .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, subType)))
+            .limit(1),
+        ]);
+        if (taxAcc) {
+          lines.push({
+            orgId,
+            journalEntryId: journalEntry.id,
+            accountId: taxAcc.id,
+            description: `${tType} Tax Invoice ${invoice.invoiceNumber}`,
+            debitAmount: "0",
+            creditAmount: amount.toFixed(2),
+          });
+        }
       }
 
       if (shippingVal > 0) {

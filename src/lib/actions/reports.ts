@@ -830,11 +830,46 @@ export async function getSalesTaxReport(dateFrom: string, dateTo: string) {
         sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
       ));
 
+    // Provincial breakdown from invoice items
+    const salesTaxByType = await db
+      .select({
+        taxType: invoiceItems.taxType,
+        total: sql<string>`SUM(COALESCE(${invoiceItems.lineTotal} * ${invoiceItems.taxRate} / 100, 0))`,
+      })
+      .from(invoiceItems)
+      .innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id))
+      .where(and(
+        eq(invoices.orgId, orgId),
+        gte(invoices.issueDate, fromDate),
+        lte(invoices.issueDate, toDate),
+        sql`${invoices.status} NOT IN ('draft', 'cancelled')`,
+      ))
+      .groupBy(invoiceItems.taxType);
+
+    const purchaseTaxByType = await db
+      .select({
+        taxType: purchaseItems.taxType,
+        total: sql<string>`SUM(COALESCE(${purchaseItems.lineTotal} * ${purchaseItems.taxRate} / 100, 0))`,
+      })
+      .from(purchaseItems)
+      .innerJoin(purchaseInvoices, eq(purchaseItems.purchaseInvoiceId, purchaseInvoices.id))
+      .where(and(
+        eq(purchaseInvoices.orgId, orgId),
+        gte(purchaseInvoices.date, fromDate),
+        lte(purchaseInvoices.date, toDate),
+        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`,
+      ))
+      .groupBy(purchaseItems.taxType);
+
     return {
       success: true,
       data: {
         taxCollected: taxCollected[0]?.totalTax ? parseFloat(taxCollected[0].totalTax) : 0,
         taxPaid: taxPaid[0]?.totalTax ? parseFloat(taxPaid[0].totalTax) : 0,
+        provincial: {
+          collected: salesTaxByType.map(r => ({ type: r.taxType || 'GST', amount: parseFloat(r.total || '0') })),
+          paid: purchaseTaxByType.map(r => ({ type: r.taxType || 'GST', amount: parseFloat(r.total || '0') })),
+        },
       }
     };
   } catch (error) {

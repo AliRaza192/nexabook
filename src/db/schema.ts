@@ -407,6 +407,7 @@ export const invoiceItems = pgTable('invoice_items', {
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
   discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
   taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  taxType: varchar('tax_type', { length: 10 }).notNull().default('GST'),
   lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
 });
 
@@ -753,6 +754,7 @@ export const purchaseItems = pgTable('purchase_items', {
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
   discountPercentage: decimal('discount_percentage', { precision: 5, scale: 2 }).notNull().default('0'),
   taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+  taxType: varchar('tax_type', { length: 10 }).notNull().default('GST'),
   lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
 });
 

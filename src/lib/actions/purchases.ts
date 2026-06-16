@@ -469,34 +469,46 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         ))
         .limit(1);
 
-      const [purchaseTax] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'input_tax')
-        ))
-        .limit(1);
-
       if (!inventoryAccount || !vendorPayable) {
         throw new Error('Required accounts not found. Please seed Chart of Accounts first.');
       }
 
       // 5. Create Journal Entry Lines
-      const taxAmount = parseFloat(invoice.taxTotal || '0');
       const discountAmount = parseFloat(invoice.discountTotal || '0');
       const inventoryDebitAmount = (parseFloat(invoice.grossAmount || '0') - discountAmount).toFixed(2);
+
+      // Calculate tax per taxType from purchase items
+      const taxByType = new Map<string, number>();
+      for (const item of items) {
+        const lineTotal = parseFloat(item.lineTotal || "0");
+        const rate = parseFloat(item.taxRate || "0");
+        const itemTax = lineTotal * (rate / 100);
+        const tType = item.taxType || "GST";
+        taxByType.set(tType, (taxByType.get(tType) || 0) + itemTax);
+      }
+
+      const inputTaxSubTypeMap: Record<string, string> = {
+        GST: "input_tax",
+        SRB: "input_tax_srb",
+        PRA: "input_tax_pra",
+        KPRA: "input_tax_kpra",
+        BRA: "input_tax_bra",
+      };
+
+      let totalTaxAmount = 0;
+      for (const amount of taxByType.values()) totalTaxAmount += amount;
 
       // Validate journal balance before posting
       const purchaseLines: { debitAmount: string; creditAmount: string }[] = [
         { debitAmount: inventoryDebitAmount, creditAmount: "0" },
       ];
-      if (taxAmount > 0) purchaseLines.push({ debitAmount: invoice.taxTotal, creditAmount: "0" });
+      for (const amount of taxByType.values()) {
+        if (amount > 0) purchaseLines.push({ debitAmount: amount.toFixed(2), creditAmount: "0" });
+      }
       purchaseLines.push({ debitAmount: "0", creditAmount: invoice.netAmount });
       if (!validateJournalBalance(purchaseLines)) throw new Error("Journal entry out of balance");
 
       // Debit: Inventory (Asset) — grossAmount minus any discount
-      // Purchase discounts reduce the cost of inventory
       await tx.insert(journalEntryLines).values({
         orgId,
         journalEntryId: journalEntry.id,
@@ -506,17 +518,24 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         creditAmount: '0',
       });
 
-      // Debit: Input Tax (if tax > 0)
-      if (taxAmount > 0) {
-        if (!purchaseTax) {
-          throw new Error('Input Tax account not found. Please seed Chart of Accounts first.');
+      // Debit: Input Tax per tax type
+      for (const [tType, amount] of taxByType.entries()) {
+        if (amount <= 0) continue;
+        const subType = inputTaxSubTypeMap[tType] || "input_tax";
+        const [[taxAcc]] = await Promise.all([
+          tx.select().from(chartOfAccounts)
+            .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, subType)))
+            .limit(1),
+        ]);
+        if (!taxAcc) {
+          throw new Error(`${tType} Input Tax account not found. Please seed Chart of Accounts first.`);
         }
         await tx.insert(journalEntryLines).values({
           orgId,
           journalEntryId: journalEntry.id,
-          accountId: purchaseTax.id,
-          description: `Debit - Input Tax (Purchase ${invoice.billNumber})`,
-          debitAmount: invoice.taxTotal,
+          accountId: taxAcc.id,
+          description: `Debit - ${tType} Input Tax (Purchase ${invoice.billNumber})`,
+          debitAmount: amount.toFixed(2),
           creditAmount: '0',
         });
       }

@@ -302,4 +302,4 @@ Examples:
 
 ---
 
-**Current Status: B1 complete — "next" bolte hi B2 (Provincial Sales Tax) shuru karunga.**
+**Current Status: B2 complete — "next" bolte hi B3 (Input/Output Tax GL Separation) shuru karunga.**
