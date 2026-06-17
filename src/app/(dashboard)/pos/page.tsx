@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { GatewayPaymentButton } from "@/components/GatewayPaymentButton";
 import {
   Dialog,
   DialogContent,
@@ -921,6 +922,28 @@ export default function PosPage() {
                   <p className="font-semibold">Card</p>
                 </div>
               </Button>
+            </div>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-2 text-muted-foreground">Online Payment</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <GatewayPaymentButton
+                amount={grandTotal}
+                gateway="jazzcash"
+                onError={(err) => alert(err)}
+              />
+              <GatewayPaymentButton
+                amount={grandTotal}
+                gateway="easypaisa"
+                onError={(err) => alert(err)}
+              />
             </div>
           </div>
 

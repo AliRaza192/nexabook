@@ -701,6 +701,25 @@ export const auditLogs = pgTable('audit_logs', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+// Payment Transactions (Gateway Integration)
+export const paymentTransactions = pgTable('payment_transactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  invoiceId: uuid('invoice_id').references(() => invoices.id),
+  customerId: uuid('customer_id').references(() => customers.id),
+  gateway: varchar('gateway', { length: 50 }).notNull(), // jazzcash, easypaisa
+  transactionId: varchar('transaction_id', { length: 255 }),
+  referenceNumber: varchar('reference_number', { length: 255 }),
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  currency: varchar('currency', { length: 10 }).default('PKR'),
+  status: varchar('status', { length: 20 }).notNull().default('pending'), // pending, completed, failed, refunded
+  gatewayResponse: text('gateway_response'),
+  initiatedAt: timestamp('initiated_at').notNull().defaultNow(),
+  completedAt: timestamp('completed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Journal Entries (General Ledger)
 export const journalEntries = pgTable('journal_entries', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -1885,6 +1904,21 @@ export const pdcInstrumentsRelations = relations(pdcInstruments, ({ one }) => ({
   bankAccount: one(bankAccounts, {
     fields: [pdcInstruments.bankAccountId],
     references: [bankAccounts.id],
+  }),
+}));
+
+export const paymentTransactionsRelations = relations(paymentTransactions, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [paymentTransactions.orgId],
+    references: [organizations.id],
+  }),
+  invoice: one(invoices, {
+    fields: [paymentTransactions.invoiceId],
+    references: [invoices.id],
+  }),
+  customer: one(customers, {
+    fields: [paymentTransactions.customerId],
+    references: [customers.id],
   }),
 }));
 

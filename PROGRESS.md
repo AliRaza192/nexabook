@@ -53,7 +53,7 @@
 - [x] E4: Performance Optimization (N+1 queries fixed in reports.ts + accounting.ts)
 
 ### Phase F — Market Readiness
-- [ ] F1: Urdu Translation (next-intl)
+- [x] F1: Urdu Translation (next-intl + LanguageToggle + RTL)
 - [ ] F2: Payment Gateway Integration (JazzCash + Easypaisa)
 - [ ] F3: AI Assistant Chatbot (RAG)
 
