@@ -54,7 +54,7 @@
 
 ### Phase F — Market Readiness
 - [x] F1: Urdu Translation (next-intl + LanguageToggle + RTL)
-- [ ] F2: Payment Gateway Integration (JazzCash + Easypaisa)
+- [x] F2: Payment Gateway Integration (JazzCash + Easypaisa)
 - [ ] F3: AI Assistant Chatbot (RAG)
 
 ---

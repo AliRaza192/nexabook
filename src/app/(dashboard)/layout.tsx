@@ -8,6 +8,7 @@ import { UserButton, SignOutButton, useUser } from "@clerk/nextjs";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { I18nProvider } from "@/lib/i18n";
 import { LanguageToggle } from "@/components/LanguageToggle";
+import { ChatWidget } from "@/components/ChatWidget";
 import {
   LayoutDashboard,
   Handshake,
@@ -493,6 +494,7 @@ export default function DashboardLayout({
         </main>
       </div>
     </div>
+    <ChatWidget />
     </I18nProvider>
   );
 }
