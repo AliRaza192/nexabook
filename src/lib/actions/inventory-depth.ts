@@ -115,7 +115,7 @@ export async function addStockMovement(data: StockMovementFormData) {
     if (!product) return { success: false, error: "Product not found" };
 
     const currentStock = product.currentStock || 0;
-    const newStock = data.movementType === "in" ? currentStock + quantity : currentStock - quantity;
+    const newStock = data.movementType === "in" ? Number(currentStock) + quantity : Number(currentStock) - quantity;
 
     if (newStock < 0) {
       return { success: false, error: "Insufficient stock. Current stock: " + currentStock };
@@ -142,7 +142,7 @@ export async function addStockMovement(data: StockMovementFormData) {
     // Update product stock
     await db
       .update(products)
-      .set({ currentStock: newStock })
+      .set({ currentStock: String(newStock) })
       .where(eq(products.id, data.productId));
 
     revalidatePath("/inventory/stock");
@@ -262,7 +262,7 @@ export async function addStockAdjustment(data: StockAdjustmentFormData) {
 
       const currentStock = product.currentStock || 0;
       const newStock = parseFloat(line.adjustedQuantity);
-      const difference = newStock - currentStock;
+      const difference = newStock - Number(currentStock);
       const unitCost = product.costPrice ? parseFloat(product.costPrice) : 0;
       const totalValue = Math.abs(difference) * unitCost;
 
@@ -281,7 +281,7 @@ export async function addStockAdjustment(data: StockAdjustmentFormData) {
       // Update product stock
       await db
         .update(products)
-        .set({ currentStock: newStock })
+        .set({ currentStock: String(newStock) })
         .where(eq(products.id, line.productId));
 
       // Record stock movement

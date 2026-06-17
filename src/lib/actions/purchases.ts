@@ -424,8 +424,6 @@ export async function approvePurchaseInvoice(invoiceId: string) {
               referenceId: invoiceId,
               referenceNumber: invoice.billNumber,
               runningBalance: String(newStock),
-              warehouseId: invoice.warehouseId || null,
-              batchId: batchId,
             });
           }
         }
@@ -614,10 +612,10 @@ export async function revisePurchaseInvoice(invoiceId: string) {
             .limit(1);
 
           if (product) {
-            const newStock = Math.max(0, (product.currentStock || 0) - parseFloat(item.quantity));
+            const newStock = Math.max(0, parseFloat(product.currentStock || "0") - parseFloat(item.quantity));
             await tx
               .update(products)
-              .set({ currentStock: newStock })
+              .set({ currentStock: String(newStock) })
               .where(eq(products.id, item.productId));
           }
         }
@@ -1563,8 +1561,8 @@ export async function approvePurchaseReturn(id: string) {
         if (item.productId) {
           const [product] = await tx.select({ currentStock: products.currentStock }).from(products).where(and(eq(products.id, item.productId), eq(products.orgId, orgId))).limit(1);
           if (product) {
-            const newStock = Math.max(0, (product.currentStock || 0) - parseFloat(item.quantity));
-            await tx.update(products).set({ currentStock: newStock }).where(eq(products.id, item.productId));
+            const newStock = Math.max(0, parseFloat(product.currentStock || "0") - parseFloat(item.quantity));
+            await tx.update(products).set({ currentStock: String(newStock) }).where(eq(products.id, item.productId));
           }
         }
       }

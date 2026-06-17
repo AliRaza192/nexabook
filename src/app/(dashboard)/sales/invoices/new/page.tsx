@@ -21,6 +21,7 @@ import {
   Search,
   ArrowUpDown,
   Download,
+  MessageCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -67,6 +68,7 @@ import { formatPKR } from "@/lib/utils/number-format";
 interface Customer {
   id: string;
   name: string;
+  phone?: string | null;
 }
 
 interface Product {
@@ -664,6 +666,10 @@ export default function NewInvoicePage() {
                   <DropdownMenuItem onClick={() => handleSave("approve-download")} className="text-blue-600 font-medium">
                     <Download className="h-4 w-4 mr-2" />
                     Approve & Download PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { if (customerId && customers.find(c => c.id === customerId)?.phone) { handleSave("close"); } else { alert("Customer has no phone number"); } }} className="text-green-600 font-medium">
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                    Save & Share WhatsApp
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

@@ -122,6 +122,7 @@ export async function seedInitialCOA() {
 
       // Equity (3000-3999)
       { code: "3000", name: "Owner's Equity", type: "equity", description: "Owner's investment in the business" },
+      { code: "3010", name: "Opening Balance Equity", type: "equity", description: "Contra account for opening balance journal entries" },
       { code: "3100", name: "Retained Earnings", type: "equity", description: "Accumulated profits/losses" },
       { code: "3200", name: "Share Capital", type: "equity", description: "Capital from shares issued" },
       { code: "3300", name: "Additional Paid-in Capital", type: "equity", description: "Capital above par value" },
@@ -184,7 +185,7 @@ export async function seedInitialCOA() {
       "2201": "tax_payable_srb", "2202": "tax_payable_pra", "2203": "tax_payable_kpra", "2204": "tax_payable_bra",
       "2210": "income_tax_payable", "2250": "wht_payable", "2300": "income_tax_payable",
       "2410": "salaries_payable", "2800": "eobi_payable",
-      "3000": "capital", "3100": "retained_earnings",
+      "3000": "capital", "3010": "opening_balance_equity", "3100": "retained_earnings",
       "3500": "current_year_pl",
       "4000": "sales_revenue", "4100": "service_revenue",
       "4300": "other_income", "4400": "inventory_adjustment_income", "4500": "exchange_gain", "4900": "discount_allowed",
@@ -333,6 +334,250 @@ export async function getAccountById(accountId: string) {
     return { success: true, data: account[0] };
   } catch (error) {
     return { success: false, error: "Failed to fetch account" };
+  }
+}
+
+// ==================== OPENING BALANCE ====================
+
+export async function findOpeningBalanceEquityAccount(orgId: string) {
+  const [account] = await db
+    .select()
+    .from(chartOfAccounts)
+    .where(
+      and(
+        eq(chartOfAccounts.orgId, orgId),
+        eq(chartOfAccounts.subType, "opening_balance_equity")
+      )
+    )
+    .limit(1);
+  return account || null;
+}
+
+export async function postOpeningBalance(data: {
+  date: string;
+  description: string;
+  lines: Array<{ accountId: string; debit: string; credit: string }>;
+}) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    // Find Opening Balance Equity account
+    const obeAccount = await findOpeningBalanceEquityAccount(orgId);
+    if (!obeAccount) {
+      return {
+        success: false,
+        error:
+          "Opening Balance Equity account not found. Please seed Chart of Accounts first.",
+      };
+    }
+
+    // Calculate totals
+    const totalDebit = data.lines.reduce(
+      (sum, l) => sum + parseFloat(l.debit || "0"),
+      0
+    );
+    const totalCredit = data.lines.reduce(
+      (sum, l) => sum + parseFloat(l.credit || "0"),
+      0
+    );
+
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      return {
+        success: false,
+        error: `Opening entry is not balanced. Total Debit: ${totalDebit.toFixed(
+          2
+        )}, Total Credit: ${totalCredit.toFixed(2)}`,
+      };
+    }
+
+    // Generate entry number
+    const entryCount = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.orgId, orgId));
+
+    const entryNumber = `OB-${String(entryCount.length + 1).padStart(5, "0")}`;
+
+    // Create journal entry
+    const [journalEntry] = await db
+      .insert(journalEntries)
+      .values({
+        orgId,
+        entryNumber,
+        entryDate: new Date(data.date),
+        referenceType: "opening_balance",
+        description: data.description || "Opening Balance Entry",
+        status: "posted",
+        postedAt: new Date(),
+      })
+      .returning();
+
+    // Create journal entry lines
+    const allLines = [...data.lines];
+    // Add the contra line to Opening Balance Equity
+    if (totalDebit > 0) {
+      allLines.push({
+        accountId: obeAccount.id,
+        debit: "0",
+        credit: totalDebit.toFixed(2),
+      });
+    }
+
+    for (const line of allLines) {
+      await db.insert(journalEntryLines).values({
+        orgId,
+        journalEntryId: journalEntry.id,
+        accountId: line.accountId,
+        description: data.description || "Opening Balance",
+        debitAmount: line.debit || "0",
+        creditAmount: line.credit || "0",
+      });
+    }
+
+    await db.insert(auditLogs).values({
+      orgId,
+      userId: (await auth()).userId || "system",
+      action: "OPENING_BALANCE_POSTED",
+      entityType: "journal_entry",
+      entityId: journalEntry.id,
+      changes: JSON.stringify({
+        entryNumber,
+        description: data.description,
+        totalDebit,
+        totalCredit,
+      }),
+    });
+
+    revalidatePath("/accounts/opening-balance");
+    revalidatePath("/reports/trial-balance");
+
+    return {
+      success: true,
+      message: "Opening balance posted successfully",
+      entryNumber,
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to post opening balance" };
+  }
+}
+
+export async function bulkImportOpeningBalances(
+  rows: Array<{ accountCode: string; debit: string; credit: string }>
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const obeAccount = await findOpeningBalanceEquityAccount(orgId);
+    if (!obeAccount) {
+      return {
+        success: false,
+        error:
+          "Opening Balance Equity account not found. Please seed Chart of Accounts first.",
+      };
+    }
+
+    // Resolve account codes to IDs
+    const lines: Array<{ accountId: string; debit: string; credit: string }> =
+      [];
+    const errors: Array<{ row: number; error: string }> = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const [account] = await db
+        .select({ id: chartOfAccounts.id })
+        .from(chartOfAccounts)
+        .where(
+          and(
+            eq(chartOfAccounts.orgId, orgId),
+            eq(chartOfAccounts.code, row.accountCode)
+          )
+        )
+        .limit(1);
+
+      if (!account) {
+        errors.push({
+          row: i + 1,
+          error: `Account code "${row.accountCode}" not found`,
+        });
+        continue;
+      }
+
+      lines.push({ accountId: account.id, debit: row.debit, credit: row.credit });
+    }
+
+    if (errors.length > 0) {
+      return { success: false, errors };
+    }
+
+    if (lines.length === 0) {
+      return { success: false, error: "No valid rows to import" };
+    }
+
+    // Now post as one opening balance entry
+    const totalDebit = lines.reduce(
+      (sum, l) => sum + parseFloat(l.debit || "0"),
+      0
+    );
+    const totalCredit = lines.reduce(
+      (sum, l) => sum + parseFloat(l.credit || "0"),
+      0
+    );
+
+    // Auto-balance with Opening Balance Equity
+    const diff = totalDebit - totalCredit;
+    if (Math.abs(diff) > 0.01) {
+      lines.push({
+        accountId: obeAccount.id,
+        debit: diff < 0 ? Math.abs(diff).toFixed(2) : "0",
+        credit: diff > 0 ? diff.toFixed(2) : "0",
+      });
+    }
+
+    const entryCount = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.orgId, orgId));
+
+    const entryNumber = `OB-BULK-${String(entryCount.length + 1).padStart(
+      5,
+      "0"
+    )}`;
+
+    const [journalEntry] = await db
+      .insert(journalEntries)
+      .values({
+        orgId,
+        entryNumber,
+        entryDate: new Date(),
+        referenceType: "opening_balance",
+        description: "Bulk Opening Balance Import",
+        status: "posted",
+        postedAt: new Date(),
+      })
+      .returning();
+
+    for (const line of lines) {
+      await db.insert(journalEntryLines).values({
+        orgId,
+        journalEntryId: journalEntry.id,
+        accountId: line.accountId,
+        description: "Opening Balance",
+        debitAmount: line.debit || "0",
+        creditAmount: line.credit || "0",
+      });
+    }
+
+    revalidatePath("/accounts/opening-balance");
+
+    return {
+      success: true,
+      message: `Imported ${lines.length} account balances as ${entryNumber}`,
+      entryNumber,
+    };
+  } catch (error) {
+    return { success: false, error: "Failed to import opening balances" };
   }
 }
 

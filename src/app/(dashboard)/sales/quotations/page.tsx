@@ -5,13 +5,16 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import {
   FileText, Plus, Search, Filter, Loader2, Eye, Edit, Trash2, ArrowRightCircle,
-  TrendingUp, CheckCircle, Clock, RotateCw
+  TrendingUp, CheckCircle, Clock, RotateCw, MessageCircle, Download, Mail
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { getQuotations, deleteQuotation, convertQuotationToOrder } from "@/lib/actions/sales";
 import { formatPKR } from "@/lib/utils/number-format";
 
@@ -67,6 +70,11 @@ export default function QuotationsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [stats, setStats] = useState({ total: 0, accepted: 0, pending: 0, converted: 0 });
 
+  // WhatsApp dialog state
+  const [whatsappDialogOpen, setWhatsappDialogOpen] = useState(false);
+  const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
+  const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -98,6 +106,51 @@ export default function QuotationsPage() {
     const res = await convertQuotationToOrder(id);
     if (res.success) { alert("Quotation converted to sale order"); loadData(); }
     else alert(res.error || "Failed to convert");
+  };
+
+  // WhatsApp Share
+  const handleWhatsAppShare = (quotation: Quotation) => {
+    setSelectedQuotation(quotation);
+    setWhatsappDialogOpen(true);
+  };
+
+  const confirmSendWhatsApp = async () => {
+    if (!selectedQuotation) return;
+    const customerName = selectedQuotation.customer?.name || "Customer";
+    const amount = selectedQuotation.netAmount || "0";
+    setSendingWhatsapp(true);
+    try {
+      const response = await fetch('/api/send-quotation-whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quotationId: selectedQuotation.id,
+          phoneNumber: "",
+          customerName,
+          quotationNumber: selectedQuotation.quotationNumber,
+          netAmount: amount,
+          expiryDate: selectedQuotation.expiryDate,
+          orgName: "Business",
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        if (result.method === 'link') {
+          window.open(result.waLink, '_blank');
+        } else {
+          alert('Quotation sent via WhatsApp successfully!');
+        }
+        setWhatsappDialogOpen(false);
+      } else {
+        alert(`Failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error("Error sending WhatsApp:", error);
+    } finally {
+      setSendingWhatsapp(false);
+    }
   };
 
   const formatCurrency = (val: number) => formatPKR(val, 'south-asian');
@@ -169,6 +222,7 @@ export default function QuotationsPage() {
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Eye className="h-3.5 w-3.5" /></Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Edit className="h-3.5 w-3.5" /></Button>
                             {q.status !== 'converted' && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-green-600" onClick={() => handleConvert(q.id)} title="Convert to Order"><ArrowRightCircle className="h-3.5 w-3.5" /></Button>}
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-green-600" onClick={() => handleWhatsAppShare(q)} title="Share on WhatsApp"><MessageCircle className="h-3.5 w-3.5" /></Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-600" onClick={() => handleDelete(q.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
                           </div>
                         </td>
@@ -181,6 +235,45 @@ export default function QuotationsPage() {
           )}
         </CardContent>
       </Card>
+      {/* WhatsApp Confirmation Dialog */}
+      <Dialog open={whatsappDialogOpen} onOpenChange={setWhatsappDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Share via WhatsApp</DialogTitle>
+            <DialogDescription>
+              Send quotation #{selectedQuotation?.quotationNumber} to{' '}
+              <strong className="text-nexabook-900">{selectedQuotation?.customer?.name || "Customer"}</strong>
+              ?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setWhatsappDialogOpen(false)}
+              disabled={sendingWhatsapp}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSendWhatsApp}
+              disabled={sendingWhatsapp}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {sendingWhatsapp ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Opening...
+                </>
+              ) : (
+                <>
+                  <MessageCircle className="mr-2 h-4 w-4" />
+                  Open WhatsApp
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

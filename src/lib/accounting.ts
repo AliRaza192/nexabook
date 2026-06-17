@@ -5,7 +5,7 @@ import {
   chartOfAccounts,
   payrollRuns,
 } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 
 // ─────────────────────────────────────────
 // VALIDATION HELPERS
@@ -249,20 +249,24 @@ export async function postPayrollToLedger(
   totalIncomeTax: number,
   userId: string
 ): Promise<string> {
-  const findAccount = async (subType: string) => {
-    const [acc] = await db
-      .select()
-      .from(chartOfAccounts)
-      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, subType)))
-      .limit(1);
+  const subTypes = ["salary_expense", "salaries_payable", "eobi_payable", "income_tax_payable"] as const;
+
+  const accounts = await db
+    .select()
+    .from(chartOfAccounts)
+    .where(and(eq(chartOfAccounts.orgId, orgId), inArray(chartOfAccounts.subType, subTypes)));
+
+  const accountMap = new Map(accounts.map((a) => [a.subType, a]));
+  const getAccount = (subType: string) => {
+    const acc = accountMap.get(subType);
     if (!acc) throw new Error(`Account not found: ${subType}`);
     return acc;
   };
 
-  const salaryExpense   = await findAccount("salary_expense");
-  const salariesPayable = await findAccount("salaries_payable");
-  const eobiPayable     = await findAccount("eobi_payable");
-  const incomeTaxPayable = await findAccount("income_tax_payable");
+  const salaryExpense   = getAccount("salary_expense");
+  const salariesPayable = getAccount("salaries_payable");
+  const eobiPayable     = getAccount("eobi_payable");
+  const incomeTaxPayable = getAccount("income_tax_payable");
 
   const year = new Date().getFullYear();
   const [countResult] = await db

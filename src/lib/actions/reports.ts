@@ -320,31 +320,44 @@ export async function getBalanceSheetReport(asOfDate: string) {
       .from(chartOfAccounts)
       .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.type, 'equity')));
 
-    // Calculate account balances from journal entries
-    const getAccountBalance = async (accountId: string) => {
-      const [result] = await db
-        .select({
-          totalDebit: sql<string>`SUM(${journalEntryLines.debitAmount})`,
-          totalCredit: sql<string>`SUM(${journalEntryLines.creditAmount})`,
-        })
-        .from(journalEntryLines)
-        .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
-        .where(and(
-          eq(journalEntryLines.accountId, accountId),
-          eq(journalEntryLines.orgId, orgId),
-          lte(journalEntries.entryDate, reportDate)
-        ));
+    // Batch query all account balances in a single GROUP BY query
+    const allAccountIds = [
+      ...assetAccounts.map(a => a.id),
+      ...liabilityAccounts.map(a => a.id),
+      ...equityAccounts.map(a => a.id),
+    ];
 
-      const debit = result?.totalDebit ? parseFloat(result.totalDebit) : 0;
-      const credit = result?.totalCredit ? parseFloat(result.totalCredit) : 0;
-      return debit - credit; // For asset accounts
+    const balanceRows = allAccountIds.length > 0 ? await db
+      .select({
+        accountId: journalEntryLines.accountId,
+        totalDebit: sql<string>`SUM(${journalEntryLines.debitAmount})`,
+        totalCredit: sql<string>`SUM(${journalEntryLines.creditAmount})`,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(and(
+        inArray(journalEntryLines.accountId, allAccountIds),
+        eq(journalEntryLines.orgId, orgId),
+        lte(journalEntries.entryDate, reportDate)
+      ))
+      .groupBy(journalEntryLines.accountId) : [];
+
+    const balanceMap = new Map<string, number>();
+    for (const row of balanceRows) {
+      const debit = row.totalDebit ? parseFloat(row.totalDebit) : 0;
+      const credit = row.totalCredit ? parseFloat(row.totalCredit) : 0;
+      balanceMap.set(row.accountId, debit - credit);
+    }
+
+    const getAccountBalance = (accountId: string): number => {
+      return balanceMap.get(accountId) ?? 0;
     };
 
     // Calculate total assets
     let totalAssets = 0;
     const assetBalances = [];
     for (const account of assetAccounts) {
-      const balance = await getAccountBalance(account.id);
+      const balance = getAccountBalance(account.id);
       totalAssets += balance;
       assetBalances.push({ ...account, balance });
     }
@@ -353,7 +366,7 @@ export async function getBalanceSheetReport(asOfDate: string) {
     let totalLiabilities = 0;
     const liabilityBalances = [];
     for (const account of liabilityAccounts) {
-      const balance = await getAccountBalance(account.id);
+      const balance = getAccountBalance(account.id);
       totalLiabilities += Math.abs(balance); // Liabilities are credit balances
       liabilityBalances.push({ ...account, balance: Math.abs(balance) });
     }
@@ -362,7 +375,7 @@ export async function getBalanceSheetReport(asOfDate: string) {
     let totalEquity = 0;
     const equityBalances = [];
     for (const account of equityAccounts) {
-      const balance = await getAccountBalance(account.id);
+      const balance = getAccountBalance(account.id);
       totalEquity += Math.abs(balance);
       equityBalances.push({ ...account, balance: Math.abs(balance) });
     }
@@ -554,27 +567,40 @@ export async function getTrialBalanceReport(asOfDate: string) {
       .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.isActive, true)))
       .orderBy(chartOfAccounts.code);
 
-    // Calculate balances for each account
+    // Calculate balances for each account using single GROUP BY query
     const accountBalances = [];
     let totalDebit = 0;
     let totalCredit = 0;
 
-    for (const account of accounts) {
-      const [result] = await db
-        .select({
-          totalDebit: sql<string>`SUM(${journalEntryLines.debitAmount})`,
-          totalCredit: sql<string>`SUM(${journalEntryLines.creditAmount})`,
-        })
-        .from(journalEntryLines)
-        .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
-        .where(and(
-          eq(journalEntryLines.accountId, account.id),
-          eq(journalEntryLines.orgId, orgId),
-          lte(journalEntries.entryDate, reportDate)
-        ));
+    const accountIds = accounts.map(a => a.id);
 
-      const debit = result?.totalDebit ? parseFloat(result.totalDebit) : 0;
-      const credit = result?.totalCredit ? parseFloat(result.totalCredit) : 0;
+    const balanceResults = await db
+      .select({
+        accountId: journalEntryLines.accountId,
+        totalDebit: sql<string>`SUM(${journalEntryLines.debitAmount})`,
+        totalCredit: sql<string>`SUM(${journalEntryLines.creditAmount})`,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(and(
+        eq(journalEntryLines.orgId, orgId),
+        inArray(journalEntryLines.accountId, accountIds),
+        lte(journalEntries.entryDate, reportDate)
+      ))
+      .groupBy(journalEntryLines.accountId);
+
+    const balanceMap = new Map<string, { debit: number; credit: number }>();
+    for (const row of balanceResults) {
+      balanceMap.set(row.accountId, {
+        debit: row.totalDebit ? parseFloat(row.totalDebit) : 0,
+        credit: row.totalCredit ? parseFloat(row.totalCredit) : 0,
+      });
+    }
+
+    for (const account of accounts) {
+      const result = balanceMap.get(account.id);
+      const debit = result?.debit ?? 0;
+      const credit = result?.credit ?? 0;
       const balance = debit - credit;
 
       if (balance !== 0) {
@@ -1359,25 +1385,48 @@ export async function getBomCostReport() {
       .from(manufacturingBoms)
       .where(and(eq(manufacturingBoms.orgId, orgId), eq(manufacturingBoms.isActive, true)));
 
-    const bomCosts = await Promise.all(boms.map(async (bom) => {
-      const components = await db
-        .select({
-          componentId: bomItems.componentId,
-          quantityRequired: bomItems.quantityRequired,
-        })
-        .from(bomItems)
-        .where(eq(bomItems.bomId, bom.id));
+    const bomIds = boms.map((b) => b.id);
 
+    const allComponents = await db
+      .select({
+        bomId: bomItems.bomId,
+        componentId: bomItems.componentId,
+        quantityRequired: bomItems.quantityRequired,
+      })
+      .from(bomItems)
+      .where(inArray(bomItems.bomId, bomIds));
+
+    const componentIds = [...new Set(allComponents.map((c) => c.componentId))];
+
+    const productsMap = new Map<string, string>();
+    if (componentIds.length > 0) {
+      const productRows = await db
+        .select({ id: products.id, costPrice: products.costPrice })
+        .from(products)
+        .where(inArray(products.id, componentIds));
+      for (const p of productRows) {
+        productsMap.set(p.id, p.costPrice || "0");
+      }
+    }
+
+    const componentsByBom = new Map<string, typeof allComponents>();
+    for (const comp of allComponents) {
+      const list = componentsByBom.get(comp.bomId);
+      if (list) list.push(comp);
+      else componentsByBom.set(comp.bomId, [comp]);
+    }
+
+    const bomCosts = boms.map((bom) => {
+      const components = componentsByBom.get(bom.id) || [];
       let totalCost = 0;
       for (const comp of components) {
-        const [product] = await db.select({ costPrice: products.costPrice }).from(products).where(eq(products.id, comp.componentId)).limit(1);
-        if (product?.costPrice) {
-          totalCost += parseFloat(comp.quantityRequired || "0") * parseFloat(product.costPrice);
+        const costPrice = productsMap.get(comp.componentId);
+        if (costPrice) {
+          totalCost += parseFloat(comp.quantityRequired || "0") * parseFloat(costPrice);
         }
       }
-
       return { ...bom, totalCost, componentCount: components.length };
-    }));
+    });
 
     return { success: true, data: bomCosts };
   } catch (error) {
@@ -1622,10 +1671,11 @@ export async function getCustomerBalanceReport(
       .orderBy(customers.name);
 
     // For each customer, calculate: totalInvoiced, totalReceived, balance
-    const result = await Promise.all(
-      customerRows.map(async (c) => {
-        const [inv] = await db
+    const customerIds = customerRows.map(c => c.id);
+    const invoiceAggs = customerIds.length
+      ? await db
           .select({
+            customerId: invoices.customerId,
             total: sql<number>`COALESCE(SUM(${invoices.netAmount}),0)`,
             received: sql<number>`COALESCE(SUM(${invoices.receivedAmount}),0)`,
           })
@@ -1633,25 +1683,30 @@ export async function getCustomerBalanceReport(
           .where(
             and(
               eq(invoices.orgId, orgId),
-              eq(invoices.customerId, c.id),
+              inArray(invoices.customerId, customerIds),
               lte(invoices.issueDate, asOf)
             )
-          );
+          )
+          .groupBy(invoices.customerId)
+      : [];
 
-        const totalInvoiced = parseFloat(String(inv.total));
-        const totalReceived = parseFloat(String(inv.received));
-        const openingBal = parseFloat(c.openingBalance || "0");
-        const balance = openingBal + totalInvoiced - totalReceived;
+    const aggMap = new Map(invoiceAggs.map(a => [a.customerId, a]));
 
-        return {
-          ...c,
-          totalInvoiced,
-          totalReceived,
-          openingBalance: openingBal,
-          balance,
-        };
-      })
-    );
+    const result = customerRows.map((c) => {
+      const agg = aggMap.get(c.id);
+      const totalInvoiced = parseFloat(String(agg?.total ?? "0"));
+      const totalReceived = parseFloat(String(agg?.received ?? "0"));
+      const openingBal = parseFloat(c.openingBalance || "0");
+      const balance = openingBal + totalInvoiced - totalReceived;
+
+      return {
+        ...c,
+        totalInvoiced,
+        totalReceived,
+        openingBalance: openingBal,
+        balance,
+      };
+    });
 
     const grandTotal = result.reduce(
       (acc, r) => ({
@@ -1901,42 +1956,53 @@ export async function getVendorBalanceReport(
       .where(and(...conditions))
       .orderBy(vendors.name);
 
-    const result = await Promise.all(
-      vendorRows.map(async (v) => {
-        const [pi] = await db
-          .select({
-            total: sql<number>`COALESCE(SUM(${purchaseInvoices.netAmount}),0)`,
-          })
-          .from(purchaseInvoices)
-          .where(
-            and(
-              eq(purchaseInvoices.orgId, orgId),
-              eq(purchaseInvoices.vendorId, v.id),
-              lte(purchaseInvoices.date, asOf)
+    const vendorIds = vendorRows.map(v => v.id);
+    const [piAggs, vpAggs] = await Promise.all([
+      vendorIds.length
+        ? db
+            .select({
+              vendorId: purchaseInvoices.vendorId,
+              total: sql<number>`COALESCE(SUM(${purchaseInvoices.netAmount}),0)`,
+            })
+            .from(purchaseInvoices)
+            .where(
+              and(
+                eq(purchaseInvoices.orgId, orgId),
+                inArray(purchaseInvoices.vendorId, vendorIds),
+                lte(purchaseInvoices.date, asOf)
+              )
             )
-          );
-
-        const [vp] = await db
-          .select({
-            total: sql<number>`COALESCE(SUM(${vendorPayments.amount}),0)`,
-          })
-          .from(vendorPayments)
-          .where(
-            and(
-              eq(vendorPayments.orgId, orgId),
-              eq(vendorPayments.vendorId, v.id),
-              lte(vendorPayments.paymentDate, asOf)
+            .groupBy(purchaseInvoices.vendorId)
+        : [],
+      vendorIds.length
+        ? db
+            .select({
+              vendorId: vendorPayments.vendorId,
+              total: sql<number>`COALESCE(SUM(${vendorPayments.amount}),0)`,
+            })
+            .from(vendorPayments)
+            .where(
+              and(
+                eq(vendorPayments.orgId, orgId),
+                inArray(vendorPayments.vendorId, vendorIds),
+                lte(vendorPayments.paymentDate, asOf)
+              )
             )
-          );
+            .groupBy(vendorPayments.vendorId)
+        : [],
+    ]);
 
-        const totalBilled = parseFloat(String(pi.total));
-        const totalPaid = parseFloat(String(vp.total));
-        const openingBal = parseFloat(v.openingBalance || "0");
-        const balance = openingBal + totalBilled - totalPaid;
+    const piMap = new Map(piAggs.map(a => [a.vendorId, a]));
+    const vpMap = new Map(vpAggs.map(a => [a.vendorId, a]));
 
-        return { ...v, totalBilled, totalPaid, openingBalance: openingBal, balance };
-      })
-    );
+    const result = vendorRows.map((v) => {
+      const totalBilled = parseFloat(String(piMap.get(v.id)?.total ?? "0"));
+      const totalPaid = parseFloat(String(vpMap.get(v.id)?.total ?? "0"));
+      const openingBal = parseFloat(v.openingBalance || "0");
+      const balance = openingBal + totalBilled - totalPaid;
+
+      return { ...v, totalBilled, totalPaid, openingBalance: openingBal, balance };
+    });
 
     const grandTotal = result.reduce(
       (acc, r) => ({
@@ -2080,58 +2146,69 @@ export async function getAccountStatementReport(
       .where(and(...accConditions))
       .orderBy(chartOfAccounts.code);
 
-    const result = await Promise.all(
-      accounts.map(async (acc) => {
-        const [opening] = await db
-          .select({
-            debit: sql<number>`COALESCE(SUM(${journalEntryLines.debitAmount}::numeric),0)`,
-            credit: sql<number>`COALESCE(SUM(${journalEntryLines.creditAmount}::numeric),0)`,
-          })
-          .from(journalEntryLines)
-          .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
-          .where(
-            and(
-              eq(journalEntryLines.orgId, orgId),
-              eq(journalEntryLines.accountId, acc.id),
-              lte(journalEntries.entryDate, new Date(from.getTime() - 1))
-            )
-          );
+    const accountIds = accounts.map(a => a.id);
 
-        const [period] = await db
-          .select({
-            debit: sql<number>`COALESCE(SUM(${journalEntryLines.debitAmount}::numeric),0)`,
-            credit: sql<number>`COALESCE(SUM(${journalEntryLines.creditAmount}::numeric),0)`,
-          })
-          .from(journalEntryLines)
-          .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
-          .where(
-            and(
-              eq(journalEntryLines.orgId, orgId),
-              eq(journalEntryLines.accountId, acc.id),
-              gte(journalEntries.entryDate, from),
-              lte(journalEntries.entryDate, to)
-            )
-          );
+    const [openingRows, periodRows] = await Promise.all([
+      db
+        .select({
+          accountId: journalEntryLines.accountId,
+          debit: sql<number>`COALESCE(SUM(${journalEntryLines.debitAmount}::numeric),0)`,
+          credit: sql<number>`COALESCE(SUM(${journalEntryLines.creditAmount}::numeric),0)`,
+        })
+        .from(journalEntryLines)
+        .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(journalEntryLines.orgId, orgId),
+            inArray(journalEntryLines.accountId, accountIds),
+            lte(journalEntries.entryDate, new Date(from.getTime() - 1))
+          )
+        )
+        .groupBy(journalEntryLines.accountId),
+      db
+        .select({
+          accountId: journalEntryLines.accountId,
+          debit: sql<number>`COALESCE(SUM(${journalEntryLines.debitAmount}::numeric),0)`,
+          credit: sql<number>`COALESCE(SUM(${journalEntryLines.creditAmount}::numeric),0)`,
+        })
+        .from(journalEntryLines)
+        .leftJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+        .where(
+          and(
+            eq(journalEntryLines.orgId, orgId),
+            inArray(journalEntryLines.accountId, accountIds),
+            gte(journalEntries.entryDate, from),
+            lte(journalEntries.entryDate, to)
+          )
+        )
+        .groupBy(journalEntryLines.accountId),
+    ]);
 
-        const openingBal =
-          parseFloat(String(opening.debit)) - parseFloat(String(opening.credit));
-        const periodDebit = parseFloat(String(period.debit));
-        const periodCredit = parseFloat(String(period.credit));
-        const closingBal = openingBal + periodDebit - periodCredit;
+    const openingMap = new Map(openingRows.map(r => [r.accountId, r]));
+    const periodMap = new Map(periodRows.map(r => [r.accountId, r]));
 
-        return {
-          id: acc.id,
-          code: acc.code,
-          name: acc.name,
-          type: acc.type,
-          subType: acc.subType,
-          openingBalance: openingBal,
-          periodDebit,
-          periodCredit,
-          closingBalance: closingBal,
-        };
-      })
-    );
+    const result = accounts.map((acc) => {
+      const opening = openingMap.get(acc.id) ?? { debit: 0, credit: 0 };
+      const period = periodMap.get(acc.id) ?? { debit: 0, credit: 0 };
+
+      const openingBal =
+        parseFloat(String(opening.debit)) - parseFloat(String(opening.credit));
+      const periodDebit = parseFloat(String(period.debit));
+      const periodCredit = parseFloat(String(period.credit));
+      const closingBal = openingBal + periodDebit - periodCredit;
+
+      return {
+        id: acc.id,
+        code: acc.code,
+        name: acc.name,
+        type: acc.type,
+        subType: acc.subType,
+        openingBalance: openingBal,
+        periodDebit,
+        periodCredit,
+        closingBalance: closingBal,
+      };
+    });
 
     // Filter out zero-activity accounts
     const active = result.filter(
@@ -2235,7 +2312,7 @@ export async function getProductSalesReport(
     // Aggregate by product
     const productMap: Record<string, any> = {};
     for (const r of rows) {
-      const key = r.productId || r.productName;
+      const key = r.productId || r.productName || "Unknown";
       if (!productMap[key]) {
         productMap[key] = {
           productId: r.productId,

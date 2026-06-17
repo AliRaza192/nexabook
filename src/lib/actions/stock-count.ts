@@ -333,7 +333,7 @@ export async function completeStockCount(stockCountId: string) {
       // Update product stock
       await db
         .update(products)
-        .set({ currentStock: countedQty })
+        .set({ currentStock: String(countedQty) })
         .where(eq(products.id, item.productId));
 
       // Create stock movement

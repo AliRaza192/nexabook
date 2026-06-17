@@ -46,6 +46,7 @@ async function seedDefaultChartOfAccounts(orgId: string): Promise<void> {
 
     // Equity
     { code: "3000", name: "Owner's Equity", type: "equity", subType: "capital", description: "Owner's investment in the business" },
+    { code: "3010", name: "Opening Balance Equity", type: "equity", subType: "opening_balance_equity", description: "Contra account for opening balance journal entries" },
     { code: "3100", name: "Retained Earnings", type: "equity", subType: "retained_earnings", description: "Accumulated profits/losses" },
     { code: "3200", name: "Current Year P&L", type: "equity", subType: "current_year_pl", description: "Current year profit or loss" },
 

@@ -19,9 +19,11 @@ interface ReportFilterBarProps {
   showCategoryFilter?: boolean;
   showCustomerFilter?: boolean;
   showVendorFilter?: boolean;
+  showProductFilter?: boolean;
   categories?: Array<{ id: string; name: string }>;
   customers?: Array<{ id: string; name: string }>;
   vendors?: Array<{ id: string; name: string }>;
+  productsList?: Array<{ id: string; name: string }>;
 }
 
 export interface ReportFilters {
@@ -30,6 +32,7 @@ export interface ReportFilters {
   category?: string;
   customerId?: string;
   vendorId?: string;
+  productId?: string;
 }
 
 export default function ReportFilterBar({

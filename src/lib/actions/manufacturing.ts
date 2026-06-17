@@ -510,7 +510,7 @@ export async function completeJobOrder(jobOrderId: string) {
       const availableStock = comp.component?.currentStock || 0;
       const required = parseFloat(comp.requiredQty);
       
-      if (availableStock < required) {
+      if (Number(availableStock) < required) {
         return { 
           success: false, 
           error: `Insufficient stock for ${comp.component?.name || 'component'}. Required: ${required}, Available: ${availableStock}` 
@@ -740,7 +740,7 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
     if (!finishedGood) return { success: false, error: "Finished good not found" };
 
     const currentStock = finishedGood.currentStock || 0;
-    if (currentStock < data.quantity) {
+    if (Number(currentStock) < data.quantity) {
       return { success: false, error: `Insufficient stock. Available: ${currentStock}, Required: ${data.quantity}` };
     }
 

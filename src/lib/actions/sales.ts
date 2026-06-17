@@ -27,11 +27,12 @@ import {
   settlements,
   settlementLines,
   organizations,
+  profiles,
 } from "@/db/schema";
-import { eq, and, or, ilike, desc } from "drizzle-orm";
+import { eq, and, or, ilike, desc, gte, lte, count, sum } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, requireRole } from "./shared";
 import { validateJournalBalance } from "../accounting";
 import { submitInvoiceToFBR } from "../fbr-api";
 import {
@@ -48,6 +49,8 @@ export interface CustomerFormData {
   phone?: string;
   address?: string;
   city?: string;
+  region?: string;
+  area?: string;
   ntn?: string;
   strn?: string;
   openingBalance?: string;
@@ -61,6 +64,8 @@ export interface CustomerWithStats {
   phone: string | null;
   address: string | null;
   city: string | null;
+  region: string | null;
+  area: string | null;
   ntn: string | null;
   strn: string | null;
   balance: string | null;
@@ -154,6 +159,8 @@ export async function createCustomer(data: CustomerFormData) {
         phone: data.phone || null,
         address: data.address || null,
         city: data.city || null,
+        region: data.region || null,
+        area: data.area || null,
         ntn: data.ntn || null,
         strn: data.strn || null,
         openingBalance: data.openingBalance || "0",
@@ -191,6 +198,8 @@ export async function updateCustomer(
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.address !== undefined) updateData.address = data.address;
     if (data.city !== undefined) updateData.city = data.city;
+    if (data.region !== undefined) updateData.region = data.region;
+    if (data.area !== undefined) updateData.area = data.area;
     if (data.ntn !== undefined) updateData.ntn = data.ntn;
     if (data.strn !== undefined) updateData.strn = data.strn;
     if (data.creditLimit !== undefined)
@@ -236,6 +245,120 @@ export async function deleteCustomer(customerId: string) {
     return { success: true, message: "Customer deleted successfully" };
   } catch (error) {
     return { success: false, error: "Failed to delete customer" };
+  }
+}
+
+// ==================== SALES TEAM ACTIONS ====================
+
+export async function getSalesTeam() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const team = await db
+      .select({
+        id: profiles.id,
+        userId: profiles.userId,
+        fullName: profiles.fullName,
+        email: profiles.email,
+        phone: profiles.phone,
+        role: profiles.role,
+        department: profiles.department,
+        designation: profiles.designation,
+        territory: profiles.territory,
+        region: profiles.region,
+        isActive: profiles.isActive,
+      })
+      .from(profiles)
+      .where(and(eq(profiles.orgId, orgId), eq(profiles.isActive, true)))
+      .orderBy(profiles.fullName);
+
+    return { success: true, data: team };
+  } catch (error) {
+    return { success: false, error: "Failed to load sales team" };
+  }
+}
+
+export async function updateSalesTeamMember(
+  profileId: string,
+  data: { territory?: string; region?: string }
+) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    await db
+      .update(profiles)
+      .set({ territory: data.territory, region: data.region, updatedAt: new Date() })
+      .where(and(eq(profiles.id, profileId), eq(profiles.orgId, orgId)));
+
+    revalidatePath("/sales/team");
+    return { success: true, message: "Team member updated" };
+  } catch (error) {
+    return { success: false, error: "Failed to update team member" };
+  }
+}
+
+export async function getGeographySalesReport(filters: {
+  dateFrom?: string;
+  dateTo?: string;
+  groupBy: "region" | "area";
+}) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const conditions = [eq(invoices.orgId, orgId), eq(invoices.isPosted, true)];
+
+    if (filters.dateFrom) {
+      conditions.push(gte(invoices.issueDate, new Date(filters.dateFrom)));
+    }
+    if (filters.dateTo) {
+      conditions.push(lte(invoices.issueDate, new Date(filters.dateTo)));
+    }
+
+    const data = await db
+      .select({
+        customerId: invoices.customerId,
+        customerName: customers.name,
+        region: customers.region,
+        area: customers.area,
+        invoiceCount: count(invoices.id),
+        totalAmount: sum(invoices.netAmount),
+      })
+      .from(invoices)
+      .innerJoin(customers, eq(invoices.customerId, customers.id))
+      .where(and(...conditions))
+      .groupBy(
+        invoices.customerId,
+        customers.name,
+        customers.region,
+        customers.area
+      )
+      .orderBy(
+        filters.groupBy === "region" ? customers.region : customers.area
+      );
+
+    // Group by region or area
+    const grouped: Record<string, {
+      customers: typeof data;
+      totalSales: number;
+      invoiceCount: number;
+    }> = {};
+
+    for (const row of data) {
+      const key = filters.groupBy === "region" ? (row.region || "Unknown") : (row.area || "Unknown");
+      if (!grouped[key]) {
+        grouped[key] = { customers: [], totalSales: 0, invoiceCount: 0 };
+      }
+      grouped[key].customers.push(row);
+      grouped[key].totalSales += Number(row.totalAmount);
+      grouped[key].invoiceCount += Number(row.invoiceCount);
+    }
+
+    return { success: true, data: grouped };
+  } catch (error) {
+    return { success: false, error: "Failed to load geography report" };
   }
 }
 
@@ -773,6 +896,9 @@ export async function approveInvoice(invoiceId: string) {
               referenceType: "invoice",
               referenceId: invoiceId,
               referenceNumber: invoice.invoiceNumber,
+              runningBalance: (
+                parseFloat(product.currentStock || "0") - baseQuantity
+              ).toFixed(2),
             });
           }
         }

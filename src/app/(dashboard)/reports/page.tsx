@@ -61,6 +61,7 @@ const reportCategories: ReportCategory[] = [
       { name: "Aged Receivables", href: "/reports/aged-receivables", description: "Outstanding customer balances by age" },
       { name: "Sales by Month", href: "/reports/sales-by-month", description: "Monthly sales trends" },
       { name: "Product-wise Profit", href: "/reports/product-profit", description: "Profitability by product" },
+      { name: "Sales by Geography", href: "/reports/sales-by-geography", description: "Sales performance by region and area" },
     ],
   },
   {

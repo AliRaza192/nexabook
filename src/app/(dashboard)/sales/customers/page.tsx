@@ -40,6 +40,8 @@ interface Customer {
   phone: string | null;
   address: string | null;
   city: string | null;
+  region: string | null;
+  area: string | null;
   ntn: string | null;
   strn: string | null;
   balance: string | null;
@@ -62,6 +64,8 @@ function NewCustomerForm({
     phone: "",
     address: "",
     city: "",
+    region: "",
+    area: "",
     ntn: "",
     strn: "",
     openingBalance: "0",
@@ -117,6 +121,26 @@ function NewCustomerForm({
             value={formData.city || ""}
             onChange={(e) => setFormData({ ...formData, city: e.target.value })}
             placeholder="e.g., Karachi"
+          />
+        </div>
+
+        {/* Region */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-nexabook-900">Region</label>
+          <Input
+            value={formData.region || ""}
+            onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+            placeholder="e.g., North, South, Central"
+          />
+        </div>
+
+        {/* Area */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-nexabook-900">Area</label>
+          <Input
+            value={formData.area || ""}
+            onChange={(e) => setFormData({ ...formData, area: e.target.value })}
+            placeholder="e.g., Gulshan, Clifton, Saddar"
           />
         </div>
 
@@ -380,12 +404,10 @@ export default function CustomersPage() {
                             <p className="font-medium text-nexabook-900 text-sm">
                               {customer.name}
                             </p>
-                            {customer.city && (
-                              <div className="flex items-center gap-1 text-xs text-nexabook-500">
-                                <MapPin className="h-3 w-3" />
-                                {customer.city}
-                              </div>
-                            )}
+                            <div className="flex items-center gap-1 text-xs text-nexabook-500">
+                              <MapPin className="h-3 w-3" />
+                              {[customer.city, customer.region, customer.area].filter(Boolean).join(" / ") || "No location"}
+                            </div>
                           </div>
                         </div>
                       </td>

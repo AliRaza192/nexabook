@@ -107,6 +107,8 @@ export async function getOrgUsers() {
         role: profiles.role,
         department: profiles.department,
         designation: profiles.designation,
+        territory: profiles.territory,
+        region: profiles.region,
         isActive: profiles.isActive,
         lastLoginAt: profiles.lastLoginAt,
         createdAt: profiles.createdAt,
@@ -146,6 +148,8 @@ export interface UpdateUserData {
   phone?: string;
   department?: string;
   designation?: string;
+  territory?: string;
+  region?: string;
   role: string;
   isActive: boolean;
 }
@@ -172,6 +176,8 @@ export async function updateOrgUser(profileId: string, data: UpdateUserData) {
         phone: data.phone,
         department: data.department,
         designation: data.designation,
+        territory: data.territory,
+        region: data.region,
         role: data.role as any,
         isActive: data.isActive,
         updatedAt: new Date(),

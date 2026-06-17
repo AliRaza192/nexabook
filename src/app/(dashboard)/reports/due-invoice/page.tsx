@@ -70,7 +70,6 @@ export default function DueInvoiceReportPage() {
           onFilterChange={(f) => { setAsOf(f.dateTo); setSelectedCustomer(f.customerId); loadReport(f); }}
           showCustomerFilter
           customers={customers}
-          dateLabel="As of Date"
         />
         {/* Aging filter */}
         <div className="flex items-center gap-3">

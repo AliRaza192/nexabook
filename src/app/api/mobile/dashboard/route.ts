@@ -136,7 +136,7 @@ export async function GET() {
     for (const item of inventoryItems) {
       const stock = item.currentStock || 0;
       const cost = item.costPrice ? parseFloat(item.costPrice) : 0;
-      inventoryValue += stock * cost;
+      inventoryValue += Number(stock) * cost;
     }
 
     return NextResponse.json({

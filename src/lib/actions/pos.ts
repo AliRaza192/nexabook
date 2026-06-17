@@ -422,10 +422,10 @@ export async function processPosSale(saleData: PosSaleData) {
         .limit(1);
 
       if (product) {
-        const newStock = Math.max(0, (product.currentStock || 0) - item.quantity);
+        const newStock = Math.max(0, (parseFloat(product.currentStock || "0")) - item.quantity);
         await db
           .update(products)
-          .set({ currentStock: newStock })
+          .set({ currentStock: String(newStock) })
           .where(eq(products.id, item.productId));
       }
     }
@@ -506,6 +506,18 @@ export async function processPosSale(saleData: PosSaleData) {
       }
     }
 
+    // Earn loyalty points (1 point per 100 PKR spent)
+    if (saleData.customerId && netAmount > 0) {
+      const pointsToEarn = Math.floor(netAmount / 100);
+      await db
+        .update(customers)
+        .set({
+          loyaltyPoints: sql`COALESCE(${customers.loyaltyPoints}, 0) + ${pointsToEarn}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(customers.id, saleData.customerId));
+    }
+
     // Audit log
     await db.insert(auditLogs).values({
       orgId,
@@ -551,6 +563,43 @@ async function getDefaultWalkInCustomer(orgId: string): Promise<string> {
     .returning();
 
   return newCustomer.id;
+}
+
+// Get POS customers
+export async function getPosCustomers(searchQuery?: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const conditions = [eq(customers.orgId, orgId), eq(customers.isActive, true)];
+
+    if (searchQuery) {
+      conditions.push(
+        or(
+          ilike(customers.name, `%${searchQuery}%`),
+          ilike(customers.phone, `%${searchQuery}%`)
+        )!
+      );
+    }
+
+    const result = await db
+      .select({
+        id: customers.id,
+        name: customers.name,
+        phone: customers.phone,
+        balance: customers.balance,
+        defaultDiscount: customers.defaultDiscount,
+        loyaltyPoints: customers.loyaltyPoints,
+      })
+      .from(customers)
+      .where(and(...conditions))
+      .orderBy(customers.name)
+      .limit(50);
+
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: "Failed to fetch customers" };
+  }
 }
 
 // Get POS products

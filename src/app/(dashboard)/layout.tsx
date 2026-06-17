@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { UserButton, SignOutButton, useUser } from "@clerk/nextjs";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
   LayoutDashboard,
   Handshake,
@@ -66,6 +67,7 @@ const navItems: NavItem[] = [
     badge: 10,
     children: [
       { name: "Customers", href: "/sales/customers" },
+      { name: "Sales Team", href: "/sales/team" },
       { name: "Quotations", href: "/sales/quotations" },
       { name: "Sales Orders", href: "/sales/orders" },
       { name: "Invoices", href: "/sales/invoices" },
@@ -104,6 +106,7 @@ const navItems: NavItem[] = [
     badge: 7,
     children: [
       { name: "Chart of Accounts", href: "/accounts/chart-of-accounts" },
+      { name: "Opening Balance", href: "/accounts/opening-balance" },
       { name: "Journal Entries", href: "/accounts/journal-entries" },
       { name: "Ledger", href: "/accounts/ledger" },
       { name: "Banking", href: "/accounts/banking" },
@@ -184,6 +187,7 @@ const navItems: NavItem[] = [
       { name: "Product Profit", href: "/reports/product-profit" },
       { name: "Product Aging", href: "/reports/product-aging" },
       { name: "Sales by Month", href: "/reports/sales-by-month" },
+      { name: "Sales by Geography", href: "/reports/sales-by-geography" },
       { name: "Purchase Details", href: "/reports/purchase-details" },
       { name: "Attendance", href: "/reports/attendance" },
       { name: "Payroll Summary", href: "/reports/payroll-summary" },
@@ -479,7 +483,7 @@ export default function DashboardLayout({
 
         {/* Page Content */}
         <main className="p-4 lg:p-6">
-          {children}
+          <ErrorBoundary>{children}</ErrorBoundary>
         </main>
       </div>
     </div>

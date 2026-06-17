@@ -622,16 +622,16 @@ export async function getInventoryStats() {
       (p) => p.currentStock !== null &&
              p.minStockLevel !== null &&
              p.currentStock <= p.minStockLevel &&
-             p.currentStock > 0
+              parseFloat(p.currentStock) > 0
     ).length;
 
     const outOfStockItems = allProducts.filter(
-      (p) => p.currentStock === 0 || p.currentStock === null
+      (p) => parseFloat(p.currentStock || "0") === 0
     ).length;
 
     // Calculate total stock value using cost price
     const totalStockValue = allProducts.reduce((sum, p) => {
-      const stock = p.currentStock || 0;
+      const stock = parseFloat(p.currentStock || "0");
       const cost = p.costPrice ? parseFloat(p.costPrice) : 0;
       return sum + (stock * cost);
     }, 0);
@@ -843,9 +843,10 @@ export async function transferStock(data: StockTransferFormData) {
           throw new Error(`Insufficient stock for ${prod?.name || 'product'} in source warehouse`);
         }
 
+        const sourceNewQty = (parseFloat(fromStock.quantity) - baseQuantity).toFixed(2);
         await tx
           .update(warehouseStock)
-          .set({ quantity: (parseFloat(fromStock.quantity) - baseQuantity).toFixed(2) })
+          .set({ quantity: sourceNewQty })
           .where(eq(warehouseStock.id, fromStock.id));
 
         // 4. Add to destination warehouse
@@ -855,16 +856,19 @@ export async function transferStock(data: StockTransferFormData) {
           .where(and(eq(warehouseStock.warehouseId, data.toWarehouseId), eq(warehouseStock.productId, item.productId)))
           .limit(1);
 
+        const destNewQty = toStock
+          ? (parseFloat(toStock.quantity) + baseQuantity).toFixed(2)
+          : baseQuantity.toFixed(2);
         if (toStock) {
           await tx
             .update(warehouseStock)
-            .set({ quantity: (parseFloat(toStock.quantity) + baseQuantity).toFixed(2) })
+            .set({ quantity: destNewQty })
             .where(eq(warehouseStock.id, toStock.id));
         } else {
           await tx.insert(warehouseStock).values({
             warehouseId: data.toWarehouseId,
             productId: item.productId,
-            quantity: baseQuantity.toFixed(2),
+            quantity: destNewQty,
           });
         }
 
@@ -879,6 +883,7 @@ export async function transferStock(data: StockTransferFormData) {
           referenceType: 'stock_transfer',
           referenceId: transfer.id,
           referenceNumber: data.referenceNo || transfer.id,
+          runningBalance: sourceNewQty,
         });
 
         // In to destination
@@ -891,6 +896,7 @@ export async function transferStock(data: StockTransferFormData) {
           referenceType: 'stock_transfer',
           referenceId: transfer.id,
           referenceNumber: data.referenceNo || transfer.id,
+          runningBalance: destNewQty,
         });
       }
 

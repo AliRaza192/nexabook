@@ -89,6 +89,8 @@ export const profiles = pgTable('profiles', {
   avatar: text('avatar'),
   department: varchar('department', { length: 100 }),
   designation: varchar('designation', { length: 100 }),
+  territory: varchar('territory', { length: 100 }),
+  region: varchar('region', { length: 100 }),
   isActive: boolean('is_active').notNull().default(true),
   lastLoginAt: timestamp('last_login_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -300,6 +302,7 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   }),
   conversions: many(uomConversions),
   batches: many(productBatches),
+  attributes: many(productAttributes),
 }));
 
 export const uomConversionsRelations = relations(uomConversions, ({ one }) => ({
@@ -383,7 +386,22 @@ export const customers = pgTable('customers', {
   openingBalance: decimal('opening_balance', { precision: 12, scale: 2 }).default('0'),
   balance: decimal('balance', { precision: 12, scale: 2 }).default('0'),
   creditLimit: decimal('credit_limit', { precision: 12, scale: 2 }),
+  region: varchar('region', { length: 100 }),
+  area: varchar('area', { length: 100 }),
+  defaultDiscount: decimal('default_discount', { precision: 5, scale: 2 }).default('0'),
+  loyaltyPoints: integer('loyalty_points').default(0),
   isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Product Attributes (custom fields like Size, Color, Weight)
+export const productAttributes = pgTable('product_attributes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  productId: uuid('product_id').references(() => products.id).notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  value: varchar('value', { length: 255 }).notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -457,6 +475,13 @@ export const invoicesRelations = relations(invoices, ({ one, many }) => ({
     references: [warehouses.id],
   }),
   items: many(invoiceItems),
+}));
+
+export const productAttributesRelations = relations(productAttributes, ({ one }) => ({
+  product: one(products, {
+    fields: [productAttributes.productId],
+    references: [products.id],
+  }),
 }));
 
 export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
@@ -2361,6 +2386,8 @@ export type StockCount = typeof stockCounts.$inferSelect;
 export type NewStockCount = typeof stockCounts.$inferInsert;
 export type StockCountItem = typeof stockCountItems.$inferSelect;
 export type NewStockCountItem = typeof stockCountItems.$inferInsert;
+export type ProductAttribute = typeof productAttributes.$inferSelect;
+export type NewProductAttribute = typeof productAttributes.$inferInsert;
 
 // Export complete schema
 export const schema = {
@@ -2446,6 +2473,9 @@ export const schema = {
   stockAdjustments,
   stockAdjustmentLines,
   stockValuationLogs,
+  // Product Attributes
+  productAttributes,
+  productAttributesRelations,
 };
 
 

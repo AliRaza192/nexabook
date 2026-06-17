@@ -20,6 +20,10 @@ import {
   Receipt,
   FileText,
   AlertTriangle,
+  Percent,
+  Users,
+  Gift,
+  Keyboard,
 } from "lucide-react";
 import { formatPKR } from "@/lib/utils/number-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +48,7 @@ import {
   processPosSale,
   generatePOSReport,
   getCurrentShiftDetails,
+  getPosCustomers,
   type PosSaleItem,
   type PosReportType,
   type PosReportData,
@@ -62,6 +67,15 @@ interface Product {
 interface Category {
   id: string;
   name: string;
+}
+
+interface PosCustomer {
+  id: string;
+  name: string;
+  phone: string | null;
+  balance: string | null;
+  defaultDiscount: string | null;
+  loyaltyPoints: number | null;
 }
 
 interface CartItem extends PosSaleItem {
@@ -91,14 +105,32 @@ export default function PosPage() {
   const [showReportDialog, setShowReportDialog] = useState(false);
   const [printing, setPrinting] = useState(false);
 
-  // Load products and categories
+  // Customer state
+  const [customers, setCustomers] = useState<PosCustomer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<PosCustomer | null>(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+
+  // Discount state
+  const [globalDiscountPct, setGlobalDiscountPct] = useState("0");
+
+  // POS settings (will be saved to localStorage)
+  const [posSettings, setPosSettings] = useState({
+    taxRate: 17,
+    autoPrint: true,
+    receiptFooter: "Thank you for your purchase!",
+  });
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+
+  // Load products, categories, customers
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [productsRes, categoriesRes, shiftRes] = await Promise.all([
+        const [productsRes, categoriesRes, shiftRes, customersRes] = await Promise.all([
           getPosProducts(),
           getPosCategories(),
           getCurrentShiftDetails(),
+          getPosCustomers(),
         ]);
 
         if (productsRes.success && productsRes.data) {
@@ -111,6 +143,9 @@ export default function PosPage() {
           setShiftOpen(true);
           setCurrentShiftId(shiftRes.data.shift.id);
         }
+        if (customersRes.success && customersRes.data) {
+          setCustomers(customersRes.data as PosCustomer[]);
+        }
       } catch (error) {
       } finally {
         setLoading(false);
@@ -118,6 +153,31 @@ export default function PosPage() {
     };
     loadData();
   }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F1') {
+        e.preventDefault();
+        if (cart.length > 0) setShowPaymentDialog(true);
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        clearCart();
+      } else if (e.key === 'F3') {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[type="search"]') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        if (cart.length > 0) handleProcessSale();
+      } else if (e.key === 'Escape') {
+        setShowPaymentDialog(false);
+        setShowCustomerDropdown(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
 
   // Filter products
   const filteredProducts = products.filter((p) => {
@@ -129,8 +189,18 @@ export default function PosPage() {
 
   // Cart calculations
   const subtotal = cart.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-  const tax = subtotal * 0.17; // 17% GST default
-  const grandTotal = Math.round(subtotal + tax);
+  const lineDiscounts = cart.reduce((sum, item) => {
+    const lineTotal = item.quantity * item.unitPrice;
+    return sum + (item.discountPercentage ? lineTotal * (item.discountPercentage / 100) : 0);
+  }, 0);
+  const afterLineDiscounts = subtotal - lineDiscounts;
+  const globalDiscAmt = parseFloat(globalDiscountPct || "0")
+    ? afterLineDiscounts * (parseFloat(globalDiscountPct) / 100)
+    : 0;
+  const taxableAmount = afterLineDiscounts - globalDiscAmt;
+  const taxRate = posSettings.taxRate / 100;
+  const tax = taxableAmount * taxRate;
+  const grandTotal = Math.round(taxableAmount + tax);
 
   // Add to cart
   const addToCart = useCallback((product: Product) => {
@@ -178,7 +248,32 @@ export default function PosPage() {
   };
 
   // Clear cart
-  const clearCart = () => setCart([]);
+  const clearCart = () => {
+    setCart([]);
+    setSelectedCustomer(null);
+    setGlobalDiscountPct("0");
+  };
+
+  // Update discount on cart item
+  const updateDiscount = (productId: string, discountPct: number) => {
+    setCart((prev) =>
+      prev.map((item) =>
+        item.productId === productId
+          ? { ...item, discountPercentage: Math.max(0, Math.min(100, discountPct)) }
+          : item
+      )
+    );
+  };
+
+  // Select customer & apply default discount
+  const selectCustomer = (customer: PosCustomer) => {
+    setSelectedCustomer(customer);
+    if (customer.defaultDiscount && parseFloat(customer.defaultDiscount) > 0) {
+      setGlobalDiscountPct(customer.defaultDiscount);
+    }
+    setShowCustomerDropdown(false);
+    setCustomerSearch("");
+  };
 
   // Handle shift management
   const handleShiftSubmit = async () => {
@@ -225,6 +320,7 @@ export default function PosPage() {
     setShowPaymentDialog(false);
     try {
       const result = await processPosSale({
+        customerId: selectedCustomer?.id,
         items: cart.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
@@ -232,7 +328,8 @@ export default function PosPage() {
           discountPercentage: item.discountPercentage,
         })),
         paymentMethod,
-        taxPercentage: 17,
+        discountPercentage: parseFloat(globalDiscountPct || "0"),
+        taxPercentage: posSettings.taxRate,
       });
 
       if (result.success) {
@@ -355,7 +452,7 @@ export default function PosPage() {
                       className="h-10 border-slate-300 text-slate-700 hover:bg-slate-50"
                     >
                       <FileText className="h-4 w-4 mr-2" />
-                      Print X-Report
+                      X-Report
                     </Button>
                     <Button
                       variant="outline"
@@ -365,7 +462,7 @@ export default function PosPage() {
                       className="h-10 border-red-300 text-red-700 hover:bg-red-50"
                     >
                       <AlertTriangle className="h-4 w-4 mr-2" />
-                      Close Shift (Z)
+                      Z-Report
                     </Button>
                   </>
                 )}
@@ -379,6 +476,15 @@ export default function PosPage() {
                 >
                   <Clock className="h-4 w-4 mr-2" />
                   {shiftOpen ? "Close Shift" : "Start Shift"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowSettingsDialog(true)}
+                  className="h-10 border-slate-300 text-slate-700 hover:bg-slate-50"
+                  title="POS Settings"
+                >
+                  <Percent className="h-4 w-4" />
                 </Button>
               </div>
 
@@ -403,6 +509,15 @@ export default function PosPage() {
                     {cat.name}
                   </Button>
                 ))}
+              </div>
+
+              {/* Keyboard Shortcuts Hint */}
+              <div className="flex gap-3 mt-2 text-[10px] text-slate-400">
+                <span><kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">F1</kbd> Pay</span>
+                <span><kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">F2</kbd> New</span>
+                <span><kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">F3</kbd> Search</span>
+                <span><kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">F4</kbd> Print</span>
+                <span><kbd className="px-1 py-0.5 bg-slate-100 rounded text-slate-500 font-mono">Esc</kbd> Close</span>
               </div>
             </CardContent>
           </Card>
@@ -448,16 +563,78 @@ export default function PosPage() {
         {/* Right: Billing Terminal (5 cols) */}
         <div className="col-span-5 flex flex-col gap-4 overflow-hidden">
           <Card className="border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden">
-            <CardHeader className="bg-slate-900 text-white py-3 px-4 flex-shrink-0">
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <CardHeader className="bg-slate-900 text-white py-2 px-4 flex-shrink-0 space-y-2">
+              <div className="flex items-center gap-2">
                 <ShoppingCart className="h-5 w-5" />
-                Current Sale
+                <span className="text-base font-semibold">Current Sale</span>
                 {cart.length > 0 && (
                   <Badge className="ml-auto bg-blue-600 text-white">
                     {cart.length} items
                   </Badge>
                 )}
-              </CardTitle>
+              </div>
+
+              {/* Customer Selection */}
+              <div className="relative">
+                <div
+                  className="flex items-center gap-2 bg-slate-800 rounded px-2 py-1.5 cursor-pointer hover:bg-slate-700"
+                  onClick={() => setShowCustomerDropdown(!showCustomerDropdown)}
+                >
+                  <Users className="h-3.5 w-3.5 text-slate-400" />
+                  {selectedCustomer ? (
+                    <span className="text-xs text-white flex-1 truncate">
+                      {selectedCustomer.name}
+                      {selectedCustomer.loyaltyPoints ? ` (${selectedCustomer.loyaltyPoints} pts)` : ''}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400 flex-1">Walk-in Customer</span>
+                  )}
+                  <Gift className={`h-3 w-3 ${selectedCustomer?.loyaltyPoints ? 'text-yellow-400' : 'text-slate-500'}`} />
+                </div>
+
+                {showCustomerDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                    <div className="p-2">
+                      <Input
+                        type="search"
+                        placeholder="Search customers..."
+                        value={customerSearch}
+                        onChange={(e) => setCustomerSearch(e.target.value)}
+                        className="h-8 text-xs border-slate-300"
+                        autoFocus
+                      />
+                    </div>
+                    <button
+                      className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 border-b border-slate-100"
+                      onClick={() => { setSelectedCustomer(null); setShowCustomerDropdown(false); }}
+                    >
+                      Walk-in Customer
+                    </button>
+                    {customers
+                      .filter(c => !customerSearch || c.name.toLowerCase().includes(customerSearch.toLowerCase()) || c.phone?.includes(customerSearch))
+                      .map(c => (
+                        <button
+                          key={c.id}
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 border-b border-slate-100 flex items-center justify-between"
+                          onClick={() => selectCustomer(c)}
+                        >
+                          <div>
+                            <span className="font-medium text-slate-900">{c.name}</span>
+                            {c.phone && <span className="text-slate-400 ml-2">{c.phone}</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {c.defaultDiscount && parseFloat(c.defaultDiscount) > 0 && (
+                              <Badge className="bg-green-100 text-green-800 text-[10px]">{c.defaultDiscount}%</Badge>
+                            )}
+                            {c.loyaltyPoints ? (
+                              <Badge className="bg-yellow-100 text-yellow-800 text-[10px]">{c.loyaltyPoints}pts</Badge>
+                            ) : null}
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
             </CardHeader>
 
             <CardContent className="flex-1 flex flex-col overflow-hidden p-0">
@@ -480,6 +657,20 @@ export default function PosPage() {
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium text-slate-900 text-sm truncate">{item.name}</h4>
                         <p className="text-xs text-slate-500">{formatCurrency(item.unitPrice)} each</p>
+                        {/* Item Discount */}
+                        <div className="flex items-center gap-1 mt-1">
+                          <Percent className="h-3 w-3 text-slate-400" />
+                          <Input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            value={item.discountPercentage || 0}
+                            onChange={(e) => updateDiscount(item.productId, parseFloat(e.target.value || "0"))}
+                            className="h-6 w-14 text-[10px] px-1 border-slate-300"
+                          />
+                          <span className="text-[10px] text-slate-400">%</span>
+                        </div>
                       </div>
 
                       {/* Quantity Controls */}
@@ -530,8 +721,36 @@ export default function PosPage() {
                   <span className="text-slate-600">Subtotal</span>
                   <span className="font-medium text-slate-900">{formatCurrency(subtotal)}</span>
                 </div>
+                {lineDiscounts > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">Line Discounts</span>
+                    <span className="font-medium text-red-600">-{formatCurrency(lineDiscounts)}</span>
+                  </div>
+                )}
+                {/* Global Discount */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">Global Discount</span>
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={globalDiscountPct}
+                      onChange={(e) => setGlobalDiscountPct(e.target.value)}
+                      className="h-7 w-16 text-xs text-right border-slate-300"
+                      placeholder="%"
+                    />
+                    <span className="text-xs text-slate-400">%</span>
+                    {globalDiscAmt > 0 && (
+                      <span className="text-sm font-medium text-red-600 w-20 text-right">
+                        -{formatCurrency(globalDiscAmt)}
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">Tax (17% GST)</span>
+                  <span className="text-slate-600">Tax ({posSettings.taxRate}% GST)</span>
                   <span className="font-medium text-slate-900">{formatCurrency(tax)}</span>
                 </div>
                 <div className="flex justify-between items-center py-3 px-4 bg-slate-900 rounded-lg mt-3">
@@ -548,6 +767,7 @@ export default function PosPage() {
                   >
                     <Wallet className="h-5 w-5 mr-2" />
                     PAY NOW
+                    <span className="text-[10px] ml-1 opacity-70">F1</span>
                   </Button>
                   <Button
                     variant="outline"
@@ -559,6 +779,7 @@ export default function PosPage() {
                   >
                     <Printer className="h-5 w-5 mr-2" />
                     PRINT
+                    <span className="text-[10px] ml-1 opacity-50">F4</span>
                   </Button>
                 </div>
 
@@ -570,7 +791,7 @@ export default function PosPage() {
                     onClick={clearCart}
                   >
                     <X className="h-4 w-4 mr-2" />
-                    Clear Cart
+                    Clear Cart <span className="text-[10px] ml-1 opacity-50">F2</span>
                   </Button>
                 )}
               </div>
@@ -958,6 +1179,72 @@ export default function PosPage() {
           )}
         </DialogContent>
       </Dialog>
+      {/* POS Settings Dialog */}
+      <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-slate-900 flex items-center gap-2">
+              <Percent className="h-5 w-5" />
+              POS Settings
+            </DialogTitle>
+            <DialogDescription className="text-slate-600">
+              Configure POS behavior and defaults
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-slate-700 mb-1 block">Default Tax Rate (%)</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={posSettings.taxRate}
+                onChange={(e) => setPosSettings({ ...posSettings, taxRate: parseFloat(e.target.value || "0") })}
+                className="border-slate-300"
+              />
+              <p className="text-xs text-slate-500 mt-1">Applied to all POS sales. Pakistan standard is 17%.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="autoPrint"
+                checked={posSettings.autoPrint}
+                onChange={(e) => setPosSettings({ ...posSettings, autoPrint: e.target.checked })}
+                className="rounded border-slate-300"
+              />
+              <Label htmlFor="autoPrint" className="text-slate-700">Auto-print receipt after sale</Label>
+            </div>
+            <div>
+              <Label className="text-slate-700 mb-1 block">Receipt Footer Text</Label>
+              <Input
+                value={posSettings.receiptFooter}
+                onChange={(e) => setPosSettings({ ...posSettings, receiptFooter: e.target.value })}
+                className="border-slate-300"
+                placeholder="Thank you for your purchase!"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSettingsDialog(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Keyboard Shortcuts Help */}
+      <div className="hidden">
+        <div className="text-[10px] text-slate-400 flex gap-2">
+          <span><kbd>F1</kbd> Pay</span>
+          <span><kbd>F2</kbd> New Sale</span>
+          <span><kbd>F3</kbd> Search</span>
+          <span><kbd>F4</kbd> Print</span>
+          <span><kbd>Esc</kbd> Close Dialog</span>
+        </div>
+      </div>
     </div>
   );
 }

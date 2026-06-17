@@ -270,7 +270,7 @@ export default function JobOrdersPage() {
 
     setSubmitting(true);
     try {
-      const result = await completeJobOrder(completingOrderId, scrapData.quantity > 0 ? scrapData : undefined);
+      const result = await completeJobOrder(completingOrderId);
       if (result.success) {
         setCompleteDialogOpen(false);
         setCompletingOrderId(null);

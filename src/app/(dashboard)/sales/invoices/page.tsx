@@ -170,6 +170,10 @@ export default function InvoicesPage() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailSent, setEmailSent] = useState<Set<string>>(new Set());
 
+  // WhatsApp dialog state
+  const [whatsappDialogOpen, setWhatsappDialogOpen] = useState(false);
+  const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+
   // Load invoices and stats
   const loadData = async () => {
     setLoading(true);
@@ -320,28 +324,47 @@ export default function InvoicesPage() {
 
   // WhatsApp Share
   const handleWhatsAppShare = (invoice: Invoice) => {
-    const customerName = invoice.customer?.name || "Customer";
-    const amount = invoice.netAmount
-      ? `PKR ${parseFloat(invoice.netAmount).toLocaleString("en-PK", {
-          minimumFractionDigits: 2,
-        })}`
-      : "N/A";
-    const dueDate = invoice.dueDate
-      ? new Date(invoice.dueDate).toLocaleDateString("en-PK")
-      : "N/A";
+    setSelectedInvoice(invoice);
+    setWhatsappDialogOpen(true);
+  };
 
-    const message = encodeURIComponent(
-      `Dear ${customerName},\n\nYour Invoice *${invoice.invoiceNumber}* is ready.\n\n` +
-      `Amount Due: *${amount}*\nDue Date: *${dueDate}*\n\n` +
-      `Please make payment at your earliest convenience.\n\nThank you for your business!`
-    );
+  const confirmSendWhatsApp = async () => {
+    if (!selectedInvoice) return;
+    const phone = selectedInvoice.customer?.phone;
+    if (!phone) {
+      alert("Customer has no phone number.");
+      return;
+    }
 
-    const rawPhone = invoice.customer?.phone?.replace(/[^0-9]/g, "") || "";
-    const url = rawPhone
-      ? `https://wa.me/92${rawPhone.replace(/^0/, "")}?text=${message}`
-      : `https://wa.me/?text=${message}`;
+    setSendingWhatsapp(true);
+    try {
+      const response = await fetch('/api/send-invoice-whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceId: selectedInvoice.id,
+          phoneNumber: phone,
+        }),
+      });
 
-    window.open(url, "_blank");
+      const result = await response.json();
+
+      if (result.success) {
+        if (result.method === 'link') {
+          window.open(result.waLink, '_blank');
+        } else {
+          alert('Invoice sent via WhatsApp successfully!');
+        }
+        setWhatsappDialogOpen(false);
+      } else {
+        alert(`Failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error("Error sending WhatsApp:", error);
+      alert("Failed to send via WhatsApp. Please try again.");
+    } finally {
+      setSendingWhatsapp(false);
+    }
   };
 
   if (loading && !invoices.length) {
@@ -660,6 +683,46 @@ export default function InvoicesPage() {
                 <>
                   <Mail className="mr-2 h-4 w-4" />
                   Send Email
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* WhatsApp Confirmation Dialog */}
+      <Dialog open={whatsappDialogOpen} onOpenChange={setWhatsappDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Share via WhatsApp</DialogTitle>
+            <DialogDescription>
+              Send invoice #{selectedInvoice?.invoiceNumber} to{' '}
+              <strong className="text-nexabook-900">{selectedInvoice?.customer?.name}</strong>{' '}
+              via WhatsApp{selectedInvoice?.customer?.phone ? ` (${selectedInvoice.customer.phone})` : ''}?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setWhatsappDialogOpen(false)}
+              disabled={sendingWhatsapp}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSendWhatsApp}
+              disabled={sendingWhatsapp || !selectedInvoice?.customer?.phone}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {sendingWhatsapp ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <MessageCircle className="mr-2 h-4 w-4" />
+                  Open WhatsApp
                 </>
               )}
             </Button>

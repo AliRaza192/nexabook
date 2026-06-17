@@ -12,6 +12,14 @@ import {
   Loader2,
   PackageOpen,
   TrendingDown,
+  Upload,
+  Download,
+  FileSpreadsheet,
+  FileDown,
+  CheckCircle2,
+  XCircle,
+  X,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,6 +58,19 @@ import {
   type InventoryStats,
   type UomFormData,
 } from "@/lib/actions/inventory";
+import {
+  exportProductsToExcel,
+  exportProductsToCSV,
+  importProductsFromCSV,
+  getImportTemplate,
+  type ImportRow,
+} from "@/lib/actions/inventory-export";
+import {
+  saveProductAttributes,
+  getAllAttributeNames,
+  searchByAttribute,
+  type ProductAttributeData,
+} from "@/lib/actions/product-attributes";
 
 // Product interface for table
 interface ProductTableRow extends ProductWithCategory {}
@@ -121,7 +142,7 @@ function AddProductForm({
 }: {
   categories: { id: string; name: string }[];
   uoms: { id: string; name: string }[];
-  onSubmit: (data: ProductFormData) => void;
+  onSubmit: (data: ProductFormData, attributes?: ProductAttributeData[]) => void;
   loading: boolean;
 }) {
   const [formData, setFormData] = useState<ProductFormData>({
@@ -152,6 +173,23 @@ function AddProductForm({
   const [newUom, setNewUom] = useState("");
   const [showNewUom, setShowNewUom] = useState(false);
 
+  // Product attributes (custom fields)
+  const [attributes, setAttributes] = useState<ProductAttributeData[]>([]);
+
+  const addAttribute = () => {
+    setAttributes([...attributes, { name: "", value: "" }]);
+  };
+
+  const updateAttribute = (index: number, field: keyof ProductAttributeData, value: string) => {
+    const updated = [...attributes];
+    updated[index] = { ...updated[index], [field]: value };
+    setAttributes(updated);
+  };
+
+  const removeAttribute = (index: number) => {
+    setAttributes(attributes.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -173,7 +211,7 @@ function AddProductForm({
       finalData.saleUomId = formData.baseUomId;
     }
 
-    onSubmit(finalData);
+    onSubmit(finalData, attributes.filter((a) => a.name && a.value));
   };
 
   const handleAddCategory = async () => {
@@ -526,6 +564,47 @@ function AddProductForm({
         />
       </div>
 
+      {/* Custom Attributes */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-nexabook-900">Custom Attributes</label>
+          <Button type="button" variant="outline" size="sm" onClick={addAttribute} className="h-7 text-xs">
+            <Plus className="h-3 w-3 mr-1" /> Add Attribute
+          </Button>
+        </div>
+        {attributes.length === 0 ? (
+          <p className="text-xs text-nexabook-500 italic">No custom attributes. Add size, color, weight, etc.</p>
+        ) : (
+          <div className="space-y-2">
+            {attributes.map((attr, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input
+                  placeholder="Name (e.g. Size)"
+                  value={attr.name}
+                  onChange={(e) => updateAttribute(i, "name", e.target.value)}
+                  className="h-8 text-xs flex-1"
+                  list="attribute-names"
+                />
+                <Input
+                  placeholder="Value (e.g. XL)"
+                  value={attr.value}
+                  onChange={(e) => updateAttribute(i, "value", e.target.value)}
+                  className="h-8 text-xs flex-1"
+                />
+                <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-600" onClick={() => removeAttribute(i)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <datalist id="attribute-names">
+              {["Size", "Color", "Weight", "Material", "Brand", "Dimensions", "Warranty"].map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
+          </div>
+        )}
+      </div>
+
       {/* Accounting Note */}
       <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
         <p className="text-xs text-blue-800">
@@ -559,18 +638,34 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Attribute state
+  const [attributeNames, setAttributeNames] = useState<string[]>([]);
+  const [filterAttrName, setFilterAttrName] = useState("");
+  const [filterAttrValue, setFilterAttrValue] = useState("");
+
+  // Import/Export state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportRow[] | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; errors: ImportRow[] } | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // Load data
   const loadData = async () => {
     setLoading(true);
 
     try {
-      const [productsRes, categoriesRes, statsRes] = await Promise.all([
+      const [productsRes, categoriesRes, statsRes, uomsRes, attrNamesRes] = await Promise.all([
         getProducts(searchQuery, selectedCategory === "all" ? undefined : selectedCategory),
         getCategories(),
         getInventoryStats(),
+        getUoms(),
+        getAllAttributeNames(),
       ]);
 
       if (productsRes.success && productsRes.data) {
@@ -589,6 +684,14 @@ export default function InventoryPage() {
       if (statsRes.success && statsRes.data) {
         setStats(statsRes.data);
       }
+
+      if (uomsRes.success && uomsRes.data) {
+        setUoms(uomsRes.data as { id: string; name: string }[]);
+      }
+
+      if (attrNamesRes.success && attrNamesRes.data) {
+        setAttributeNames(attrNamesRes.data);
+      }
     } catch (error) {
     } finally {
       setLoading(false);
@@ -600,13 +703,17 @@ export default function InventoryPage() {
   }, [searchQuery, selectedCategory]);
 
   // Handle add product
-  const handleAddProduct = async (data: ProductFormData) => {
+  const handleAddProduct = async (data: ProductFormData, attributes?: ProductAttributeData[]) => {
     setSubmitting(true);
 
     try {
       const result = await addProduct(data);
 
-      if (result.success) {
+      if (result.success && result.data) {
+        // Save attributes if provided
+        if (attributes && attributes.length > 0) {
+          await saveProductAttributes(result.data.id, attributes);
+        }
         setAddDialogOpen(false);
         await loadData();
       } else {
@@ -633,6 +740,125 @@ export default function InventoryPage() {
     }
 
     return { label: "In Stock", variant: "success" as const };
+  };
+
+  // Export handlers
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const result = await exportProductsToExcel();
+      if (result.success && result.data) {
+        const link = document.createElement("a");
+        link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${result.data}`;
+        link.download = result.fileName;
+        link.click();
+      } else {
+        alert(result.error || "Export failed");
+      }
+    } catch (error) {
+      alert("Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportCSV = async () => {
+    setExporting(true);
+    try {
+      const result = await exportProductsToCSV();
+      if (result.success && result.data) {
+        const blob = new Blob([result.data], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = result.fileName;
+        link.click();
+      } else {
+        alert(result.error || "Export failed");
+      }
+    } catch (error) {
+      alert("Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Import handlers
+  const handleImportFile = async (file: File) => {
+    setImportFile(file);
+    setImportResult(null);
+    setImportPreview(null);
+
+    const text = await file.text();
+    const lines = text.split("\n").filter((l) => l.trim());
+    if (lines.length < 2) {
+      alert("CSV must have a header row and data rows");
+      return;
+    }
+
+    const headerLine = lines[0];
+    const headers = headerLine.split(",").map((h) => h.trim().toLowerCase().replace("*", ""));
+
+    const preview: ImportRow[] = [];
+    for (let i = 1; i < Math.min(lines.length, 6); i++) {
+      const values = lines[i].split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+      const row: ImportRow & Record<string, any> = { _rowNumber: i + 1 };
+      headers.forEach((header, idx) => {
+        const val = values[idx] || "";
+        switch (header) {
+          case "name": row.name = val; break;
+          case "sku": row.sku = val; break;
+          case "barcode": row.barcode = val; break;
+          case "category": row.category = val; break;
+          case "type": row.type = val; break;
+          case "unit": row.unit = val; break;
+          case "sale price": row.salePrice = val; break;
+          case "cost price": row.costPrice = val; break;
+          case "current stock": row.currentStock = val; break;
+          case "min stock level": row.minStockLevel = val; break;
+          case "tax rate (%)": row.taxRate = val; break;
+          case "description": row.description = val; break;
+          case "batch tracked": row.isBatchTracked = val; break;
+          case "serial tracked": row.isSerialTracked = val; break;
+        }
+      });
+      preview.push(row as ImportRow);
+    }
+
+    setImportPreview(preview);
+  };
+
+  const handleImportConfirm = async () => {
+    if (!importFile) return;
+    setImporting(true);
+    try {
+      const text = await importFile.text();
+      const result = await importProductsFromCSV(text);
+      if (result.success && result.data) {
+        setImportResult(result.data);
+        if (result.data.imported > 0) {
+          await loadData();
+        }
+      } else {
+        alert(result.error || "Import failed");
+      }
+    } catch (error) {
+      alert("Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    const result = await getImportTemplate();
+    if (result.success && result.data) {
+      const blob = new Blob([result.data], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "product_import_template.csv";
+      link.click();
+    } else {
+      alert("Failed to generate template");
+    }
   };
 
   // Format currency
@@ -666,30 +892,72 @@ export default function InventoryPage() {
           </p>
         </div>
 
-        {/* Add Product Dialog */}
-        <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-nexabook-900 hover:bg-nexabook-800">
-              <Plus className="mr-2 h-4 w-4" />
-              Add Product
+        <div className="flex items-center gap-2">
+          {/* Export Dropdown */}
+          <div className="relative group">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exporting}
+              className="border-nexabook-300"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {exporting ? "Exporting..." : "Export"}
             </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add New Product</DialogTitle>
-              <DialogDescription>
-                Fill in the product details below. This product will be automatically linked to
-                your inventory system.
-              </DialogDescription>
-            </DialogHeader>
-            <AddProductForm
-              categories={categories}
-              uoms={uoms}
-              onSubmit={handleAddProduct}
-              loading={submitting}
-            />
-          </DialogContent>
-        </Dialog>
+            <div className="absolute right-0 top-full mt-1 bg-white border border-nexabook-200 rounded-lg shadow-lg z-50 hidden group-hover:block min-w-[160px]">
+              <button
+                onClick={handleExportExcel}
+                className="w-full text-left px-4 py-2 text-sm text-nexabook-700 hover:bg-nexabook-50 flex items-center gap-2"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-green-600" />
+                Export as Excel
+              </button>
+              <button
+                onClick={handleExportCSV}
+                className="w-full text-left px-4 py-2 text-sm text-nexabook-700 hover:bg-nexabook-50 flex items-center gap-2"
+              >
+                <FileDown className="h-4 w-4 text-blue-600" />
+                Export as CSV
+              </button>
+            </div>
+          </div>
+
+          {/* Import Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setImportDialogOpen(true); setImportFile(null); setImportPreview(null); setImportResult(null); }}
+            className="border-nexabook-300"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Import
+          </Button>
+
+          {/* Add Product Button */}
+          <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-nexabook-900 hover:bg-nexabook-800">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Product
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Add New Product</DialogTitle>
+                <DialogDescription>
+                  Fill in the product details below. This product will be automatically linked to
+                  your inventory system.
+                </DialogDescription>
+              </DialogHeader>
+              <AddProductForm
+                categories={categories}
+                uoms={uoms}
+                onSubmit={handleAddProduct}
+                loading={submitting}
+              />
+            </DialogContent>
+          </Dialog>
+        </div>
       </motion.div>
 
       {/* Stats Cards */}
@@ -770,6 +1038,31 @@ export default function InventoryPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Attribute Filter */}
+            {attributeNames.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Select value={filterAttrName} onValueChange={(v) => { setFilterAttrName(v); setFilterAttrValue(""); }}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Attribute" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">All Attributes</SelectItem>
+                    {attributeNames.map((n) => (
+                      <SelectItem key={n} value={n}>{n}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {filterAttrName && (
+                  <Input
+                    placeholder="Filter value..."
+                    value={filterAttrValue}
+                    onChange={(e) => setFilterAttrValue(e.target.value)}
+                    className="w-[140px] h-9 text-xs"
+                  />
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -924,6 +1217,163 @@ export default function InventoryPage() {
           )}
         </CardContent>
       </Card>
+      {/* Import Dialog */}
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5 text-nexabook-600" />
+              Import Products
+            </DialogTitle>
+            <DialogDescription>
+              Upload a CSV file to bulk import products.{" "}
+              <button onClick={handleDownloadTemplate} className="text-blue-600 underline hover:text-blue-800">
+                Download template
+              </button>
+            </DialogDescription>
+          </DialogHeader>
+
+          {!importResult ? (
+            <div className="space-y-4 py-4">
+              {/* File Upload */}
+              <div
+                className="border-2 border-dashed border-nexabook-300 rounded-lg p-8 text-center hover:border-nexabook-500 transition-colors cursor-pointer"
+                onClick={() => document.getElementById("csv-file-input")?.click()}
+              >
+                <Upload className="h-10 w-10 text-nexabook-400 mx-auto mb-3" />
+                <p className="text-sm font-medium text-nexabook-700 mb-1">
+                  {importFile ? importFile.name : "Click to upload CSV file"}
+                </p>
+                <p className="text-xs text-nexabook-500">Supports .csv files</p>
+                <input
+                  id="csv-file-input"
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleImportFile(file);
+                  }}
+                />
+              </div>
+
+              {/* Preview */}
+              {importPreview && importPreview.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-nexabook-900 mb-2">
+                    Preview ({importPreview.length} rows)
+                  </h4>
+                  <div className="overflow-x-auto border border-nexabook-200 rounded-lg">
+                    <table className="w-full text-xs">
+                      <thead className="bg-nexabook-50">
+                        <tr>
+                          <th className="px-2 py-1 text-left">#</th>
+                          <th className="px-2 py-1 text-left">Name</th>
+                          <th className="px-2 py-1 text-left">SKU</th>
+                          <th className="px-2 py-1 text-left">Category</th>
+                          <th className="px-2 py-1 text-right">Price</th>
+                          <th className="px-2 py-1 text-right">Stock</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreview.map((row, i) => (
+                          <tr key={i} className="border-t border-nexabook-100">
+                            <td className="px-2 py-1 text-nexabook-500">{row._rowNumber}</td>
+                            <td className="px-2 py-1 font-medium">{row.name}</td>
+                            <td className="px-2 py-1 font-mono">{row.sku}</td>
+                            <td className="px-2 py-1">{row.category || "-"}</td>
+                            <td className="px-2 py-1 text-right">{row.salePrice || "0"}</td>
+                            <td className="px-2 py-1 text-right">{row.currentStock || "0"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleImportConfirm}
+                  disabled={!importFile || importing}
+                  className="bg-nexabook-900 hover:bg-nexabook-800"
+                >
+                  {importing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Importing...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Import Products
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            /* Import Results */
+            <div className="space-y-4 py-4">
+              <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <CheckCircle2 className="h-6 w-6 text-green-600" />
+                <div>
+                  <p className="font-semibold text-green-900">Import Complete</p>
+                  <p className="text-sm text-green-700">
+                    {importResult.imported} product{importResult.imported !== 1 ? "s" : ""} imported successfully
+                  </p>
+                </div>
+              </div>
+
+              {importResult.errors.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-red-800 mb-2 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4" />
+                    {importResult.errors.length} error{importResult.errors.length !== 1 ? "s" : ""}
+                  </h4>
+                  <div className="border border-red-200 rounded-lg overflow-x-auto max-h-48 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-red-50">
+                        <tr>
+                          <th className="px-2 py-1 text-left">Row</th>
+                          <th className="px-2 py-1 text-left">Name</th>
+                          <th className="px-2 py-1 text-left">SKU</th>
+                          <th className="px-2 py-1 text-left">Errors</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importResult.errors.map((row, i) => (
+                          <tr key={i} className="border-t border-red-100">
+                            <td className="px-2 py-1 text-red-500">{row._rowNumber}</td>
+                            <td className="px-2 py-1">{row.name || "-"}</td>
+                            <td className="px-2 py-1 font-mono">{row.sku || "-"}</td>
+                            <td className="px-2 py-1">
+                              <ul className="list-disc list-inside text-red-600">
+                                {row._errors?.map((err, j) => (
+                                  <li key={j}>{err}</li>
+                                ))}
+                              </ul>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter>
+                <Button onClick={() => setImportDialogOpen(false)} className="bg-nexabook-900 hover:bg-nexabook-800">
+                  Done
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
