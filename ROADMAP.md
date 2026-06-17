@@ -292,6 +292,43 @@ Examples:
 
 ---
 
+## PHASE F — MARKET READINESS (Estimated: 8-10 days)
+### "Production-ready + competitive banao"
+
+### F1: Urdu Translation (next-intl)
+**Files:** All pages + components
+**What:** Complete Urdu/English bilingual support with RTL layout
+**How:**
+- `npm install next-intl`
+- Script se saari hardcoded English strings extract karo → `messages/en.json`
+- Urdu translations generate karo → `messages/ur.json`
+- `LanguageToggle` component in header
+- RTL CSS for Urdu layout (Tailwind RTL plugins)
+- Auto-detect browser language
+
+### F2: Payment Gateway Integration
+**Files:** new payment module
+**What:** JazzCash + Easypaisa integration for POS and invoices
+**How:**
+- `paymentTransactions` table (transactionId, gateway, amount, status, invoiceId)
+- JazzCash Merchant API integration (JazzCash PG Sandbox)
+- Easypaisa Merchant API integration
+- Webhook/callback handlers for payment status updates
+- `Pay Now` button on invoices and POS checkout
+- Auto-update invoice.receivedAmount on successful payment
+
+### F3: AI Assistant Chatbot (RAG)
+**Files:** new AI module
+**What:** In-app AI assistant that answers accounting questions using live data
+**How:**
+- RAG engine: user question → fetch relevant report data → LLM → human answer
+- Local Ollama (free, Llama 3.2/Phi-4) or OpenAI API (optional)
+- Context builder: fetches real-time P&L, Trial Balance, Sales Tax, etc.
+- Chat UI: floating button + dialog with message bubbles
+- No vector DB needed (structured accounting data, not documents)
+
+---
+
 ## INSTRUCTIONS FOR USAGE
 
 1. **Aap ka role:** Sirf `next` bolna hai har step ke baad
@@ -302,4 +339,4 @@ Examples:
 
 ---
 
-**Current Status: 🎉 All Phases A-E Complete! NexaBook is production-ready.**
+**Current Status: F1 (Urdu Translation) in progress — "next" bolte hi F2 shuru karunga.**

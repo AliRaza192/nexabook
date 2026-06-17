@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { UserButton, SignOutButton, useUser } from "@clerk/nextjs";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { I18nProvider } from "@/lib/i18n";
+import { LanguageToggle } from "@/components/LanguageToggle";
 import {
   LayoutDashboard,
   Handshake,
@@ -398,6 +400,7 @@ export default function DashboardLayout({
   );
 
   return (
+    <I18nProvider>
     <div className="min-h-screen bg-nexabook-50">
       {/* Mobile Sidebar Overlay */}
       <AnimatePresence>
@@ -453,6 +456,9 @@ export default function DashboardLayout({
 
             {/* Right Section */}
             <div className="flex items-center gap-3">
+              {/* Language Toggle */}
+              <LanguageToggle />
+
               {/* Notifications */}
               <button className="relative p-2 hover:bg-nexabook-100 rounded-lg transition-colors">
                 <Bell className="h-5 w-5 text-nexabook-600" />
@@ -487,5 +493,6 @@ export default function DashboardLayout({
         </main>
       </div>
     </div>
+    </I18nProvider>
   );
 }
