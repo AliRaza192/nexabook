@@ -85,6 +85,20 @@ export const organizations = pgTable('organizations', {
   charityAccountId: uuid('charity_account_id'),
 });
 
+// Email Templates
+export const emailTemplates = pgTable("email_templates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull(),
+  templateType: varchar("template_type", { length: 50 }).notNull().default("invoice"), // invoice, quotation, reminder
+  subject: varchar("subject", { length: 255 }).notNull().default("Invoice #{invoiceNumber} from {businessName}"),
+  bodyHtml: text("body_html").notNull().default(""),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqueOrgTemplateType: unique("uq_email_template_org_type").on(table.orgId, table.templateType),
+}));
+
 // Onboarding Progress Table
 export const onboardingProgress = pgTable("onboarding_progress", {
   id: uuid("id").defaultRandom().primaryKey(),
