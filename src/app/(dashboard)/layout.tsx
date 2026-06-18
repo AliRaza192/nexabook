@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { I18nProvider, useT } from "@/lib/i18n";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { ChatWidget } from "@/components/ChatWidget";
+import CommandPalette from "@/components/CommandPalette";
 import {
   LayoutDashboard,
   Handshake,
@@ -26,14 +27,13 @@ import {
   ChevronRight,
   Menu,
   X,
-  Search,
   Bell,
   ChevronLeft,
   Building,
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+
 
 interface NavItem {
   name: string;
@@ -457,16 +457,9 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
                   <Menu className="h-5 w-5" />
                 </button>
 
-                {/* Search Bar */}
+                {/* Command Palette */}
                 <div className="hidden md:flex items-center gap-2">
-                  <div className="relative">
-                    <Search className={`absolute ${dir === "rtl" ? "right-3" : "left-3"} top-1/2 -translate-y-1/2 h-4 w-4 text-nexabook-400`} />
-                    <Input
-                      type="search"
-                      placeholder={t("common.searchAnything", "Search anything...")}
-                      className={`${dir === "rtl" ? "pr-10" : "pl-10"} w-64 bg-nexabook-50 border-nexabook-200 focus:bg-white`}
-                    />
-                  </div>
+                  <CommandPalette />
                 </div>
               </div>
 
