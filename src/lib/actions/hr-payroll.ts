@@ -716,7 +716,7 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
       if (totalTax > 0) {
         lineAmounts.push({ debitAmount: '0', creditAmount: totalTax.toFixed(2) });
       }
-      if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance");
+      if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
       // Debit: Salaries & Wages Expense
       await db.insert(journalEntryLines).values({

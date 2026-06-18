@@ -609,7 +609,7 @@ export async function completeJobOrder(jobOrderId: string) {
           }
         }
 
-        if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance");
+        if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
         // Debit entry for finished goods
         await db.insert(journalEntryLines).values({
@@ -831,7 +831,7 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
           const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
           validationLines.push({ debitAmount: qtyToAdd.toFixed(2), creditAmount: '0' });
         }
-        if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance");
+        if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
         // Credit: Inventory Asset (Finished Goods)
         await db.insert(journalEntryLines).values({

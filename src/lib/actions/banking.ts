@@ -144,7 +144,7 @@ export async function addBankAccount(data: BankAccountFormData) {
           { debitAmount: "0", creditAmount: data.openingBalance },
         ];
         if (!validateJournalBalance(lines)) {
-          throw new Error("Journal entry out of balance");
+          throw new Error("Journal entry out of balance: total debits must equal total credits");
         }
         await db.insert(journalEntryLines).values({
           orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: data.openingBalance, creditAmount: "0", description: "Bank opening balance"
@@ -365,7 +365,7 @@ export async function approveBankDeposit(depositId: string) {
       { debitAmount: "0", creditAmount: deposit.amount },
     ];
     if (!validateJournalBalance(lines)) {
-      throw new Error("Journal entry out of balance");
+      throw new Error("Journal entry out of balance: total debits must equal total credits");
     }
     await db.insert(journalEntryLines).values({
       orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: deposit.amount, creditAmount: "0", description: "Bank deposit"
@@ -536,7 +536,7 @@ export async function approveFundsTransfer(transferId: string) {
       { debitAmount: "0", creditAmount: transfer.amount },
     ];
     if (!validateJournalBalance(lines)) {
-      throw new Error("Journal entry out of balance");
+      throw new Error("Journal entry out of balance: total debits must equal total credits");
     }
     await db.insert(journalEntryLines).values([
       { orgId, journalEntryId: journalEntry.id, accountId: transfer.toBankAccountId, debitAmount: transfer.amount, creditAmount: "0", description: "Funds transfer to" },
@@ -939,7 +939,7 @@ export async function createContraEntry(data: ContraEntryFormData) {
       { debitAmount: '0', creditAmount: data.amount },
     ];
     if (!validateJournalBalance(lines)) {
-      throw new Error("Journal entry out of balance");
+      throw new Error("Journal entry out of balance: total debits must equal total credits");
     }
     await db.insert(journalEntryLines).values({
       orgId,

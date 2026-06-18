@@ -549,7 +549,7 @@ export async function postDepreciation(
     if (!validateJournalBalance([
       { debitAmount: monthlyDepreciation.toFixed(2), creditAmount: "0" },
       { debitAmount: "0", creditAmount: monthlyDepreciation.toFixed(2) },
-    ])) throw new Error("Journal entry out of balance");
+    ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
     // Debit: Depreciation Expense
     await db.insert(journalEntryLines).values({

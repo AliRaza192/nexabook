@@ -14,6 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { formatPKR } from "@/lib/utils/number-format";
 import { getVendors, createVendorPayment, getVendorOutstandingInvoices, type VendorPaymentFormData } from "@/lib/actions/purchases";
 
+const PAYMENT_METHODS = ["cash", "bank_transfer", "cheque", "online", "credit_card", "other"] as const;
+type PaymentMethod = typeof PAYMENT_METHODS[number];
+
 interface Vendor { id: string; name: string; }
 interface OutstandingInvoice {
   id: string; billNumber: string; date: Date; dueDate: Date | null;
@@ -30,14 +33,14 @@ export default function VendorPaymentsPage() {
 
   const [vendorId, setVendorId] = useState("");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "bank_transfer" | "cheque" | "online" | "credit_card" | "other">("cash");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
   const [allocations, setAllocations] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    getVendors().then(res => { if (res.success && res.data) setVendors(res.data as Vendor[]); setLoading(false); });
+    getVendors().then(res => { if (res.success && res.data) setVendors(res.data); setLoading(false); });
   }, []);
 
   const loadOutstanding = async (vId: string) => {
@@ -45,9 +48,9 @@ export default function VendorPaymentsPage() {
     if (!vId) { setOutstanding([]); return; }
     const res = await getVendorOutstandingInvoices(vId);
     if (res.success && res.data) {
-      setOutstanding(res.data as OutstandingInvoice[]);
+      setOutstanding(res.data);
       const allocs: Record<string, string> = {};
-      (res.data as OutstandingInvoice[]).forEach(inv => { allocs[inv.id] = inv.balanceAmount || "0"; });
+      res.data.forEach(inv => { allocs[inv.id] = inv.balanceAmount || "0"; });
       setAllocations(allocs);
     }
   };
@@ -91,7 +94,7 @@ export default function VendorPaymentsPage() {
             <div className="grid grid-cols-4 gap-3">
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Vendor*</Label><Select value={vendorId} onValueChange={loadOutstanding}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select vendor" /></SelectTrigger><SelectContent>{vendors.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent></Select></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Payment Date*</Label><Input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="h-9 text-xs" /></div>
-              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Payment Method*</Label><Select value={paymentMethod} onValueChange={v => setPaymentMethod(v as any)}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="bank_transfer">Bank Transfer</SelectItem><SelectItem value="cheque">Cheque</SelectItem><SelectItem value="online">Online</SelectItem><SelectItem value="credit_card">Credit Card</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent></Select></div>
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Payment Method*</Label><Select value={paymentMethod} onValueChange={v => { const pm = PAYMENT_METHODS.find(m => m === v); if (pm) setPaymentMethod(pm); }}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="bank_transfer">Bank Transfer</SelectItem><SelectItem value="cheque">Cheque</SelectItem><SelectItem value="online">Online</SelectItem><SelectItem value="credit_card">Credit Card</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent></Select></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Amount*</Label><Input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" className="h-9 text-xs" /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">

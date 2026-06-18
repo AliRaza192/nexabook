@@ -170,7 +170,7 @@ export async function startShift(openingAmount: number) {
       if (!validateJournalBalance([
         { debitAmount: openingAmount.toFixed(2), creditAmount: '0' },
         { debitAmount: '0', creditAmount: openingAmount.toFixed(2) },
-      ])) throw new Error("Journal entry out of balance");
+      ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
       // Debit: POS Cash
       await db.insert(journalEntryLines).values({
@@ -471,7 +471,7 @@ export async function processPosSale(saleData: PosSaleData) {
       if (totalTax > 0 && salesTaxPayable) {
         lineAmounts.push({ debitAmount: '0', creditAmount: totalTax.toFixed(2) });
       }
-      if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance");
+      if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
       // Debit: POS Cash
       await db.insert(journalEntryLines).values({

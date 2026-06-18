@@ -100,7 +100,7 @@ export async function createVendor(data: VendorFormData) {
     revalidatePath('/purchases/vendors');
     return { success: true, data: newVendor, message: "Vendor created successfully" };
   } catch (error) {
-    return { success: false, error: "Failed to create vendor" };
+    return { success: false, error: `Failed to create vendor: ${error instanceof Error ? error.message : "Please check all required fields and try again."}` };
   }
 }
 
@@ -506,7 +506,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         if (amount > 0) purchaseLines.push({ debitAmount: amount.toFixed(2), creditAmount: "0" });
       }
       purchaseLines.push({ debitAmount: "0", creditAmount: invoice.netAmount });
-      if (!validateJournalBalance(purchaseLines)) throw new Error("Journal entry out of balance");
+      if (!validateJournalBalance(purchaseLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
       // Debit: Inventory (Asset) — grossAmount minus any discount
       await tx.insert(journalEntryLines).values({
@@ -677,7 +677,7 @@ export async function revisePurchaseInvoice(invoiceId: string) {
       }
 
       if (!validateJournalBalance([{ debitAmount: invoice.netAmount, creditAmount: "0" }, { debitAmount: "0", creditAmount: invoice.netAmount }]))
-        throw new Error("Journal entry out of balance");
+        throw new Error("Journal entry out of balance: total debits must equal total credits");
 
       // Reverse: Credit Inventory, Debit Vendor Payable
       await tx.insert(journalEntryLines).values({
@@ -799,7 +799,7 @@ export async function recordExpense(data: ExpenseFormData) {
       .returning();
 
     if (!validateJournalBalance([{ debitAmount: data.amount, creditAmount: "0" }, { debitAmount: "0", creditAmount: data.amount }]))
-      throw new Error("Journal entry out of balance");
+      throw new Error("Journal entry out of balance: total debits must equal total credits");
 
     // Debit: Expense Account
     await db.insert(journalEntryLines).values({
@@ -1607,7 +1607,7 @@ export async function approvePurchaseReturn(id: string) {
 
       if (accountsPayable && purchaseReturnsAccount) {
         if (!validateJournalBalance([{ debitAmount: purchaseReturn.refundAmount, creditAmount: "0" }, { debitAmount: "0", creditAmount: purchaseReturn.refundAmount }]))
-          throw new Error("Journal entry out of balance");
+          throw new Error("Journal entry out of balance: total debits must equal total credits");
 
         // Debit: Accounts Payable (reduce liability)
         await tx.insert(journalEntryLines).values({
@@ -1762,7 +1762,7 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
         lines.push({ debitAmount: '0', creditAmount: String(whtAmount) });
       }
       if (!validateJournalBalance(lines))
-        throw new Error("Journal entry out of balance");
+        throw new Error("Journal entry out of balance: total debits must equal total credits");
 
       const [journalEntry] = await db.insert(journalEntries).values({
         orgId,

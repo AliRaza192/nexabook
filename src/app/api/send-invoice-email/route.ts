@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     // Send email via Resend
     const { data, error } = await resend.emails.send({
-      from: `${invoice.orgName} <onboarding@resend.dev>`, // Update with your verified domain
+      from: `${invoice.orgName} <${process.env.RESEND_FROM_EMAIL || "invoices@" + (process.env.NEXT_PUBLIC_APP_URL?.replace(/https?:\/\//, "").replace(/\/.*/, "") || "nexabook.com")}>`,
       to: [customerEmail],
       subject: `Invoice ${invoice.invoiceNumber} from ${invoice.orgName}`,
       html: emailHtml,

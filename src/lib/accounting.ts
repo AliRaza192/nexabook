@@ -82,14 +82,18 @@ export async function getTrialBalance(orgId: string) {
       const debit = Number(ledger?.totalDebit ?? 0);
       const credit = Number(ledger?.totalCredit ?? 0);
       if (debit === 0 && credit === 0) return null;
-      grandTotalDebit += debit;
-      grandTotalCredit += credit;
+      // Compute net balance based on account type
+      const normalDebit = ["asset", "expense", "cost_of_goods_sold"].includes(account.type || "");
+      const netBalance = normalDebit ? debit - credit : credit - debit;
+      if (Math.abs(netBalance) < 0.01) return null;
+      grandTotalDebit += netBalance > 0 ? netBalance : 0;
+      grandTotalCredit += netBalance < 0 ? Math.abs(netBalance) : 0;
       return {
         code: account.code,
         name: account.name,
         type: account.type,
-        debit: debit > 0 ? debit : null,
-        credit: credit > 0 ? credit : null,
+        debit: netBalance > 0 ? netBalance : null,
+        credit: netBalance < 0 ? Math.abs(netBalance) : null,
       };
     })
     .filter(Boolean);
@@ -304,7 +308,7 @@ export async function postPayrollToLedger(
     if (totalEobi > 0) lines.push({ orgId, journalEntryId: entry.id, accountId: eobiPayable.id, debitAmount: "0.00", creditAmount: totalEobi.toFixed(2), description: "EOBI Payable" });
     if (totalIncomeTax > 0) lines.push({ orgId, journalEntryId: entry.id, accountId: incomeTaxPayable.id, debitAmount: "0.00", creditAmount: totalIncomeTax.toFixed(2), description: "Income Tax Payable" });
 
-    if (!validateJournalBalance(lines)) throw new Error("Journal entry out of balance");
+    if (!validateJournalBalance(lines)) throw new Error("Journal entry out of balance: total debits must equal total credits for this transaction.");
     await tx.insert(journalEntryLines).values(lines);
 
     await tx.update(payrollRuns)

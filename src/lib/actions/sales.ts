@@ -177,7 +177,7 @@ export async function createCustomer(data: CustomerFormData) {
       message: "Customer created successfully",
     };
   } catch (error) {
-    return { success: false, error: "Failed to create customer" };
+    return { success: false, error: `Failed to create customer: ${error instanceof Error ? error.message : "Unknown error"}` };
   }
 }
 
@@ -981,7 +981,7 @@ export async function approveInvoice(invoiceId: string) {
         .limit(1);
 
       if (!ar || !rev || !cogsAcc || !invAcc)
-        throw new Error("Required accounting accounts missing.");
+        throw new Error("Required accounting accounts missing. Please go to Chart of Accounts and seed default accounts first.");
 
       // 4. Posting Lines
       const shippingVal = parseFloat(invoice.shippingCharges || "0");

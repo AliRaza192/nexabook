@@ -134,6 +134,7 @@ export async function seedInitialCOA() {
       { code: "4000", name: "Sales Revenue", type: "income", description: "Revenue from sales" },
       { code: "4100", name: "Service Revenue", type: "income", description: "Revenue from services" },
       { code: "4200", name: "Interest Income", type: "income", description: "Interest earned" },
+      { code: "4250", name: "Shipping Revenue", type: "income", subType: "shipping_revenue", description: "Revenue from shipping charges" },
       { code: "4300", name: "Other Income", type: "income", description: "Miscellaneous income" },
       { code: "4400", name: "Discount Received", type: "income", description: "Discounts from suppliers" },
       { code: "4500", name: "Exchange Gain", type: "income", description: "Gain from currency exchange rate fluctuations" },
@@ -188,7 +189,7 @@ export async function seedInitialCOA() {
       "3000": "capital", "3010": "opening_balance_equity", "3100": "retained_earnings",
       "3500": "current_year_pl",
       "4000": "sales_revenue", "4100": "service_revenue",
-      "4300": "other_income", "4400": "inventory_adjustment_income", "4500": "exchange_gain", "4900": "discount_allowed",
+      "4250": "shipping_revenue", "4300": "other_income", "4400": "inventory_adjustment_income", "4500": "exchange_gain", "4900": "discount_allowed",
       "5000": "cogs", "5010": "cogs",
       "5100": "salary_expense", "5110": "salary_expense",
       "5200": "rent_expense", "5300": "utilities",
@@ -278,7 +279,7 @@ export async function createJournalEntry(data: JournalEntryData) {
 
     // Create journal entry lines
     if (!validateJournalBalance(data.lines.map(l => ({ debitAmount: l.debit || '0', creditAmount: l.credit || '0' })))) {
-      throw new Error("Journal entry out of balance");
+      throw new Error("Journal entry out of balance: total debits must equal total credits");
     }
     for (const line of data.lines) {
       await db.insert(journalEntryLines).values({
@@ -415,12 +416,13 @@ export async function postOpeningBalance(data: {
 
     // Create journal entry lines
     const allLines = [...data.lines];
-    // Add the contra line to Opening Balance Equity
-    if (totalDebit > 0) {
+    // Auto-balance with Opening Balance Equity
+    const diff = totalDebit - totalCredit;
+    if (Math.abs(diff) > 0.01) {
       allLines.push({
         accountId: obeAccount.id,
-        debit: "0",
-        credit: totalDebit.toFixed(2),
+        debit: diff < 0 ? Math.abs(diff).toFixed(2) : "0",
+        credit: diff > 0 ? diff.toFixed(2) : "0",
       });
     }
 

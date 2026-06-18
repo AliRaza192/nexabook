@@ -375,7 +375,7 @@ export async function approveStockAdjustment(adjustmentId: string) {
         if (!validateJournalBalance([
           { debitAmount: totalNegative.toFixed(2), creditAmount: "0" },
           { debitAmount: "0", creditAmount: totalNegative.toFixed(2) },
-        ])) throw new Error("Journal entry out of balance");
+        ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
         await tx.insert(journalEntryLines).values([
           { orgId, journalEntryId: je.id, accountId: lossAccount.id, description: "Loss on Inventory Write-off", debitAmount: totalNegative.toFixed(2), creditAmount: "0" },
@@ -405,7 +405,7 @@ export async function approveStockAdjustment(adjustmentId: string) {
         if (!validateJournalBalance([
           { debitAmount: totalPositive.toFixed(2), creditAmount: "0" },
           { debitAmount: "0", creditAmount: totalPositive.toFixed(2) },
-        ])) throw new Error("Journal entry out of balance");
+        ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
         await tx.insert(journalEntryLines).values([
           { orgId, journalEntryId: je.id, accountId: invAccount.id, description: "Inventory increase", debitAmount: totalPositive.toFixed(2), creditAmount: "0" },
