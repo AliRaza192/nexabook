@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Building2, Users, Save, Loader2, CheckCircle2, AlertCircle,
-  X, Pencil, ShieldCheck, UserCheck, UserX, Settings2,
+  X, Pencil, ShieldCheck, UserCheck, UserX, Settings2, Bell,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,10 +21,11 @@ import {
   getCompanyProfile, updateCompanyProfile,
   getOrgUsers, updateOrgUser, updateMyProfile,
   deactivateUser, reactivateUser, getCurrentUserProfile,
+  getReminderSettings, updateReminderSettings,
   type CompanyProfileData, type UpdateUserData,
 } from "@/lib/actions/settings";
 
-type Tab = "company" | "users" | "myprofile" | "numbering";
+type Tab = "company" | "users" | "myprofile" | "numbering" | "reminders";
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-purple-100 text-purple-800",
@@ -65,15 +66,25 @@ export default function SettingsPage() {
   // My Profile
   const [myProfile, setMyProfile] = useState({ fullName: "", phone: "", department: "", designation: "" });
 
+  // Reminder Settings
+  const [reminder, setReminder] = useState({
+    isActive: false,
+    reminderDaysBefore: 3,
+    reminderOnDueDate: true,
+    reminderDaysAfter: 7,
+    messageTemplate: "Assalam-o-Alaikum {customerName}!\n{businessName} ki taraf se yaad dahaani:\nInvoice #{invoiceNumber} ka Rs. {amount} was due on {dueDate}.\nShukriya!",
+  });
+
   useEffect(() => {
     loadAll();
   }, []);
 
   const loadAll = async () => {
-    const [compRes, usersRes, meRes] = await Promise.all([
+    const [compRes, usersRes, meRes, remRes] = await Promise.all([
       getCompanyProfile(),
       getOrgUsers(),
       getCurrentUserProfile(),
+      getReminderSettings(),
     ]);
     if (compRes.success && compRes.data) {
       const d = compRes.data as any;
@@ -91,6 +102,16 @@ export default function SettingsPage() {
       });
     }
     if (usersRes.success && usersRes.data) setUsers(usersRes.data as any);
+    if (remRes.success && remRes.data) {
+      const r = remRes.data as any;
+      setReminder({
+        isActive: r.isActive ?? false,
+        reminderDaysBefore: r.reminderDaysBefore ?? 3,
+        reminderOnDueDate: r.reminderOnDueDate ?? true,
+        reminderDaysAfter: r.reminderDaysAfter ?? 7,
+        messageTemplate: r.messageTemplate || reminder.messageTemplate,
+      });
+    }
     if (meRes.success && meRes.data) {
       const me = meRes.data as any;
       setCurrentUser(me);
@@ -146,6 +167,13 @@ export default function SettingsPage() {
     }
   };
 
+  const saveReminder = async () => {
+    setSaving(true);
+    const r = await updateReminderSettings(reminder);
+    setSaving(false);
+    r.success ? showMsg("success", "Reminder settings saved") : showMsg("error", r.error || "Failed");
+  };
+
   const handleToggleUser = async (u: any) => {
     setSaving(true);
     const r = u.isActive ? await deactivateUser(u.id) : await reactivateUser(u.id);
@@ -159,6 +187,7 @@ export default function SettingsPage() {
     { id: "numbering", label: "Document Numbering", icon: <Settings2 className="h-4 w-4" /> },
     { id: "users", label: "User Management", icon: <Users className="h-4 w-4" /> },
     { id: "myprofile", label: "My Profile", icon: <ShieldCheck className="h-4 w-4" /> },
+    { id: "reminders", label: "Payment Reminders", icon: <Bell className="h-4 w-4" /> },
   ];
 
   return (
@@ -510,6 +539,104 @@ export default function SettingsPage() {
             <Button onClick={saveMyProfile} disabled={saving} className="bg-nexabook-600 hover:bg-nexabook-700 text-white px-6">
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
               Save Profile
+            </Button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Tab: Payment Reminders ── */}
+      {activeTab === "reminders" && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          <Card className="enterprise-card max-w-2xl">
+            <CardHeader className="pb-3 border-b border-nexabook-50">
+              <CardTitle className="text-base font-semibold text-nexabook-900 flex items-center gap-2">
+                <Bell className="h-4 w-4 text-nexabook-600" />
+                Automated Payment Reminders
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-nexabook-900">Enable Reminders</p>
+                  <p className="text-xs text-nexabook-500">Send SMS reminders to customers for overdue invoices</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" className="sr-only peer"
+                    checked={reminder.isActive}
+                    onChange={(e) => setReminder({ ...reminder, isActive: e.target.checked })}
+                  />
+                  <div className="w-11 h-6 bg-nexabook-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                </label>
+              </div>
+
+              <div className="border-t border-nexabook-100 pt-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <Label>Remind Before (days)</Label>
+                    <Input type="number" min={0} max={30}
+                      value={reminder.reminderDaysBefore}
+                      onChange={(e) => setReminder({ ...reminder, reminderDaysBefore: parseInt(e.target.value) || 0 })}
+                    />
+                    <p className="text-xs text-nexabook-400">Days before due date</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>On Due Date</Label>
+                    <Select value={reminder.reminderOnDueDate ? "yes" : "no"}
+                      onValueChange={(v) => setReminder({ ...reminder, reminderOnDueDate: v === "yes" })}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="yes">Send reminder on due date</SelectItem>
+                        <SelectItem value="no">Skip on due date</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Remind After (days)</Label>
+                    <Input type="number" min={0} max={60}
+                      value={reminder.reminderDaysAfter}
+                      onChange={(e) => setReminder({ ...reminder, reminderDaysAfter: parseInt(e.target.value) || 0 })}
+                    />
+                    <p className="text-xs text-nexabook-400">Days after due date (overdue)</p>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label>Message Template</Label>
+                  <textarea
+                    className="w-full min-h-[120px] rounded-lg border border-nexabook-200 bg-white px-3 py-2 text-sm font-mono text-nexabook-800 focus:outline-none focus:ring-2 focus:ring-nexabook-400 resize-y"
+                    value={reminder.messageTemplate}
+                    onChange={(e) => setReminder({ ...reminder, messageTemplate: e.target.value })}
+                  />
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-nexabook-400">
+                    <span><code>{'{customerName}'}</code> — Customer name</span>
+                    <span><code>{'{businessName}'}</code> — Your business name</span>
+                    <span><code>{'{invoiceNumber}'}</code> — Invoice number</span>
+                    <span><code>{'{amount}'}</code> — Invoice amount</span>
+                    <span><code>{'{dueDate}'}</code> — Due date</span>
+                  </div>
+                </div>
+
+                <div className="bg-nexabook-50 rounded-lg p-3 border border-nexabook-100">
+                  <p className="text-xs font-medium text-nexabook-700 mb-1">Preview:</p>
+                  <p className="text-sm text-nexabook-600 whitespace-pre-wrap">
+                    {reminder.messageTemplate
+                      .replace(/{customerName}/g, "Ahmed Khan")
+                      .replace(/{businessName}/g, "NexaBook")
+                      .replace(/{invoiceNumber}/g, "INV-00001")
+                      .replace(/{amount}/g, "Rs. 15,000")
+                      .replace(/{dueDate}/g, new Date().toLocaleDateString("en-PK"))
+                    }
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex justify-end">
+            <Button onClick={saveReminder} disabled={saving} className="bg-nexabook-600 hover:bg-nexabook-700 text-white px-6">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Save Reminder Settings
             </Button>
           </div>
         </motion.div>

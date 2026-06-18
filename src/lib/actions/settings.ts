@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/db";
-import { organizations, profiles } from "@/db/schema";
+import { organizations, profiles, reminderSettings } from "@/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
@@ -269,5 +269,57 @@ export async function reactivateUser(profileId: string) {
     return { success: true };
   } catch (error) {
     return { success: false, error: "Failed" };
+  }
+}
+
+// ─── Payment Reminder Settings ──────────────────────────────────
+
+export async function getReminderSettings() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [settings] = await db
+      .select()
+      .from(reminderSettings)
+      .where(eq(reminderSettings.orgId, orgId))
+      .limit(1);
+
+    return { success: true, data: settings ?? null };
+  } catch (error) {
+    return { success: false, error: "Failed to load reminder settings" };
+  }
+}
+
+export async function updateReminderSettings(data: {
+  isActive: boolean;
+  reminderDaysBefore: number;
+  reminderOnDueDate: boolean;
+  reminderDaysAfter: number;
+  messageTemplate: string;
+}) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [existing] = await db
+      .select({ id: reminderSettings.id })
+      .from(reminderSettings)
+      .where(eq(reminderSettings.orgId, orgId))
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(reminderSettings)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(reminderSettings.id, existing.id));
+    } else {
+      await db.insert(reminderSettings).values({ orgId, ...data });
+    }
+
+    revalidatePath("/settings");
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: "Failed to update reminder settings" };
   }
 }
