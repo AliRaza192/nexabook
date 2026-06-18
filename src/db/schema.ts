@@ -77,6 +77,16 @@ export const organizations = pgTable('organizations', {
   numberingIncludeYear: boolean('numbering_include_year').notNull().default(true),
 });
 
+// Onboarding Progress Table
+export const onboardingProgress = pgTable("onboarding_progress", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull().unique(),
+  completedSteps: jsonb("completed_steps").default([]).notNull(),
+  isCompleted: boolean("is_completed").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Profiles Table (Links Clerk Users to Organizations)
 export const profiles = pgTable('profiles', {
   id: uuid('id').primaryKey().defaultRandom(),

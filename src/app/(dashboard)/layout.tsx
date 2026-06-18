@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { UserButton, SignOutButton, useUser } from "@clerk/nextjs";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -59,6 +59,22 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
   const [expandedItems, setExpandedItems] = useState<string[]>(["Sales"]);
   const pathname = usePathname();
   const { user } = useUser();
+  const router = useRouter();
+
+  // Onboarding redirect
+  useEffect(() => {
+    if (pathname.startsWith("/onboarding") || pathname.startsWith("/login") || pathname === "/") return;
+    async function checkOnboarding() {
+      try {
+        const { getOnboardingStatus } = await import("@/lib/actions/onboarding");
+        const res = await getOnboardingStatus();
+        if (res.success && res.data && !res.data.isCompleted) {
+          router.replace("/onboarding");
+        }
+      } catch { /* ignore */ }
+    }
+    checkOnboarding();
+  }, [pathname, router]);
 
   const navItems: NavItem[] = [
     {
