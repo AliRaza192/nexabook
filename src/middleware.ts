@@ -1,38 +1,39 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-// Define public routes that don't require authentication
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/login(.*)',
-  '/register(.*)',
-  '/api/webhooks(.*)',
-]);
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
-export default clerkMiddleware(async (auth, request) => {
-  const { userId, redirectToSignIn } = await auth();
-
-  // If user is trying to access protected routes without being signed in
-  if (!isPublicRoute(request) && !userId) {
-    return redirectToSignIn({
-      returnBackUrl: request.url,
-    });
+function rateLimit(ip: string, maxRequests = 30, windowMs = 60000): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
+    return true;
   }
+  if (entry.count >= maxRequests) {
+    return false;
+  }
+  entry.count++;
+  return true;
+}
 
-  // If user is signed in and trying to access auth pages, redirect to dashboard
-  if (userId && (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/register')) {
-    const dashboardUrl = new URL('/dashboard', request.url);
-    return NextResponse.redirect(dashboardUrl);
+export function middleware(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || request.headers.get("x-real-ip")
+    || "unknown";
+
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    if (!rateLimit(ip)) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again later." },
+        { status: 429 }
+      );
+    }
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
-  matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
-    '/(api|trpc)(.*)',
-  ],
+  matcher: "/api/:path*",
 };

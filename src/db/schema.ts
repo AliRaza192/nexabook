@@ -75,6 +75,14 @@ export const organizations = pgTable('organizations', {
   grnPrefix: varchar('grn_prefix', { length: 10 }).notNull().default('GRN'),
   numberingPadding: integer('numbering_padding').notNull().default(5),
   numberingIncludeYear: boolean('numbering_include_year').notNull().default(true),
+
+  // Islamic Finance Mode
+  islamicFinanceEnabled: boolean('islamic_finance_enabled').notNull().default(false),
+  zakatCalculationMethod: varchar('zakat_calculation_method', { length: 20 }).default('standard'), // standard, hawal, urf
+  zakatPercentage: decimal('zakat_percentage', { precision: 5, scale: 2 }).default('2.50'),
+  interestFreeTerms: text('interest_free_terms').default('No interest (riba) is charged as per Islamic finance principles.'),
+  latePaymentCharity: boolean('late_payment_charity').default(true).notNull(),
+  charityAccountId: uuid('charity_account_id'),
 });
 
 // Onboarding Progress Table
@@ -83,6 +91,21 @@ export const onboardingProgress = pgTable("onboarding_progress", {
   orgId: uuid("org_id").references(() => organizations.id).notNull().unique(),
   completedSteps: jsonb("completed_steps").default([]).notNull(),
   isCompleted: boolean("is_completed").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Payment Reminder Settings
+export const reminderSettings = pgTable("reminder_settings", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull().unique(),
+  isActive: boolean("is_active").default(false).notNull(),
+  reminderDaysBefore: integer("reminder_days_before").default(3).notNull(),
+  reminderOnDueDate: boolean("reminder_on_due_date").default(true).notNull(),
+  reminderDaysAfter: integer("reminder_days_after").default(7).notNull(),
+  messageTemplate: text("message_template").default(
+    "Assalam-o-Alaikum {customerName}!\\n{businessName} ki taraf se yaad dahaani:\\nInvoice #{invoiceNumber} ka Rs. {amount} was due on {dueDate}.\\nShukriya!"
+  ).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
