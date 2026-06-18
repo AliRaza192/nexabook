@@ -152,6 +152,19 @@ subType: varchar('sub_type', { length: 50 }),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Budgets
+export const budgets = pgTable("budgets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull(),
+  fiscalYear: varchar("fiscal_year", { length: 10 }).notNull(),
+  accountId: uuid("account_id").references(() => chartOfAccounts.id).notNull(),
+  month: integer("month").notNull(), // 1-12
+  budgetedAmount: decimal("budgeted_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Proper relations (broken placeholder hata diya)
 export const chartOfAccountsRelations = relations(chartOfAccounts, ({ many }) => ({
   journalLines: many(journalEntryLines),

@@ -224,6 +224,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         { name: t("nav.bomCost", "BOM Cost"), href: "/reports/bom-cost" },
         { name: t("nav.jobOrderProduction", "Job Order Production"), href: "/reports/job-order-production" },
         { name: t("nav.auditTrail", "Audit Trail"), href: "/reports/audit-log" },
+        { name: "Budget vs Actual", href: "/reports/budget" },
       ],
     },
     {
