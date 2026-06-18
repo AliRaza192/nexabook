@@ -859,6 +859,7 @@ export const vendors = pgTable('vendors', {
   name: varchar('name', { length: 255 }).notNull(),
   phone: varchar('phone', { length: 20 }),
   email: varchar('email', { length: 255 }),
+  portalToken: varchar('portal_token', { length: 64 }).unique(),
   ntn: varchar('ntn', { length: 50 }),
   strn: varchar('strn', { length: 50 }),
   address: text('address'),
