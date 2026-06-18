@@ -130,6 +130,37 @@ export const profiles = pgTable('profiles', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Approval Workflows
+export const approvalWorkflows = pgTable("approval_workflows", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  entityType: varchar("entity_type", { length: 50 }).notNull(), // invoice, purchase_order, expense, quotation
+  minAmount: decimal("min_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  maxAmount: decimal("max_amount", { precision: 15, scale: 2 }),
+  approverRole: varchar("approver_role", { length: 20 }).notNull(), // manager, admin
+  orderIndex: integer("order_index").notNull().default(1),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const approvalRequests = pgTable("approval_requests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull(),
+  workflowId: uuid("workflow_id").references(() => approvalWorkflows.id),
+  entityType: varchar("entity_type", { length: 50 }).notNull(),
+  entityId: uuid("entity_id").notNull(),
+  entityNumber: varchar("entity_number", { length: 50 }),
+  requestedBy: varchar("requested_by", { length: 255 }).notNull(),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  status: varchar("status", { length: 20 }).notNull().default("pending"), // pending, approved, rejected
+  comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Chart of Accounts
 export const chartOfAccounts = pgTable('chart_of_accounts', {
   id: uuid('id').primaryKey().defaultRandom(),

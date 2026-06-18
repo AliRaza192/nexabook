@@ -27,10 +27,12 @@ import {
   ChevronRight,
   Menu,
   X,
+  Search,
   Bell,
   ChevronLeft,
   Building,
   LogOut,
+  ClipboardCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -228,9 +230,17 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
       ],
     },
     {
+      name: "Approvals",
+      icon: <ClipboardCheck className="h-5 w-5" />,
+      href: "/approvals",
+    },
+    {
       name: t("nav.settings", "Settings"),
       icon: <Settings className="h-5 w-5" />,
       href: "/settings",
+      children: [
+        { name: "Approval Workflows", href: "/settings/approvals" },
+      ],
     },
   ];
 
