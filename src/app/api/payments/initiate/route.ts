@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     const orgId = await getCurrentOrgId(userId);
     if (!orgId) return NextResponse.json({ success: false, error: "Organization not found" }, { status: 404 });
 
-    const { invoiceId, customerId, amount, gateway } = await request.json();
+    const { invoiceId, customerId, amount, gateway, returnOrigin, customerInfo } = await request.json();
     if (!amount || !gateway) {
       return NextResponse.json({ success: false, error: "Amount and gateway are required" }, { status: 400 });
     }
@@ -54,9 +54,8 @@ export async function POST(request: NextRequest) {
     const module = await loadModule;
     initiatePayment = module.initiatePayment;
 
-    const result = await initiatePayment(amount, orderRef, {
-      name: "Customer",
-    });
+    const cInfo = customerInfo || { name: "Customer" };
+    const result = await initiatePayment(amount, orderRef, cInfo);
 
     if (result.success) {
       await db.update(paymentTransactions)

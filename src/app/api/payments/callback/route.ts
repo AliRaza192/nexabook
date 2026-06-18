@@ -11,6 +11,7 @@ export async function POST(request: NextRequest) {
 
     const orderRef = params["pp_OrderRef"] || params["orderRef"] || params["transactionRef"];
     const gateway = params["pp_TxnType"] ? "jazzcash" : "easypaisa";
+    const returnOrigin = params["ppmpf_1"] || params["orderRef"] || "";
 
     if (!orderRef) {
       return NextResponse.redirect(new URL("/dashboard?payment=failed", request.url));
@@ -37,9 +38,15 @@ export async function POST(request: NextRequest) {
         .where(eq(paymentTransactions.id, existing[0].id));
     }
 
-    const dashboardUrl = new URL("/dashboard", request.url);
-    dashboardUrl.searchParams.set("payment", status);
-    return NextResponse.redirect(dashboardUrl);
+    // Determine return origin (POS, invoice page, or dashboard)
+    const origin = returnOrigin && returnOrigin.startsWith("/")
+      ? returnOrigin
+      : "/dashboard";
+    const redirectUrl = new URL(origin, request.url);
+    redirectUrl.searchParams.set("payment", status);
+    redirectUrl.searchParams.set("txn", orderRef);
+
+    return NextResponse.redirect(redirectUrl);
   } catch (err) {
     console.error("Payment callback error:", err);
     return NextResponse.redirect(new URL("/dashboard?payment=error", request.url));

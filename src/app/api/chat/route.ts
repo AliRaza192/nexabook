@@ -21,14 +21,7 @@ Rules:
 - Use Pakistani Rupee (PKR) format: Rs. 1,00,000 (South Asian numbering).
 - Only answer questions about the provided accounting data.
 - If asked something outside the provided data, say "I can only answer questions about your accounting data."
-- Use a friendly, professional tone.
-
-Available data types: revenue, pendingInvoices, topProducts, customerBalances, cashPosition, profitLoss
-
-When you need specific data, respond with:
-[DATA:retrieverName]
-
-The system will inject the data and call you again.`;
+- Use a friendly, professional tone.`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -42,7 +35,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Organization not found" }, { status: 404 });
     }
 
-    const { message } = await request.json();
+    const { message, history } = await request.json();
     if (!message || typeof message !== "string") {
       return NextResponse.json({ success: false, error: "Message is required" }, { status: 400 });
     }
@@ -58,12 +51,10 @@ export async function POST(request: NextRequest) {
     if (/\b(cash|bank|balance.*account|paise|nagad)\b/.test(msg)) needsData.push("cashPosition");
     if (/\b(profit|loss|profit and loss|munafa|nuqsan|p&l)\b/.test(msg)) needsData.push("profitLoss");
 
-    // If nothing specific, get a summary overview
     if (needsData.length === 0) {
       needsData = ["revenue", "pendingInvoices", "cashPosition"];
     }
 
-    // Deduplicate
     needsData = [...new Set(needsData)];
 
     // Fetch data
@@ -83,8 +74,24 @@ export async function POST(request: NextRequest) {
 
     const context = contextParts.join("\n\n");
 
-    // Build the prompt for the AI
-    const prompt = `${SYSTEM_PROMPT}\n\nUser question: ${message}\n\nRelevant accounting data:\n${context}\n\nAnswer the user's question based on the data above. Be specific with numbers and use PKR format.`;
+    // Build conversation history
+    const conversationMessages: { role: string; content: string }[] = [
+      { role: "system", content: SYSTEM_PROMPT },
+    ];
+
+    if (Array.isArray(history) && history.length > 0) {
+      const sliced = history.slice(-10);
+      for (const msg of sliced) {
+        if (msg.role === "user" || msg.role === "assistant") {
+          conversationMessages.push({ role: msg.role, content: msg.content });
+        }
+      }
+    }
+
+    conversationMessages.push({
+      role: "user",
+      content: `${message}\n\nRelevant accounting data:\n${context}`,
+    });
 
     // Try OpenAI first, fallback to Ollama
     let answer: string;
@@ -97,11 +104,8 @@ export async function POST(request: NextRequest) {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: `${message}\n\nRelevant data:\n${context}` },
-          ],
+          model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+          messages: conversationMessages,
           max_tokens: 500,
         }),
       });
@@ -113,6 +117,7 @@ export async function POST(request: NextRequest) {
       const openaiData = await openaiRes.json();
       answer = openaiData.choices?.[0]?.message?.content || "Sorry, I couldn't generate a response.";
     } else if (process.env.OLLAMA_BASE_URL) {
+      const prompt = conversationMessages.map((m) => `${m.role}: ${m.content}`).join("\n");
       const ollamaRes = await fetch(`${process.env.OLLAMA_BASE_URL}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -131,7 +136,6 @@ export async function POST(request: NextRequest) {
       const ollamaData = await ollamaRes.json();
       answer = ollamaData.response || "Sorry, I couldn't generate a response.";
     } else {
-      // No AI available - return data as structured response
       return NextResponse.json({
         success: true,
         answer: null,

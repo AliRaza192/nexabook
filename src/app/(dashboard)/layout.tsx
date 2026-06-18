@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { UserButton, SignOutButton, useUser } from "@clerk/nextjs";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { I18nProvider } from "@/lib/i18n";
+import { I18nProvider, useT } from "@/lib/i18n";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { ChatWidget } from "@/components/ChatWidget";
 import {
@@ -44,183 +44,189 @@ interface NavItem {
   children?: { name: string; href: string; badge?: number }[];
 }
 
-const navItems: NavItem[] = [
-  {
-    name: "Dashboard",
-    icon: <LayoutDashboard className="h-5 w-5" />,
-    href: "/dashboard",
-  },
-  {
-    name: "CRM",
-    icon: <Handshake className="h-5 w-5" />,
-    href: "/crm",
-    badge: 5,
-    children: [
-      { name: "Dashboard", href: "/crm" },
-      { name: "Leads", href: "/crm/leads" },
-      { name: "Tickets", href: "/crm/tickets" },
-      { name: "Events", href: "/crm/events" },
-      { name: "Calls", href: "/crm/calls" },
-    ],
-  },
-  {
-    name: "Sales",
-    icon: <FileText className="h-5 w-5" />,
-    href: "/sales",
-    badge: 10,
-    children: [
-      { name: "Customers", href: "/sales/customers" },
-      { name: "Sales Team", href: "/sales/team" },
-      { name: "Quotations", href: "/sales/quotations" },
-      { name: "Sales Orders", href: "/sales/orders" },
-      { name: "Invoices", href: "/sales/invoices" },
-      { name: "Delivery", href: "/sales/delivery" },
-      { name: "Recurring Invoices", href: "/sales/recurring" },
-      { name: "Sales Returns", href: "/sales/returns" },
-      { name: "Receive Payment", href: "/sales/receive-payment" },
-      { name: "Refund", href: "/sales/refund" },
-      { name: "Settlement", href: "/sales/settlement" },
-    ],
-  },
-  {
-    name: "Purchases",
-    icon: <ShoppingCart className="h-5 w-5" />,
-    href: "/purchases",
-    badge: 8,
-    children: [
-      { name: "Vendors", href: "/purchases/vendors" },
-      { name: "Purchase Orders", href: "/purchases/orders" },
-      { name: "Purchase Invoices", href: "/purchases/invoices" },
-      { name: "GRN", href: "/purchases/grn" },
-      { name: "Purchase Returns", href: "/purchases/returns" },
-      { name: "Vendor Payments", href: "/purchases/payments" },
-      { name: "Settlement", href: "/purchases/settlement" },
-    ],
-  },
-  {
-    name: "POS",
-    icon: <Monitor className="h-5 w-5" />,
-    href: "/pos",
-  },
-  {
-    name: "Accounts",
-    icon: <BookOpen className="h-5 w-5" />,
-    href: "/accounts",
-    badge: 7,
-    children: [
-      { name: "Chart of Accounts", href: "/accounts/chart-of-accounts" },
-      { name: "Opening Balance", href: "/accounts/opening-balance" },
-      { name: "Journal Entries", href: "/accounts/journal-entries" },
-      { name: "Ledger", href: "/accounts/ledger" },
-      { name: "Banking", href: "/accounts/banking" },
-      { name: "Credit/Debit Notes", href: "/accounts/credit-debit-notes" },
-      { name: "PDC Instruments", href: "/accounts/instruments" },
-      { name: "Contact Settlement", href: "/accounts/contact-settlement" },
-      { name: "Tax", href: "/accounts/tax" },
-      { name: "Reconciliation", href: "/accounts/reconciliation" },
-      { name: "Expenses", href: "/accounts/expenses" },
-    ],
-  },
-  {
-    name: "Inventory",
-    icon: <Package className="h-5 w-5" />,
-    href: "/inventory",
-    badge: 5,
-    children: [
-      { name: "Dashboard", href: "/inventory" },
-      { name: "Stock Movement", href: "/inventory/stock" },
-      { name: "Stock Adjustment", href: "/inventory/adjustment" },
-      { name: "Stock Valuation", href: "/inventory/valuation" },
-      { name: "Warehouses", href: "/inventory/warehouses" },
-      { name: "Batches", href: "/inventory/batches" },
-      { name: "Barcodes", href: "/inventory/barcodes" },
-    ],
-  },
-  {
-    name: "Manufacturing",
-    icon: <Factory className="h-5 w-5" />,
-    href: "/manufacturing",
-    children: [
-      { name: "BOM", href: "/manufacturing/bom" },
-      { name: "Job Orders", href: "/manufacturing/job-orders/new" },
-      { name: "Disassemble", href: "/manufacturing/disassemble" },
-    ],
-  },
-  {
-    name: "HR & Payroll",
-    icon: <Users className="h-5 w-5" />,
-    href: "/hr-payroll",
-    children: [
-      { name: "Employees", href: "/hr-payroll/employees" },
-      { name: "Attendance", href: "/hr-payroll/attendance" },
-      { name: "Salary Processing", href: "/hr-payroll/salary" },
-    ],
-  },
-  {
-    name: "Fixed Assets",
-    icon: <Building2 className="h-5 w-5" />,
-    href: "/fixed-assets",
-    children: [
-      { name: "Asset Register", href: "/fixed-assets/register" },
-      { name: "Depreciation", href: "/fixed-assets/depreciation" },
-    ],
-  },
-  {
-    name: "Reports",
-    icon: <BarChart3 className="h-5 w-5" />,
-    href: "/reports",
-    badge: 100,
-    children: [
-      { name: "Dashboard", href: "/reports" },
-      { name: "Profit & Loss", href: "/reports/profit-and-loss" },
-      { name: "Balance Sheet", href: "/reports/balance-sheet" },
-      { name: "Trial Balance", href: "/reports/trial-balance" },
-      { name: "Cash Flow", href: "/reports/cash-flow" },
-      { name: "Customer Ledger", href: "/reports/customer-ledger" },
-      { name: "Vendor Ledger", href: "/reports/vendor-ledger" },
-      { name: "Employee Ledger", href: "/reports/employee-ledger" },
-      { name: "Aged Receivables", href: "/reports/aged-receivables" },
-      { name: "Aged Payables", href: "/reports/aged-payables" },
-      { name: "Sales Tax", href: "/reports/sales-tax" },
-      { name: "Purchase Tax", href: "/reports/purchase-tax" },
-      { name: "WHT Report", href: "/reports/wht" },
-      { name: "Stock on Hand", href: "/reports/stock-on-hand" },
-      { name: "Stock Movement", href: "/reports/stock-movement" },
-      { name: "Low Inventory", href: "/reports/low-inventory" },
-      { name: "Product Profit", href: "/reports/product-profit" },
-      { name: "Product Aging", href: "/reports/product-aging" },
-      { name: "Sales by Month", href: "/reports/sales-by-month" },
-      { name: "Sales by Geography", href: "/reports/sales-by-geography" },
-      { name: "Purchase Details", href: "/reports/purchase-details" },
-      { name: "Attendance", href: "/reports/attendance" },
-      { name: "Payroll Summary", href: "/reports/payroll-summary" },
-      { name: "BOM Cost", href: "/reports/bom-cost" },
-      { name: "Job Order Production", href: "/reports/job-order-production" },
-      { name: "Audit Trail", href: "/reports/audit-log" },
-    ],
-  },
-  {
-    name: "Refer & Earn",
-    icon: <Gift className="h-5 w-5" />,
-    href: "/refer-earn",
-  },
-  {
-    name: "Settings",
-    icon: <Settings className="h-5 w-5" />,
-    href: "/settings",
-  },
-];
+function HtmlLangSetter() {
+  const { locale, dir } = useT();
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.documentElement.dir = dir;
+  }, [locale, dir]);
+  return null;
+}
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function DashboardInner({ children }: { children: React.ReactNode }) {
+  const { t, dir } = useT();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>(["Sales"]);
   const pathname = usePathname();
   const { user } = useUser();
+
+  const navItems: NavItem[] = [
+    {
+      name: t("nav.dashboard", "Dashboard"),
+      icon: <LayoutDashboard className="h-5 w-5" />,
+      href: "/dashboard",
+    },
+    {
+      name: t("nav.crm", "CRM"),
+      icon: <Handshake className="h-5 w-5" />,
+      href: "/crm",
+      badge: 5,
+      children: [
+        { name: t("nav.dashboard", "Dashboard"), href: "/crm" },
+        { name: t("nav.employees", "Leads"), href: "/crm/leads" },
+        { name: t("nav.salesOrders", "Tickets"), href: "/crm/tickets" },
+        { name: t("common.actions", "Events"), href: "/crm/events" },
+        { name: t("common.notes", "Calls"), href: "/crm/calls" },
+      ],
+    },
+    {
+      name: t("nav.sales", "Sales"),
+      icon: <FileText className="h-5 w-5" />,
+      href: "/sales",
+      badge: 10,
+      children: [
+        { name: t("nav.customers", "Customers"), href: "/sales/customers" },
+        { name: t("nav.salesTeam", "Sales Team"), href: "/sales/team" },
+        { name: t("nav.quotations", "Quotations"), href: "/sales/quotations" },
+        { name: t("nav.salesOrders", "Sales Orders"), href: "/sales/orders" },
+        { name: t("nav.invoices", "Invoices"), href: "/sales/invoices" },
+        { name: t("nav.delivery", "Delivery"), href: "/sales/delivery" },
+        { name: t("nav.recurringInvoices", "Recurring Invoices"), href: "/sales/recurring" },
+        { name: t("nav.salesReturns", "Sales Returns"), href: "/sales/returns" },
+        { name: t("nav.receivePayment", "Receive Payment"), href: "/sales/receive-payment" },
+        { name: t("nav.refund", "Refund"), href: "/sales/refund" },
+        { name: t("nav.settlement", "Settlement"), href: "/sales/settlement" },
+      ],
+    },
+    {
+      name: t("nav.purchases", "Purchases"),
+      icon: <ShoppingCart className="h-5 w-5" />,
+      href: "/purchases",
+      badge: 8,
+      children: [
+        { name: t("nav.vendors", "Vendors"), href: "/purchases/vendors" },
+        { name: t("nav.purchaseOrders", "Purchase Orders"), href: "/purchases/orders" },
+        { name: t("nav.invoices", "Purchase Invoices"), href: "/purchases/invoices" },
+        { name: t("nav.grn", "GRN"), href: "/purchases/grn" },
+        { name: t("nav.purchaseReturns", "Purchase Returns"), href: "/purchases/returns" },
+        { name: t("nav.payments", "Vendor Payments"), href: "/purchases/payments" },
+        { name: t("nav.settlement", "Settlement"), href: "/purchases/settlement" },
+      ],
+    },
+    {
+      name: t("nav.pos", "POS"),
+      icon: <Monitor className="h-5 w-5" />,
+      href: "/pos",
+    },
+    {
+      name: t("nav.accounts", "Accounts"),
+      icon: <BookOpen className="h-5 w-5" />,
+      href: "/accounts",
+      badge: 7,
+      children: [
+        { name: t("nav.chartOfAccounts", "Chart of Accounts"), href: "/accounts/chart-of-accounts" },
+        { name: t("nav.openingBalance", "Opening Balance"), href: "/accounts/opening-balance" },
+        { name: t("nav.journalEntries", "Journal Entries"), href: "/accounts/journal-entries" },
+        { name: t("nav.ledger", "Ledger"), href: "/accounts/ledger" },
+        { name: t("nav.banking", "Banking"), href: "/accounts/banking" },
+        { name: t("nav.creditDebitNotes", "Credit/Debit Notes"), href: "/accounts/credit-debit-notes" },
+        { name: t("nav.pdcInstruments", "PDC Instruments"), href: "/accounts/instruments" },
+        { name: t("nav.contactSettlement", "Contact Settlement"), href: "/accounts/contact-settlement" },
+        { name: t("nav.tax", "Tax"), href: "/accounts/tax" },
+        { name: t("nav.reconciliation", "Reconciliation"), href: "/accounts/reconciliation" },
+        { name: t("nav.expenses", "Expenses"), href: "/accounts/expenses" },
+      ],
+    },
+    {
+      name: t("nav.inventory", "Inventory"),
+      icon: <Package className="h-5 w-5" />,
+      href: "/inventory",
+      badge: 5,
+      children: [
+        { name: t("nav.dashboard", "Dashboard"), href: "/inventory" },
+        { name: t("nav.stock", "Stock Movement"), href: "/inventory/stock" },
+        { name: t("nav.stockAdjustment", "Stock Adjustment"), href: "/inventory/adjustment" },
+        { name: t("nav.valuation", "Stock Valuation"), href: "/inventory/valuation" },
+        { name: t("nav.warehouses", "Warehouses"), href: "/inventory/warehouses" },
+        { name: t("nav.batches", "Batches"), href: "/inventory/batches" },
+        { name: t("nav.barcodes", "Barcodes"), href: "/inventory/barcodes" },
+      ],
+    },
+    {
+      name: t("nav.manufacturing", "Manufacturing"),
+      icon: <Factory className="h-5 w-5" />,
+      href: "/manufacturing",
+      children: [
+        { name: t("nav.billOfMaterials", "BOM"), href: "/manufacturing/bom" },
+        { name: t("nav.jobOrders", "Job Orders"), href: "/manufacturing/job-orders/new" },
+        { name: t("nav.disassemble", "Disassemble"), href: "/manufacturing/disassemble" },
+      ],
+    },
+    {
+      name: t("nav.hrPayroll", "HR & Payroll"),
+      icon: <Users className="h-5 w-5" />,
+      href: "/hr-payroll",
+      children: [
+        { name: t("nav.employees", "Employees"), href: "/hr-payroll/employees" },
+        { name: t("nav.attendance", "Attendance"), href: "/hr-payroll/attendance" },
+        { name: t("nav.salary", "Salary Processing"), href: "/hr-payroll/salary" },
+      ],
+    },
+    {
+      name: t("nav.fixedAssets", "Fixed Assets"),
+      icon: <Building2 className="h-5 w-5" />,
+      href: "/fixed-assets",
+      children: [
+        { name: t("nav.register", "Asset Register"), href: "/fixed-assets/register" },
+        { name: t("nav.depreciation", "Depreciation"), href: "/fixed-assets/depreciation" },
+      ],
+    },
+    {
+      name: t("nav.reports", "Reports"),
+      icon: <BarChart3 className="h-5 w-5" />,
+      href: "/reports",
+      badge: 100,
+      children: [
+        { name: t("nav.dashboard", "Dashboard"), href: "/reports" },
+        { name: t("nav.profitAndLoss", "Profit & Loss"), href: "/reports/profit-and-loss" },
+        { name: t("nav.balanceSheet", "Balance Sheet"), href: "/reports/balance-sheet" },
+        { name: t("nav.trialBalance", "Trial Balance"), href: "/reports/trial-balance" },
+        { name: t("nav.cashFlow", "Cash Flow"), href: "/reports/cash-flow" },
+        { name: t("nav.customerLedger", "Customer Ledger"), href: "/reports/customer-ledger" },
+        { name: t("nav.vendorLedger", "Vendor Ledger"), href: "/reports/vendor-ledger" },
+        { name: t("nav.employeeLedger", "Employee Ledger"), href: "/reports/employee-ledger" },
+        { name: t("nav.reconciliation", "Aged Receivables"), href: "/reports/aged-receivables" },
+        { name: t("nav.settlement", "Aged Payables"), href: "/reports/aged-payables" },
+        { name: t("nav.tax", "Sales Tax"), href: "/reports/sales-tax" },
+        { name: t("nav.tax", "Purchase Tax"), href: "/reports/purchase-tax" },
+        { name: t("nav.tax", "WHT Report"), href: "/reports/wht" },
+        { name: t("nav.stock", "Stock on Hand"), href: "/reports/stock-on-hand" },
+        { name: t("nav.stock", "Stock Movement"), href: "/reports/stock-movement" },
+        { name: t("nav.inventory", "Low Inventory"), href: "/reports/low-inventory" },
+        { name: t("nav.profitAndLoss", "Product Profit"), href: "/reports/product-profit" },
+        { name: t("nav.inventory", "Product Aging"), href: "/reports/product-aging" },
+        { name: t("nav.salesByMonth", "Sales by Month"), href: "/reports/sales-by-month" },
+        { name: t("nav.salesByGeography", "Sales by Geography"), href: "/reports/sales-by-geography" },
+        { name: t("nav.purchaseOrders", "Purchase Details"), href: "/reports/purchase-details" },
+        { name: t("nav.attendance", "Attendance"), href: "/reports/attendance" },
+        { name: t("nav.payroll", "Payroll Summary"), href: "/reports/payroll-summary" },
+        { name: t("nav.billOfMaterials", "BOM Cost"), href: "/reports/bom-cost" },
+        { name: t("nav.jobOrders", "Job Order Production"), href: "/reports/job-order-production" },
+        { name: t("nav.auditTrail", "Audit Trail"), href: "/reports/audit-log" },
+      ],
+    },
+    {
+      name: t("nav.referEarn", "Refer & Earn"),
+      icon: <Gift className="h-5 w-5" />,
+      href: "/refer-earn",
+    },
+    {
+      name: t("nav.settings", "Settings"),
+      icon: <Settings className="h-5 w-5" />,
+      href: "/settings",
+    },
+  ];
 
   const toggleExpanded = (name: string) => {
     setExpandedItems((prev) =>
@@ -234,7 +240,9 @@ export default function DashboardLayout({
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
     <div
-      className={`fixed inset-y-0 left-0 z-50 flex flex-col bg-nexabook-900 text-white transition-all duration-300 ${
+      className={`fixed inset-y-0 ${
+        dir === "rtl" ? "right-0" : "left-0"
+      } z-50 flex flex-col bg-nexabook-900 text-white transition-all duration-300 ${
         mobile
           ? "w-72"
           : sidebarCollapsed
@@ -243,7 +251,7 @@ export default function DashboardLayout({
       }`}
     >
       {/* Logo Section */}
-      <div className="flex h-16 items-center justify-between px-4 border-b border-nexabook-700">
+      <div className={`flex h-16 items-center justify-between px-4 border-b border-nexabook-700`}>
         {!sidebarCollapsed || mobile ? (
           <Link href="/dashboard" className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
@@ -333,15 +341,15 @@ export default function DashboardLayout({
                   )}
                 </>
               )}
-              
+
               {/* Tooltip for collapsed state */}
               {sidebarCollapsed && (
-                <div className="absolute left-full ml-2 px-3 py-2 bg-nexabook-800 rounded-lg text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                <div className={`absolute ${dir === "rtl" ? "right-full mr-2" : "left-full ml-2"} px-3 py-2 bg-nexabook-800 rounded-lg text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50`}>
                   {item.name}
                 </div>
               )}
             </Link>
-            
+
             {/* Children */}
             <AnimatePresence>
               {item.children && (!sidebarCollapsed || mobile) && expandedItems.includes(item.name) && (
@@ -350,7 +358,7 @@ export default function DashboardLayout({
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="ml-9 mt-1 space-y-1 overflow-hidden"
+                  className={`${dir === "rtl" ? "mr-9" : "ml-9"} mt-1 space-y-1 overflow-hidden`}
                 >
                   {item.children.map((child) => (
                     <Link
@@ -401,100 +409,115 @@ export default function DashboardLayout({
   );
 
   return (
-    <I18nProvider>
-    <div className="min-h-screen bg-nexabook-50">
-      {/* Mobile Sidebar Overlay */}
-      <AnimatePresence>
-        {mobileSidebarOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-              onClick={() => setMobileSidebarOpen(false)}
-            />
-            <Sidebar mobile />
-          </>
-        )}
-      </AnimatePresence>
+    <>
+      <HtmlLangSetter />
+      <div className="min-h-screen bg-nexabook-50">
+        {/* Mobile Sidebar Overlay */}
+        <AnimatePresence>
+          {mobileSidebarOpen && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+                onClick={() => setMobileSidebarOpen(false)}
+              />
+              <Sidebar mobile />
+            </>
+          )}
+        </AnimatePresence>
 
-      {/* Desktop Sidebar */}
-      <div className="hidden lg:block">
-        <Sidebar />
-      </div>
+        {/* Desktop Sidebar */}
+        <div className="hidden lg:block">
+          <Sidebar />
+        </div>
 
-      {/* Main Content */}
-      <div
-        className={`transition-all duration-300 ${
-          sidebarCollapsed ? "lg:ml-20" : "lg:ml-72"
-        }`}
-      >
-        {/* Top Header */}
-        <header className="sticky top-0 z-30 bg-white border-b border-nexabook-200 h-16">
-          <div className="flex items-center justify-between h-full px-4 lg:px-6">
-            {/* Left Section */}
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setMobileSidebarOpen(true)}
-                className="lg:hidden p-2 hover:bg-nexabook-100 rounded-lg"
-              >
-                <Menu className="h-5 w-5" />
-              </button>
-              
-              {/* Search Bar */}
-              <div className="hidden md:flex items-center gap-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-nexabook-400" />
-                  <Input
-                    type="search"
-                    placeholder="Search anything..."
-                    className="w-64 pl-10 bg-nexabook-50 border-nexabook-200 focus:bg-white"
-                  />
+        {/* Main Content */}
+        <div
+          className={`transition-all duration-300 ${
+            dir === "rtl"
+              ? sidebarCollapsed ? "lg:mr-20" : "lg:mr-72"
+              : sidebarCollapsed ? "lg:ml-20" : "lg:ml-72"
+          }`}
+        >
+          {/* Top Header */}
+          <header className="sticky top-0 z-30 bg-white border-b border-nexabook-200 h-16">
+            <div className="flex items-center justify-between h-full px-4 lg:px-6">
+              {/* Left Section */}
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setMobileSidebarOpen(true)}
+                  className="lg:hidden p-2 hover:bg-nexabook-100 rounded-lg"
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+
+                {/* Search Bar */}
+                <div className="hidden md:flex items-center gap-2">
+                  <div className="relative">
+                    <Search className={`absolute ${dir === "rtl" ? "right-3" : "left-3"} top-1/2 -translate-y-1/2 h-4 w-4 text-nexabook-400`} />
+                    <Input
+                      type="search"
+                      placeholder={t("common.searchAnything", "Search anything...")}
+                      className={`${dir === "rtl" ? "pr-10" : "pl-10"} w-64 bg-nexabook-50 border-nexabook-200 focus:bg-white`}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Right Section */}
-            <div className="flex items-center gap-3">
-              {/* Language Toggle */}
-              <LanguageToggle />
+              {/* Right Section */}
+              <div className="flex items-center gap-3">
+                {/* Language Toggle */}
+                <LanguageToggle />
 
-              {/* Notifications */}
-              <button className="relative p-2 hover:bg-nexabook-100 rounded-lg transition-colors">
-                <Bell className="h-5 w-5 text-nexabook-600" />
-                <span className="absolute top-1.5 right-1.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white"></span>
-              </button>
-
-              {/* Logout Button */}
-              <SignOutButton>
-                <button className="p-2 hover:bg-nexabook-100 rounded-lg transition-colors" title="Sign out">
-                  <LogOut className="h-5 w-5 text-nexabook-600" />
+                {/* Notifications */}
+                <button className="relative p-2 hover:bg-nexabook-100 rounded-lg transition-colors">
+                  <Bell className="h-5 w-5 text-nexabook-600" />
+                  <span className="absolute top-1.5 right-1.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-white"></span>
                 </button>
-              </SignOutButton>
 
-              {/* Divider */}
-              <div className="h-6 w-px bg-nexabook-200 hidden md:block" />
+                {/* Logout Button */}
+                <SignOutButton>
+                  <button className="p-2 hover:bg-nexabook-100 rounded-lg transition-colors" title={t("common.signOut", "Sign Out")}>
+                    <LogOut className="h-5 w-5 text-nexabook-600" />
+                  </button>
+                </SignOutButton>
 
-              {/* User Button */}
-              <UserButton
-                appearance={{
-                  elements: {
-                    avatarBox: "h-9 w-9",
-                  },
-                }}
-              />
+                {/* Divider */}
+                <div className="h-6 w-px bg-nexabook-200 hidden md:block" />
+
+                {/* User Button */}
+                <UserButton
+                  appearance={{
+                    elements: {
+                      avatarBox: "h-9 w-9",
+                    },
+                  }}
+                />
+              </div>
             </div>
-          </div>
-        </header>
+          </header>
 
-        {/* Page Content */}
-        <main className="p-4 lg:p-6">
-          <ErrorBoundary>{children}</ErrorBoundary>
-        </main>
+          {/* Page Content */}
+          <main className="p-4 lg:p-6">
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </main>
+        </div>
       </div>
-    </div>
-    <ChatWidget />
+      <ChatWidget />
+    </>
+  );
+}
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <I18nProvider>
+      <DashboardInner>{children}</DashboardInner>
     </I18nProvider>
   );
 }

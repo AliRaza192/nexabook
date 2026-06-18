@@ -36,6 +36,7 @@ export function GatewayPaymentButton({
           invoiceId,
           customerId,
           gateway,
+          returnOrigin: window.location.pathname,
         }),
       });
 
@@ -43,6 +44,12 @@ export function GatewayPaymentButton({
 
       if (data.success && data.redirectUrl) {
         onSuccess?.(data.transactionId);
+        sessionStorage.setItem("NXL_PENDING_PAYMENT", JSON.stringify({
+          transactionId: data.transactionId,
+          gateway,
+          amount,
+          returnUrl: window.location.pathname,
+        }));
         window.location.href = data.redirectUrl;
       } else {
         onError?.(data.error || "Payment initiation failed");

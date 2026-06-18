@@ -81,6 +81,85 @@
   }
 }
 
+/* RTL Support */
+[dir="rtl"] .lg\\:ml-72 {
+  margin-left: 0;
+  margin-right: 18rem;
+}
+
+[dir="rtl"] .lg\\:ml-20 {
+  margin-left: 0;
+  margin-right: 5rem;
+}
+
+[dir="rtl"] .lg\\:mr-72 {
+  margin-right: 0;
+  margin-left: 18rem;
+}
+
+[dir="rtl"] .lg\\:mr-20 {
+  margin-right: 0;
+  margin-left: 5rem;
+}
+
+[dir="rtl"] .ml-9 {
+  margin-left: 0;
+  margin-right: 2.25rem;
+}
+
+[dir="rtl"] .mr-9 {
+  margin-right: 0;
+  margin-left: 2.25rem;
+}
+
+[dir="rtl"] .left-full {
+  left: auto;
+  right: 100%;
+}
+
+[dir="rtl"] .right-full {
+  right: auto;
+  left: 100%;
+}
+
+[dir="rtl"] .ml-2 {
+  margin-left: 0;
+  margin-right: 0.5rem;
+}
+
+[dir="rtl"] .mr-2 {
+  margin-right: 0;
+  margin-left: 0.5rem;
+}
+
+[dir="rtl"] .pl-10 {
+  padding-left: 0;
+  padding-right: 2.5rem;
+}
+
+[dir="rtl"] .pr-10 {
+  padding-right: 0;
+  padding-left: 2.5rem;
+}
+
+[dir="rtl"] .left-3 {
+  left: auto;
+  right: 0.75rem;
+}
+
+[dir="rtl"] .right-3 {
+  right: auto;
+  left: 0.75rem;
+}
+
+[dir="rtl"] .text-left {
+  text-align: right;
+}
+
+[dir="rtl"] .text-right {
+  text-align: left;
+}
+
 /* Professional Print Styles */
 @media print {
   /* Hide navigation, header, and UI elements */

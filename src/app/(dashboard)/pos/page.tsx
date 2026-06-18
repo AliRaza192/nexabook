@@ -147,6 +147,20 @@ export default function PosPage() {
         if (customersRes.success && customersRes.data) {
           setCustomers(customersRes.data as PosCustomer[]);
         }
+
+        // Check for pending gateway payment completion
+        const pendingRaw = sessionStorage.getItem("NXL_PENDING_PAYMENT");
+        if (pendingRaw) {
+          sessionStorage.removeItem("NXL_PENDING_PAYMENT");
+          const pending = JSON.parse(pendingRaw);
+          if (pending.returnUrl === "/pos" || pending.returnUrl?.startsWith("/pos")) {
+            const params = new URLSearchParams(window.location.search);
+            const paymentStatus = params.get("payment");
+            if (paymentStatus === "completed") {
+              alert(`Gateway payment (${pending.gateway}) completed! Transaction: ${pending.transactionId}`);
+            }
+          }
+        }
       } catch (error) {
       } finally {
         setLoading(false);

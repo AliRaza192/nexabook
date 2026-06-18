@@ -45,7 +45,7 @@ export interface PosSaleItem {
 export interface PosSaleData {
   customerId?: string;
   items: PosSaleItem[];
-  paymentMethod: 'cash' | 'card' | 'mixed';
+  paymentMethod: 'cash' | 'card' | 'mixed' | 'jazzcash' | 'easypaisa';
   cashReceived?: number;
   cardReceived?: number;
   discountPercentage?: number;
