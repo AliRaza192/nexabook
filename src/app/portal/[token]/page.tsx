@@ -5,7 +5,13 @@ import { useParams } from "next/navigation";
 import { getPortalData } from "@/lib/actions/portal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Building2, FileText, DollarSign, Phone, Mail, Loader2, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Building2, FileText, Phone, Mail, Loader2, AlertCircle, CreditCard,
+} from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   sent: "bg-blue-100 text-blue-800",
@@ -19,6 +25,9 @@ export default function PortalPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [paying, setPaying] = useState<string | null>(null);
+  const [payDialog, setPayDialog] = useState<any>(null);
+  const [payLoading, setPayLoading] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -28,6 +37,27 @@ export default function PortalPage() {
       else setError(res.error || "Invalid link");
     });
   }, [token]);
+
+  const handlePay = async (invoiceId: string, amount: string, gateway: string) => {
+    setPayLoading(true);
+    try {
+      const res = await fetch("/api/portal-pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, invoiceId, amount, gateway }),
+      });
+      const json = await res.json();
+      if (json.success && json.redirectUrl) {
+        window.location.href = json.redirectUrl;
+      } else {
+        alert(json.error || "Payment failed");
+      }
+    } catch {
+      alert("Payment failed. Please try again.");
+    }
+    setPayLoading(false);
+    setPayDialog(null);
+  };
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-nexabook-50 to-white">
@@ -104,14 +134,12 @@ export default function PortalPage() {
               <div className="divide-y divide-nexabook-100">
                 {invoices.map((inv: any) => (
                   <div key={inv.id} className="flex items-center justify-between px-5 py-3.5 hover:bg-nexabook-50 transition-colors">
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <p className="text-sm font-medium text-nexabook-900">{inv.invoiceNumber}</p>
-                        <p className="text-xs text-nexabook-400 mt-0.5">
-                          {new Date(inv.issueDate).toLocaleDateString("en-PK")}
-                          {inv.dueDate && ` • Due: ${new Date(inv.dueDate).toLocaleDateString("en-PK")}`}
-                        </p>
-                      </div>
+                    <div>
+                      <p className="text-sm font-medium text-nexabook-900">{inv.invoiceNumber}</p>
+                      <p className="text-xs text-nexabook-400 mt-0.5">
+                        {new Date(inv.issueDate).toLocaleDateString("en-PK")}
+                        {inv.dueDate && ` • Due: ${new Date(inv.dueDate).toLocaleDateString("en-PK")}`}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-semibold text-nexabook-900">
@@ -120,6 +148,16 @@ export default function PortalPage() {
                       <Badge className={`${STATUS_COLORS[inv.status] || "bg-gray-100 text-gray-700"} text-xs capitalize`}>
                         {inv.status}
                       </Badge>
+                      {inv.status !== "paid" && (
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white h-8"
+                          onClick={() => setPayDialog(inv)}
+                        >
+                          <CreditCard className="h-3.5 w-3.5 mr-1" />
+                          Pay
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -132,6 +170,39 @@ export default function PortalPage() {
           Powered by NexaBook — Accounting & Invoicing Software
         </p>
       </div>
+
+      {/* Payment Dialog */}
+      <Dialog open={!!payDialog} onOpenChange={(o) => !o && setPayDialog(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="h-4 w-4 text-nexabook-600" />
+              Pay {payDialog?.invoiceNumber}
+            </DialogTitle>
+            <DialogDescription>
+              Amount: Rs. {parseFloat(payDialog?.balanceAmount || payDialog?.netAmount || "0").toLocaleString("en-PK", { minimumFractionDigits: 2 })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Button
+              className="w-full h-14 bg-green-600 hover:bg-green-700 text-white text-base"
+              onClick={() => handlePay(payDialog.id, payDialog.balanceAmount || payDialog.netAmount, "jazzcash")}
+              disabled={payLoading}
+            >
+              {payLoading ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
+              Pay with JazzCash
+            </Button>
+            <Button
+              className="w-full h-14 bg-orange-600 hover:bg-orange-700 text-white text-base"
+              onClick={() => handlePay(payDialog.id, payDialog.balanceAmount || payDialog.netAmount, "easypaisa")}
+              disabled={payLoading}
+            >
+              {payLoading ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
+              Pay with Easypaisa
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
