@@ -161,6 +161,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         { name: t("nav.warehouses", "Warehouses"), href: "/inventory/warehouses" },
         { name: t("nav.batches", "Batches"), href: "/inventory/batches" },
         { name: t("nav.barcodes", "Barcodes"), href: "/inventory/barcodes" },
+        { name: "Price Lists", href: "/inventory/price-lists" },
       ],
     },
     {

@@ -168,6 +168,28 @@ export const productCategories = pgTable('product_categories', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Price Lists
+export const priceLists = pgTable("price_lists", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  type: varchar("type", { length: 20 }).notNull().default("custom"), // retail, wholesale, gold, platinum, custom
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const priceListItems = pgTable("price_list_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull(),
+  priceListId: uuid("price_list_id").references(() => priceLists.id).notNull(),
+  productId: uuid("product_id").references(() => products.id).notNull(),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(),
+  minQuantity: decimal("min_quantity", { precision: 10, scale: 2 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Units of Measure (UOM)
 export const uoms = pgTable('uoms', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -414,6 +436,7 @@ export const customers = pgTable('customers', {
   phone: varchar('phone', { length: 20 }),
   address: text('address'),
   portalToken: varchar('portal_token', { length: 64 }).unique(),
+  priceListId: uuid("price_list_id").references(() => priceLists.id),
   city: varchar('city', { length: 100 }),
   ntn: varchar('ntn', { length: 50 }), // National Tax Number
   strn: varchar('strn', { length: 50 }), // Sales Tax Registration Number
