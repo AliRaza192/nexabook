@@ -413,6 +413,7 @@ export const customers = pgTable('customers', {
   email: varchar('email', { length: 255 }),
   phone: varchar('phone', { length: 20 }),
   address: text('address'),
+  portalToken: varchar('portal_token', { length: 64 }).unique(),
   city: varchar('city', { length: 100 }),
   ntn: varchar('ntn', { length: 50 }), // National Tax Number
   strn: varchar('strn', { length: 50 }), // Sales Tax Registration Number
