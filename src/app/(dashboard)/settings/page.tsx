@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import {
   Building2, Users, Save, Loader2, CheckCircle2, AlertCircle,
   X, Pencil, ShieldCheck, UserCheck, UserX, Settings2, Bell,
+  HandHeart,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ import {
   type CompanyProfileData, type UpdateUserData,
 } from "@/lib/actions/settings";
 
-type Tab = "company" | "users" | "myprofile" | "numbering" | "reminders";
+type Tab = "company" | "users" | "myprofile" | "numbering" | "reminders" | "islamic";
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-purple-100 text-purple-800",
@@ -66,6 +67,15 @@ export default function SettingsPage() {
   // My Profile
   const [myProfile, setMyProfile] = useState({ fullName: "", phone: "", department: "", designation: "" });
 
+  // Islamic Finance
+  const [formData, setFormData] = useState({
+    islamicFinanceEnabled: false,
+    zakatCalculationMethod: "standard",
+    zakatPercentage: "2.50",
+    interestFreeTerms: "No interest (riba) is charged as per Islamic finance principles.",
+    latePaymentCharity: true,
+  });
+
   // Reminder Settings
   const [reminder, setReminder] = useState({
     isActive: false,
@@ -102,6 +112,16 @@ export default function SettingsPage() {
       });
     }
     if (usersRes.success && usersRes.data) setUsers(usersRes.data as any);
+    if (compRes.success && compRes.data) {
+      const org = compRes.data as any;
+      setFormData({
+        islamicFinanceEnabled: org.islamicFinanceEnabled ?? false,
+        zakatCalculationMethod: org.zakatCalculationMethod || "standard",
+        zakatPercentage: org.zakatPercentage || "2.50",
+        interestFreeTerms: org.interestFreeTerms || "No interest (riba) is charged as per Islamic finance principles.",
+        latePaymentCharity: org.latePaymentCharity ?? true,
+      });
+    }
     if (remRes.success && remRes.data) {
       const r = remRes.data as any;
       setReminder({
@@ -167,6 +187,20 @@ export default function SettingsPage() {
     }
   };
 
+  const saveIslamic = async () => {
+    setSaving(true);
+    const r = await updateCompanyProfile({
+      ...company,
+      islamicFinanceEnabled: formData.islamicFinanceEnabled,
+      zakatCalculationMethod: formData.zakatCalculationMethod,
+      zakatPercentage: formData.zakatPercentage,
+      interestFreeTerms: formData.interestFreeTerms,
+      latePaymentCharity: formData.latePaymentCharity,
+    } as any);
+    setSaving(false);
+    r.success ? showMsg("success", "Islamic finance settings saved") : showMsg("error", r.error || "Failed");
+  };
+
   const saveReminder = async () => {
     setSaving(true);
     const r = await updateReminderSettings(reminder);
@@ -188,6 +222,7 @@ export default function SettingsPage() {
     { id: "users", label: "User Management", icon: <Users className="h-4 w-4" /> },
     { id: "myprofile", label: "My Profile", icon: <ShieldCheck className="h-4 w-4" /> },
     { id: "reminders", label: "Payment Reminders", icon: <Bell className="h-4 w-4" /> },
+    { id: "islamic", label: "Islamic Finance", icon: <HandHeart className="h-4 w-4" /> },
   ];
 
   return (
@@ -639,6 +674,97 @@ export default function SettingsPage() {
               Save Reminder Settings
             </Button>
           </div>
+        </motion.div>
+      )}
+
+      {/* ── Tab: Islamic Finance ── */}
+      {activeTab === "islamic" && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          <Card className="enterprise-card max-w-2xl">
+            <CardHeader className="pb-3 border-b border-nexabook-50">
+              <CardTitle className="text-base font-semibold text-nexabook-900 flex items-center gap-2">
+                <HandHeart className="h-4 w-4 text-nexabook-600" />
+                Islamic Finance Mode
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-nexabook-900">Enable Islamic Finance Mode</p>
+                  <p className="text-xs text-nexabook-500">Enable Shariah-compliant accounting (interest-free, Zakat calculation, etc.)</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" className="sr-only peer"
+                    checked={formData.islamicFinanceEnabled}
+                    onChange={(e) => setFormData({ ...formData, islamicFinanceEnabled: e.target.checked })}
+                  />
+                  <div className="w-11 h-6 bg-nexabook-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                </label>
+              </div>
+
+              {formData.islamicFinanceEnabled && (
+                <div className="border-t border-nexabook-100 pt-4 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label>Zakat Calculation Method</Label>
+                      <Select value={formData.zakatCalculationMethod || "standard"}
+                        onValueChange={(v) => setFormData({ ...formData, zakatCalculationMethod: v })}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="standard">Standard (2.5% of total assets)</SelectItem>
+                          <SelectItem value="hawal">Hawal (based on cash + gold)</SelectItem>
+                          <SelectItem value="urf">Urf (custom method)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Zakat Percentage</Label>
+                      <div className="flex items-center gap-2">
+                        <Input type="number" step="0.01" min="0" max="100"
+                          value={formData.zakatPercentage}
+                          onChange={(e) => setFormData({ ...formData, zakatPercentage: e.target.value })}
+                        />
+                        <span className="text-sm text-nexabook-500">%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label>Interest-Free Terms (shown on invoices)</Label>
+                    <textarea
+                      className="w-full min-h-[80px] rounded-lg border border-nexabook-200 bg-white px-3 py-2 text-sm text-nexabook-800 focus:outline-none focus:ring-2 focus:ring-nexabook-400 resize-y"
+                      value={formData.interestFreeTerms}
+                      onChange={(e) => setFormData({ ...formData, interestFreeTerms: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-nexabook-100">
+                    <div>
+                      <p className="text-sm font-medium text-nexabook-900">Late Payment Charity</p>
+                      <p className="text-xs text-nexabook-500">Charge late fee as charity donation instead of interest</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer"
+                        checked={formData.latePaymentCharity}
+                        onChange={(e) => setFormData({ ...formData, latePaymentCharity: e.target.checked })}
+                      />
+                      <div className="w-11 h-6 bg-nexabook-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {formData.islamicFinanceEnabled && (
+            <div className="flex justify-end">
+              <Button onClick={saveIslamic} disabled={saving} className="bg-nexabook-600 hover:bg-nexabook-700 text-white px-6">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                Save Islamic Finance Settings
+              </Button>
+            </div>
+          )}
         </motion.div>
       )}
 

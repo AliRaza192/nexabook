@@ -47,6 +47,11 @@ export interface CompanyProfileData {
   numberingPadding?: number;
   numberingIncludeYear?: boolean;
   logo?: string;
+  islamicFinanceEnabled?: boolean;
+  zakatCalculationMethod?: string;
+  zakatPercentage?: string;
+  interestFreeTerms?: string;
+  latePaymentCharity?: boolean;
 }
 
 export async function updateCompanyProfile(data: CompanyProfileData) {
@@ -78,6 +83,11 @@ export async function updateCompanyProfile(data: CompanyProfileData) {
         numberingPadding: data.numberingPadding,
         numberingIncludeYear: data.numberingIncludeYear,
         logo: data.logo,
+        islamicFinanceEnabled: data.islamicFinanceEnabled,
+        zakatCalculationMethod: data.zakatCalculationMethod,
+        zakatPercentage: data.zakatPercentage,
+        interestFreeTerms: data.interestFreeTerms,
+        latePaymentCharity: data.latePaymentCharity,
         updatedAt: new Date(),
       })
       .where(eq(organizations.id, orgId));
