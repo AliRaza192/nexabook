@@ -31,7 +31,6 @@ import {
   ChevronLeft,
   Building,
   LogOut,
-  Gift,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,7 +103,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
       children: [
         { name: t("nav.vendors", "Vendors"), href: "/purchases/vendors" },
         { name: t("nav.purchaseOrders", "Purchase Orders"), href: "/purchases/orders" },
-        { name: t("nav.invoices", "Purchase Invoices"), href: "/purchases/invoices" },
+        { name: t("nav.purchaseInvoices", "Purchase Invoices"), href: "/purchases/invoices" },
         { name: t("nav.grn", "GRN"), href: "/purchases/grn" },
         { name: t("nav.purchaseReturns", "Purchase Returns"), href: "/purchases/returns" },
         { name: t("nav.payments", "Vendor Payments"), href: "/purchases/payments" },

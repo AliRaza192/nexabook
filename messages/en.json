@@ -21,6 +21,7 @@
   "nav.quotations": "Quotations",
   "nav.salesOrders": "Sales Orders",
   "nav.invoices": "Invoices",
+  "nav.purchaseInvoices": "Purchase Invoices",
   "nav.delivery": "Delivery",
   "nav.recurringInvoices": "Recurring Invoices",
   "nav.salesReturns": "Sales Returns",
