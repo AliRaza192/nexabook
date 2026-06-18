@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { db } from "@/db";
 import { profiles } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -14,14 +15,16 @@ async function getCurrentOrgId(userId: string): Promise<string | null> {
   return userProfile.length > 0 && userProfile[0].orgId ? userProfile[0].orgId : null;
 }
 
-const SYSTEM_PROMPT = `You are NexaBot, an AI accounting assistant for NexaBook. You help Pakistani business owners understand their financial data.
+const SYSTEM_PROMPT = `Tu NexaBot hai — NexaBook ka AI accounting assistant. Pakistani business owners ki help karta hai Roman Urdu + English mixed language mein.
 
 Rules:
-- Answer concisely in plain English or Urdu.
-- Use Pakistani Rupee (PKR) format: Rs. 1,00,000 (South Asian numbering).
-- Only answer questions about the provided accounting data.
-- If asked something outside the provided data, say "I can only answer questions about your accounting data."
-- Use a friendly, professional tone.`;
+- Hamesha Roman Urdu mein jawab de (Urdu English mix — jaise Pakistani log baat karte hain)
+- Pakistani Rupee format use kar: Rs. 1,00,000 (South Asian numbering)
+- Sirf provided accounting data ke baare mein jawab de
+- Agar koi accounting data nahi hai to bol: "Is bare mein data available nahi hai"
+- Friendly tone rakho — jaise ek helpful accountant dost ho
+- Numbers ke saath context bhi do — sirf figures mat do
+- Positive results pe "Mashallah!" ya "Bohot acha!" use kar`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,6 +53,9 @@ export async function POST(request: NextRequest) {
     if (/\b(customer.*balance|receivable|loan|qarz)\b/.test(msg)) needsData.push("customerBalances");
     if (/\b(cash|bank|balance.*account|paise|nagad)\b/.test(msg)) needsData.push("cashPosition");
     if (/\b(profit|loss|profit and loss|munafa|nuqsan|p&l)\b/.test(msg)) needsData.push("profitLoss");
+    if (/\b(low stock|reorder|stock khatam|reorder point)\b/.test(msg)) needsData.push("lowStock");
+    if (/\b(overdue|late|der|overdue invoices)\b/.test(msg)) needsData.push("overdueInvoices");
+    if (/\b(top customer|best customer|sab se acha)\b/.test(msg)) needsData.push("topCustomers");
 
     if (needsData.length === 0) {
       needsData = ["revenue", "pendingInvoices", "cashPosition"];
@@ -74,29 +80,54 @@ export async function POST(request: NextRequest) {
 
     const context = contextParts.join("\n\n");
 
-    // Build conversation history
-    const conversationMessages: { role: string; content: string }[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-    ];
-
-    if (Array.isArray(history) && history.length > 0) {
-      const sliced = history.slice(-10);
-      for (const msg of sliced) {
-        if (msg.role === "user" || msg.role === "assistant") {
-          conversationMessages.push({ role: msg.role, content: msg.content });
-        }
-      }
-    }
-
-    conversationMessages.push({
-      role: "user",
-      content: `${message}\n\nRelevant accounting data:\n${context}`,
-    });
-
-    // Try OpenAI first, fallback to Ollama
+    // Try Gemini first, fallback to OpenAI, then Ollama
     let answer: string;
 
-    if (process.env.OPENAI_API_KEY) {
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+        const historyMessages: { role: string; parts: { text: string }[] }[] = [];
+        if (Array.isArray(history)) {
+          for (const msg of history.slice(-10)) {
+            if (msg.role === "user" || msg.role === "assistant") {
+              historyMessages.push({
+                role: msg.role === "assistant" ? "model" : "user",
+                parts: [{ text: msg.content }],
+              });
+            }
+          }
+        }
+
+        const chat = model.startChat({
+          history: historyMessages,
+          systemInstruction: { role: "system", parts: [{ text: SYSTEM_PROMPT }] },
+        });
+
+        const result = await chat.sendMessage(`${message}\n\nRelevant accounting data:\n${context}`);
+        answer = result.response.text();
+      } catch (err) {
+        answer = "Sorry, Gemini response mein error aaya. Dobara try karein.";
+      }
+    } else if (process.env.OPENAI_API_KEY) {
+      const conversationMessages: { role: string; content: string }[] = [
+        { role: "system", content: SYSTEM_PROMPT },
+      ];
+
+      if (Array.isArray(history) && history.length > 0) {
+        for (const msg of history.slice(-10)) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            conversationMessages.push({ role: msg.role, content: msg.content });
+          }
+        }
+      }
+
+      conversationMessages.push({
+        role: "user",
+        content: `${message}\n\nRelevant accounting data:\n${context}`,
+      });
+
       const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -117,7 +148,12 @@ export async function POST(request: NextRequest) {
       const openaiData = await openaiRes.json();
       answer = openaiData.choices?.[0]?.message?.content || "Sorry, I couldn't generate a response.";
     } else if (process.env.OLLAMA_BASE_URL) {
-      const prompt = conversationMessages.map((m) => `${m.role}: ${m.content}`).join("\n");
+      const prompt = [
+        `System: ${SYSTEM_PROMPT}`,
+        ...(Array.isArray(history) ? history.slice(-10).map((m) => `${m.role}: ${m.content}`) : []),
+        `user: ${message}\n\nRelevant accounting data:\n${context}`,
+      ].join("\n");
+
       const ollamaRes = await fetch(`${process.env.OLLAMA_BASE_URL}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -140,7 +176,7 @@ export async function POST(request: NextRequest) {
         success: true,
         answer: null,
         data: contextParts,
-        warning: "No AI provider configured. Set OPENAI_API_KEY or OLLAMA_BASE_URL in .env.local",
+        warning: "No AI provider configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or OLLAMA_BASE_URL in .env.local",
       });
     }
 

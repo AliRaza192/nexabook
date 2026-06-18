@@ -186,6 +186,98 @@ export async function getProfitLoss(orgId: string): Promise<RetrievalResult> {
   };
 }
 
+export async function getLowStock(orgId: string): Promise<RetrievalResult> {
+  const rows = await db
+    .select({
+      name: products.name,
+      sku: products.sku,
+      currentStock: products.currentStock,
+      minLevel: products.minStockLevel,
+    })
+    .from(products)
+    .where(
+      and(
+        eq(products.orgId, orgId),
+        sql`${products.currentStock} <= ${products.minStockLevel}`,
+        sql`${products.minStockLevel} > '0'`
+      )
+    )
+    .limit(10);
+
+  return {
+    label: "Low Stock Products",
+    data: rows,
+    summary: rows.length > 0
+      ? `${rows.length} products below reorder level: ${rows.map((r) => `${r.name} (SKU: ${r.sku}, Stock: ${r.currentStock}, Min: ${r.minLevel})`).join(", ")}`
+      : "No low stock products found. All stock levels are healthy!",
+  };
+}
+
+export async function getOverdueInvoices(orgId: string): Promise<RetrievalResult> {
+  const rows = await db
+    .select({
+      invoiceNumber: invoices.invoiceNumber,
+      customerName: customers.name,
+      netAmount: invoices.netAmount,
+      balanceAmount: invoices.balanceAmount,
+      dueDate: invoices.dueDate,
+      daysOverdue: sql<number>`EXTRACT(DAY FROM NOW() - ${invoices.dueDate})`,
+    })
+    .from(invoices)
+    .innerJoin(customers, eq(invoices.customerId, customers.id))
+    .where(
+      and(
+        eq(invoices.orgId, orgId),
+        sql`${invoices.dueDate} < NOW()`,
+        sql`${invoices.balanceAmount} > '0'`,
+        sql`${invoices.status} NOT IN ('draft', 'cancelled', 'paid')`
+      )
+    )
+    .orderBy(desc(sql`EXTRACT(DAY FROM NOW() - ${invoices.dueDate})`))
+    .limit(10);
+
+  const totalOverdue = rows.reduce((s, r) => s + parseFloat(r.balanceAmount || "0"), 0);
+
+  return {
+    label: "Overdue Invoices",
+    data: rows,
+    summary: rows.length > 0
+      ? `${rows.length} overdue invoices, total PKR ${totalOverdue.toFixed(2)}. ${rows.map((r) => `${r.customerName}: PKR ${r.balanceAmount} (${r.daysOverdue} days overdue)`).join(", ")}`
+      : "No overdue invoices. Mashallah!",
+  };
+}
+
+export async function getTopCustomers(orgId: string, monthsBack = 3): Promise<RetrievalResult> {
+  const since = new Date();
+  since.setMonth(since.getMonth() - monthsBack);
+
+  const rows = await db
+    .select({
+      name: customers.name,
+      phone: customers.phone,
+      totalSales: sql<string>`COALESCE(SUM(${invoices.netAmount}), '0')`,
+      invoiceCount: sql<number>`COUNT(${invoices.id})`,
+    })
+    .from(customers)
+    .innerJoin(invoices, eq(customers.id, invoices.customerId))
+    .where(
+      and(
+        eq(customers.orgId, orgId),
+        gte(invoices.createdAt, since),
+        sql`${invoices.status} NOT IN ('draft', 'cancelled')`
+      )
+    )
+    .groupBy(customers.id, customers.name, customers.phone)
+    .orderBy(desc(sql`COALESCE(SUM(${invoices.netAmount}), '0')`))
+    .limit(5);
+
+  return {
+    label: "Top Customers",
+    data: rows,
+    summary: rows.map((r) => `${r.name}: PKR ${r.totalSales} (${r.invoiceCount} invoices)`).join(", "),
+  };
+}
+
 export const retrievers: Record<string, (orgId: string, ...args: any[]) => Promise<RetrievalResult>> = {
   revenue: getRevenue,
   pendingInvoices: getPendingInvoices,
@@ -193,4 +285,7 @@ export const retrievers: Record<string, (orgId: string, ...args: any[]) => Promi
   customerBalances: getCustomerBalances,
   cashPosition: getCashPosition,
   profitLoss: getProfitLoss,
+  lowStock: getLowStock,
+  overdueInvoices: getOverdueInvoices,
+  topCustomers: getTopCustomers,
 };
