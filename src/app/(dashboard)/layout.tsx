@@ -241,6 +241,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
       children: [
         { name: "Approval Workflows", href: "/settings/approvals" },
         { name: "Email Templates", href: "/settings/email-templates" },
+        { name: "Dashboard", href: "/settings/dashboard" },
       ],
     },
   ];

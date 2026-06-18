@@ -85,6 +85,19 @@ export const organizations = pgTable('organizations', {
   charityAccountId: uuid('charity_account_id'),
 });
 
+// Dashboard Widget Settings
+export const dashboardWidgets = pgTable("dashboard_widgets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orgId: uuid("org_id").references(() => organizations.id).notNull(),
+  widgetKey: varchar("widget_key", { length: 50 }).notNull(),
+  isVisible: boolean("is_visible").notNull().default(true),
+  position: integer("position").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqueOrgWidget: unique("uq_dashboard_widget_org").on(table.orgId, table.widgetKey),
+}));
+
 // Email Templates
 export const emailTemplates = pgTable("email_templates", {
   id: uuid("id").defaultRandom().primaryKey(),
