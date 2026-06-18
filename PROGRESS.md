@@ -59,7 +59,63 @@
 
 ---
 
+## PHASE G — AUDIT FIXES & ROADMAP SPRINTS
+
+### Sprint 1 — Critical Bugs Fix
+- [x] 1.1 Trial Balance: Net balance instead of gross debits/credits
+- [x] 1.2 COA Auto-Seeding on signup (already works)
+- [x] 1.3 Navigation badge counts — removed hardcoded badges
+- [x] 1.4 Badge TypeScript variants — already correct
+- [x] 1.5 Opening Balance OBE double contra fix
+
+### Sprint 2 — PDF Invoice
+- [x] 2.1 jsPDF dependency installed
+- [x] 2.2 Invoice PDF template with professional design
+- [x] 2.3 FBR QR code integration in PDF
+- [x] 2.4 Download button in invoice list page
+
+### Sprint 3 — Smart Onboarding Wizard
+- [ ] 3.1 Onboarding schema (`onboarding_progress` table)
+- [ ] 3.2 5-step onboarding wizard page
+- [ ] 3.3 Redirect new users to onboarding
+
+### Sprint 4 — NexaBot Upgrade
+- [ ] 4.1 Gemini SDK integration
+- [ ] 4.2 Roman Urdu + English mixed language support
+- [ ] 4.3 More data retrievers (topCustomers, lowStock, overdueInvoices, etc.)
+- [ ] 4.4 Action buttons in chat responses
+
+### Sprint 5 — Automated Payment Reminders
+- [ ] 5.1 Reminder settings schema
+- [ ] 5.2 Cron job for daily reminders
+- [ ] 5.3 Reminder settings UI
+
+### Sprint 6 — Recurring Invoice Auto-Generation
+- [ ] 6.1 Schema exists — cron auto-trigger needed
+- [ ] 6.2 `vercel.json` cron configuration
+
+### Sprint 7 — Low Stock Alerts
+- [x] 7.1 Low stock logic already exists
+- [x] 7.2 Dashboard widget showing low stock count
+- [ ] 7.3 Cron for low stock notifications
+
+### Sprint 8 — UX Improvements
+- [ ] 8.1 Command palette (Ctrl+K)
+- [ ] 8.2 Meaningful error messages helper
+
+### Sprint 9 — Security & Performance
+- [ ] 9.1 Rate limiting on API routes
+- [ ] 9.2 Fix DB count queries (`.length + 1` pattern)
+- [ ] 9.3 TypeScript fixes in key files
+
+### Sprint 10 — Islamic Finance Mode
+- [ ] 10.1 Islamic finance settings schema
+- [ ] 10.2 Islamic terminology mapping
+- [ ] 10.3 Zakat calculator
+
+---
+
 **Jab session restart karein:**
 1. `cat ROADMAP.md` — poori planning dekhein
 2. `cat PROGRESS.md` — kahan tak hua hai dekhein
-3. Mujhe bata dein: "Phase X task Y se shuru karo"
+3. Mujhe bata dein: "Phase G Sprint X task Y se shuru karo"
