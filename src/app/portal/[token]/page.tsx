@@ -10,7 +10,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Building2, FileText, Phone, Mail, Loader2, AlertCircle, CreditCard,
+  Building2, FileText, Phone, Mail, Loader2, AlertCircle, CreditCard, Download,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -104,7 +104,7 @@ export default function PortalPage() {
         </Card>
 
         {/* Welcome + Balance */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card className="border-nexabook-200">
             <CardContent className="p-5">
               <p className="text-sm text-nexabook-500">Welcome</p>
@@ -115,6 +115,17 @@ export default function PortalPage() {
             <CardContent className="p-5">
               <p className="text-sm text-nexabook-500">Total Outstanding</p>
               <p className="text-2xl font-bold text-red-600 mt-1">Rs. {totalDue.toLocaleString("en-PK", { minimumFractionDigits: 2 })}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-nexabook-200">
+            <CardContent className="p-5 flex items-center justify-center">
+              <a
+                href={`/api/portal-statement?token=${token}`}
+                className="flex items-center gap-2 text-sm font-medium text-nexabook-600 hover:text-nexabook-900 transition-colors"
+              >
+                <Download className="h-5 w-5" />
+                Download Statement
+              </a>
             </CardContent>
           </Card>
         </div>
