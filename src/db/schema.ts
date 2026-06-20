@@ -44,6 +44,14 @@ export const stockAdjustmentReasonEnum = pgEnum('stock_adjustment_reason', ['dam
 export const valuationMethodEnum = pgEnum('valuation_method', ['fifo', 'weighted_average']);
 export const miscContactTypeEnum = pgEnum('misc_contact_type', ['capital_investment', 'loan_proceeds', 'loan_repayment', 'owner_withdrawal', 'dividend', 'other']);
 export const approvalStatusEnum = pgEnum('approval_status', ['draft', 'pending_approval', 'approved', 'rejected']);
+// Webhook Enums
+export const webhookEventEnum = pgEnum('webhook_event', [
+  'invoice.created', 'invoice.updated', 'invoice.paid',
+  'payment.received',
+  'customer.created', 'customer.updated',
+  'purchase.created', 'purchase.updated',
+]);
+export const webhookDeliveryStatusEnum = pgEnum('webhook_delivery_status', ['pending', 'success', 'failed']);
 
 // Organizations Table (Multi-Tenant Root)
 export const organizations = pgTable('organizations', {
@@ -895,6 +903,98 @@ export const taxRatesRelations = relations(taxRates, ({ one }) => ({
 
 export type TaxRate = typeof taxRates.$inferSelect;
 export type NewTaxRate = typeof taxRates.$inferInsert;
+
+// ==========================================
+// SALES TAX RETURNS TABLE
+// ==========================================
+export const salesTaxReturns = pgTable('sales_tax_returns', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  periodStart: timestamp('period_start').notNull(),
+  periodEnd: timestamp('period_end').notNull(),
+  periodLabel: varchar('period_label', { length: 20 }).notNull(),
+  returnType: varchar('return_type', { length: 10 }).notNull().default('monthly'),
+  totalSales: decimal('total_sales', { precision: 14, scale: 2 }).notNull().default('0'),
+  totalOutputTax: decimal('total_output_tax', { precision: 14, scale: 2 }).notNull().default('0'),
+  totalPurchases: decimal('total_purchases', { precision: 14, scale: 2 }).notNull().default('0'),
+  totalInputTax: decimal('total_input_tax', { precision: 14, scale: 2 }).notNull().default('0'),
+  netPayable: decimal('net_payable', { precision: 14, scale: 2 }).notNull().default('0'),
+  status: varchar('status', { length: 20 }).notNull().default('draft'),
+  calculatedAt: timestamp('calculated_at'),
+  submittedAt: timestamp('submitted_at'),
+  fbrSubmissionId: varchar('fbr_submission_id', { length: 100 }),
+  fbrResponse: text('fbr_response'),
+  fbrReturnPeriod: varchar('fbr_return_period', { length: 20 }),
+  notes: text('notes'),
+  createdBy: varchar('created_by', { length: 255 }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const salesTaxReturnsRelations = relations(salesTaxReturns, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [salesTaxReturns.orgId],
+    references: [organizations.id],
+  }),
+}));
+
+export type SalesTaxReturn = typeof salesTaxReturns.$inferSelect;
+export type NewSalesTaxReturn = typeof salesTaxReturns.$inferInsert;
+
+// WEBHOOKS
+// ==========================================
+export const webhookEndpoints = pgTable('webhook_endpoints', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  url: text('url').notNull(),
+  events: text('events').array().notNull(),
+  secret: varchar('secret', { length: 64 }).notNull(),
+  isActive: boolean('is_active').notNull().default(true),
+  description: text('description'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const webhookDeliveries = pgTable('webhook_deliveries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  webhookEndpointId: uuid('webhook_endpoint_id').references(() => webhookEndpoints.id).notNull(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  event: webhookEventEnum('event').notNull(),
+  payload: jsonb('payload').notNull(),
+  status: webhookDeliveryStatusEnum('status').notNull().default('pending'),
+  responseCode: integer('response_code'),
+  responseBody: text('response_body'),
+  attempts: integer('attempts').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(3),
+  nextRetryAt: timestamp('next_retry_at'),
+  completedAt: timestamp('completed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const webhookEndpointsRelations = relations(webhookEndpoints, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [webhookEndpoints.orgId],
+    references: [organizations.id],
+  }),
+  deliveries: many(webhookDeliveries),
+}));
+
+export const webhookDeliveriesRelations = relations(webhookDeliveries, ({ one }) => ({
+  webhookEndpoint: one(webhookEndpoints, {
+    fields: [webhookDeliveries.webhookEndpointId],
+    references: [webhookEndpoints.id],
+  }),
+  organization: one(organizations, {
+    fields: [webhookDeliveries.orgId],
+    references: [organizations.id],
+  }),
+}));
+
+export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect;
+export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert;
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
+export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert;
 
 // Exchange Rates
 export const exchangeRates = pgTable('exchange_rates', {
@@ -2639,6 +2739,14 @@ export const schema = {
   // Product Attributes
   productAttributes,
   productAttributesRelations,
+  // Sales Tax Returns
+  salesTaxReturns,
+  salesTaxReturnsRelations,
+  // Webhooks
+  webhookEndpoints,
+  webhookDeliveries,
+  webhookEndpointsRelations,
+  webhookDeliveriesRelations,
 };
 
 

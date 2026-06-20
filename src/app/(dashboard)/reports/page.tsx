@@ -122,6 +122,7 @@ const reportCategories: ReportCategory[] = [
       { name: "Sales Tax Collected", href: "/reports/sales-tax", description: "Output tax analysis" },
       { name: "Tax Paid on Purchases", href: "/reports/purchase-tax", description: "Input tax analysis" },
       { name: "WHT Report", href: "/reports/wht", description: "Withholding tax report" },
+      { name: "Tax Returns", href: "/reports/tax-returns", description: "Sales tax return filing with FBR" },
     ],
   },
 ];

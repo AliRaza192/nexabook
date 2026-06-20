@@ -211,6 +211,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         { name: t("nav.agedReceivables", "Aged Receivables"), href: "/reports/aged-receivables" },
         { name: t("nav.agedPayables", "Aged Payables"), href: "/reports/aged-payables" },
         { name: t("nav.salesTax", "Sales Tax"), href: "/reports/sales-tax" },
+        { name: "Tax Returns", href: "/reports/tax-returns" },
         { name: t("nav.purchaseTax", "Purchase Tax"), href: "/reports/purchase-tax" },
         { name: t("nav.whtReport", "WHT Report"), href: "/reports/wht" },
         { name: t("nav.stockOnHand", "Stock on Hand"), href: "/reports/stock-on-hand" },
@@ -241,6 +242,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
       children: [
         { name: "Approval Workflows", href: "/settings/approvals" },
         { name: "Email Templates", href: "/settings/email-templates" },
+        { name: "Webhooks", href: "/settings/webhooks" },
         { name: "Dashboard", href: "/settings/dashboard" },
       ],
     },
