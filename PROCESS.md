@@ -26,30 +26,30 @@
 - [x] D3: Approvals page at `/approvals` with approve/reject
 - [x] D4: Approval workflow settings at `/settings/approvals`
 
-### Sprint E — Email Template Customization
-- [ ] E1: `emailTemplates` schema (orgId, templateType, subject, bodyHtml)
-- [ ] E2: Template editor UI (variable insertion: {invoiceNo}, {customerName}, etc.)
-- [ ] E3: Use custom templates in send-invoice-email & send-quotation-whatsapp
+### ✅ Sprint E — Email Template Customization
+- [x] E1: `emailTemplates` schema (orgId, templateType, subject, bodyHtml)
+- [x] E2: Template editor UI (variable insertion: {invoiceNo}, {customerName}, etc.)
+- [x] E3: Use custom templates in send-invoice-email & send-quotation-whatsapp
 
-### Sprint F — Dashboard Customization
-- [ ] F1: `dashboardWidgets` schema (orgId, widgetType, position, isVisible)
-- [ ] F2: Drag-and-drop widget grid
-- [ ] F3: Widget visibility toggles
+### ✅ Sprint F — Dashboard Customization
+- [x] F1: `dashboardWidgets` schema (orgId, widgetType, position, isVisible)
+- [x] F2: Drag-and-drop widget grid
+- [x] F3: Widget visibility toggles
 
-### Sprint G — Sales Tax Return Auto-Filing
-- [ ] G1: `taxReturns` schema (orgId, period, returnType, totalSales, totalTax, status)
-- [ ] G2: Auto-calculate sales tax from invoices for period
-- [ ] G3: Generate return PDF for FBR submission
+### ✅ Sprint G — Sales Tax Return Auto-Filing
+- [x] G1: `salesTaxReturns` schema (orgId, period, totalSales, outputTax, inputTax, netPayable, status)
+- [x] G2: Auto-calculate sales tax from invoices for period
+- [x] G3: Generate return PDF for FBR submission + submit to FBR API
 
-### Sprint H — Webhooks & Public API
-- [ ] H1: `webhooks` schema (orgId, url, events, secret)
-- [ ] H2: Webhook delivery engine (sign + send on entity create/update)
-- [ ] H3: `webhookLogs` schema for delivery tracking
+### ✅ Sprint H — Webhooks & Public API
+- [x] H1: `webhookEndpoints` schema (orgId, url, events, secret)
+- [x] H2: Webhook delivery engine (sign + send on entity create/update)
+- [x] H3: `webhookDeliveries` schema for delivery tracking
 
-### Sprint I — Cost Center / Profit Center Accounting
-- [ ] I1: `costCenters` schema (orgId, name, code)
-- [ ] I2: Link cost center to journal entry lines & invoices
-- [ ] I3: Cost center wise P&L report
+### ✅ Sprint I — Cost Center / Profit Center Accounting
+- [x] I1: `costCenters` schema (orgId, name, code)
+- [x] I2: Link cost center to journal entry lines & invoices
+- [x] I3: Cost center wise P&L report
 
 ### Sprint J — Mobile App (React Native / Flutter)
 - [ ] J1: Expand mobile API routes (sales, purchases, inventory)
@@ -89,13 +89,16 @@
 - **Sprint B** — Price Lists & Customer Tiers
 - **Sprint C** — Budgeting & Forecasting
 - **Sprint D** — Workflow Approvals
+- **Sprint E** — Email Template Customization
+- **Sprint F** — Dashboard Customization
+- **Sprint G** — Sales Tax Return Auto-Filing
+- **Sprint H** — Webhooks & Public API
+
+### ✅ Completed
+9. **Sprint I** — Cost Center / Profit Center
 
 ### 🔜 Next
-5. **Sprint E** — Email Template Customization
-6. **Sprint F** — Dashboard Customization
-7. **Sprint G** — Sales Tax Return Auto-Filing
-8. **Sprint H** — Webhooks & Public API
-9. **Sprint I** — Cost Center / Profit Center
+10. **Sprint K** — Two-Factor Authentication
 10. **Sprint K** — Two-Factor Authentication
 11. **Sprint N** — Project Management + Timesheets
 12. **Sprint O** — WHT Certificates

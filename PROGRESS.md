@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
-## Status: ✅ In Progress — Phase G (Audit Fixes & Roadmap Sprints)
-## Current Sprint: 8 complete, 5 pending UI items
-## Last Completed: Sprint 8 — Command Palette
+## Status: 🔜 In Progress — Sprint I (Cost Center / Profit Center Accounting)
+## Current Sprint: 11
+## Last Completed: Sprint G — Sales Tax Returns, Sprint H — Webhooks
 
 ---
 

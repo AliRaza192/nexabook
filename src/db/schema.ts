@@ -550,6 +550,7 @@ export const invoices = pgTable('invoices', {
   customerId: uuid('customer_id').references(() => customers.id).notNull(),
   warehouseId: uuid('warehouse_id').references(() => warehouses.id),
   orderBooker: varchar('order_booker', { length: 100 }),
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
 
   subject: varchar('subject', { length: 255 }).default(''),
   reference: varchar('reference', { length: 100 }).default(''),
@@ -591,6 +592,7 @@ export const invoiceItems = pgTable('invoice_items', {
   uomId: uuid('uom_id').references(() => uoms.id),
   batchId: uuid('batch_id').references(() => productBatches.id),
   serialNumberId: uuid('serial_number_id').references(() => serialNumbers.id),
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
   description: text('description').notNull(),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -996,6 +998,30 @@ export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert;
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
 export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert;
 
+// ==========================================
+// COST CENTERS TABLE
+// ==========================================
+export const costCenters = pgTable('cost_centers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  code: varchar('code', { length: 50 }).notNull(),
+  description: text('description'),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const costCentersRelations = relations(costCenters, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [costCenters.orgId],
+    references: [organizations.id],
+  }),
+}));
+
+export type CostCenter = typeof costCenters.$inferSelect;
+export type NewCostCenter = typeof costCenters.$inferInsert;
+
 // Exchange Rates
 export const exchangeRates = pgTable('exchange_rates', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -1018,6 +1044,7 @@ export const journalEntryLines = pgTable('journal_entry_lines', {
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id).notNull(),
   accountId: uuid('account_id').references(() => chartOfAccounts.id).notNull(),
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
   description: text('description').default(''),
   debitAmount: decimal('debit_amount', { precision: 12, scale: 2 }).notNull().default('0'),
   creditAmount: decimal('credit_amount', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -1046,6 +1073,7 @@ export const purchaseInvoices = pgTable('purchase_invoices', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   vendorId: uuid('vendor_id').references(() => vendors.id).notNull(),
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
   warehouseId: uuid('warehouse_id').references(() => warehouses.id),
   billNumber: varchar('bill_number', { length: 50 }).notNull(),
   date: timestamp('date').notNull(),
@@ -1076,6 +1104,7 @@ export const purchaseItems = pgTable('purchase_items', {
   expiryDate: timestamp('expiry_date'),
   manufacturingDate: timestamp('manufacturing_date'),
   serialNumberId: uuid('serial_number_id').references(() => serialNumbers.id),
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
   description: text('description').notNull(),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).notNull().default('1'),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -2739,6 +2768,9 @@ export const schema = {
   // Product Attributes
   productAttributes,
   productAttributesRelations,
+  // Cost Centers
+  costCenters,
+  costCentersRelations,
   // Sales Tax Returns
   salesTaxReturns,
   salesTaxReturnsRelations,
@@ -2766,5 +2798,9 @@ export const journalEntryLinesRelations = relations(journalEntryLines, ({ one })
   account: one(chartOfAccounts, {
     fields: [journalEntryLines.accountId],
     references: [chartOfAccounts.id],
+  }),
+  costCenter: one(costCenters, {
+    fields: [journalEntryLines.costCenterId],
+    references: [costCenters.id],
   }),
 }));

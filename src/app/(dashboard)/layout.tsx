@@ -228,6 +228,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         { name: t("nav.jobOrderProduction", "Job Order Production"), href: "/reports/job-order-production" },
         { name: t("nav.auditTrail", "Audit Trail"), href: "/reports/audit-log" },
         { name: "Budget vs Actual", href: "/reports/budget" },
+        { name: "Cost Center P&L", href: "/reports/cost-center-pl" },
       ],
     },
     {
@@ -243,6 +244,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         { name: "Approval Workflows", href: "/settings/approvals" },
         { name: "Email Templates", href: "/settings/email-templates" },
         { name: "Webhooks", href: "/settings/webhooks" },
+        { name: "Cost Centers", href: "/settings/cost-centers" },
         { name: "Dashboard", href: "/settings/dashboard" },
       ],
     },
