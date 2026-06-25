@@ -11,6 +11,7 @@ import {
   journalEntryLines,
   chartOfAccounts,
 } from "@/db/schema";
+import { createAuditLog } from "./audit";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentOrgId } from "./shared";
@@ -106,6 +107,7 @@ export async function getBoms(status?: string) {
 
     return { success: true, data: boms };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to fetch BOMs" };
   }
 }
@@ -164,6 +166,7 @@ export async function getBomById(bomId: string): Promise<{ success: boolean; dat
 
     return { success: true, data: { ...bom, bomItems: items } as BomWithDetails };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to fetch BOM" };
   }
 }
@@ -228,8 +231,10 @@ export async function createBom(data: BomFormData) {
     }
 
     revalidatePath('/manufacturing/bom');
+    await createAuditLog({ action: "BOM_CREATED", entityType: "bom", entityId: newBom.id });
     return { success: true, data: newBom, message: "BOM created successfully" };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to create BOM" };
   }
 }
@@ -246,8 +251,10 @@ export async function updateBomStatus(bomId: string, status: 'draft' | 'active' 
       .where(and(eq(manufacturingBoms.id, bomId), eq(manufacturingBoms.orgId, orgId)));
 
     revalidatePath('/manufacturing/bom');
+    await createAuditLog({ action: "BOM_STATUS_UPDATED", entityType: "bom", entityId: bomId });
     return { success: true, message: "BOM status updated successfully" };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to update BOM status" };
   }
 }
@@ -264,8 +271,10 @@ export async function deleteBom(bomId: string) {
       .where(and(eq(manufacturingBoms.id, bomId), eq(manufacturingBoms.orgId, orgId)));
 
     revalidatePath('/manufacturing/bom');
+    await createAuditLog({ action: "BOM_DELETED", entityType: "bom", entityId: bomId });
     return { success: true, message: "BOM deleted successfully" };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to delete BOM" };
   }
 }
@@ -300,6 +309,7 @@ export async function getNextJobOrderNumber() {
 
     return { success: true, data: `JO-${String(nextNumber).padStart(4, '0')}` };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to generate order number" };
   }
 }
@@ -346,6 +356,7 @@ export async function getJobOrders(status?: string) {
 
     return { success: true, data: orders };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to fetch job orders" };
   }
 }
@@ -384,6 +395,7 @@ export async function getJobOrderById(jobOrderId: string) {
 
     return { success: true, data: { ...order, components } };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to fetch job order" };
   }
 }
@@ -443,8 +455,10 @@ export async function createJobOrder(data: JobOrderFormData) {
     }
 
     revalidatePath('/manufacturing/job-orders');
+    await createAuditLog({ action: "JOB_ORDER_CREATED", entityType: "jobOrder", entityId: newOrder.id });
     return { success: true, data: newOrder, message: "Job order created successfully" };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to create job order" };
   }
 }
@@ -581,7 +595,7 @@ export async function completeJobOrder(jobOrderId: string) {
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          sql`LOWER(${chartOfAccounts.name}) LIKE '%inventory%'`,
+          eq(chartOfAccounts.subType, 'inventory'),
           eq(chartOfAccounts.type, 'asset')
         ))
         .limit(1);
@@ -674,8 +688,10 @@ export async function completeJobOrder(jobOrderId: string) {
       .where(eq(jobOrders.id, jobOrderId));
 
     revalidatePath('/manufacturing/job-orders');
+    await createAuditLog({ action: "JOB_ORDER_COMPLETED", entityType: "jobOrder", entityId: jobOrderId });
     return { success: true, message: "Job order completed successfully. Inventory and accounts updated." };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to complete job order" };
   }
 }
@@ -691,8 +707,10 @@ export async function deleteJobOrder(jobOrderId: string) {
       .where(and(eq(jobOrders.id, jobOrderId), eq(jobOrders.orgId, orgId)));
 
     revalidatePath('/manufacturing/job-orders');
+    await createAuditLog({ action: "JOB_ORDER_DELETED", entityType: "jobOrder", entityId: jobOrderId });
     return { success: true, message: "Job order deleted successfully" };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to delete job order" };
   }
 }
@@ -818,7 +836,7 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          sql`LOWER(${chartOfAccounts.name}) LIKE '%inventory%'`,
+          eq(chartOfAccounts.subType, 'inventory'),
           eq(chartOfAccounts.type, 'asset')
         ))
         .limit(1);
@@ -859,8 +877,10 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
     }
 
     revalidatePath('/manufacturing/disassemble');
+    await createAuditLog({ action: "FINISHED_GOOD_DISASSEMBLED", entityType: "jobOrder", entityId: data.finishedGoodId });
     return { success: true, message: "Disassembly completed successfully. Inventory updated." };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to disassemble finished good" };
   }
 }
@@ -1066,6 +1086,7 @@ export async function getProducts() {
 
     return { success: true, data: productsWithBomFlag };
   } catch (error) {
+    console.error("Error in manufacturing.ts:", error);
     return { success: false, error: "Failed to fetch products" };
   }
 }

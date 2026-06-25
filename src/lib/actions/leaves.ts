@@ -41,6 +41,7 @@ export async function getLeaveTypes() {
 
     return { success: true, data: types };
   } catch (error) {
+    console.error("Error in leaves.ts:", error);
     return { success: false, error: "Failed to fetch leave types" };
   }
 }
@@ -77,6 +78,7 @@ export async function createLeaveType(data: LeaveTypeFormData) {
     revalidatePath("/hr-payroll/leaves");
     return { success: true, data: leaveType, message: "Leave type created successfully" };
   } catch (error) {
+    console.error("Error in leaves.ts:", error);
     return { success: false, error: "Failed to create leave type" };
   }
 }
@@ -290,6 +292,7 @@ export async function approveLeaveApplication(applicationId: string) {
     revalidatePath("/hr-payroll/leaves");
     return { success: true, data: updated, message: "Leave application approved successfully" };
   } catch (error) {
+    console.error("Error in leaves.ts:", error);
     return { success: false, error: "Failed to approve leave application" };
   }
 }
@@ -337,6 +340,7 @@ export async function rejectLeaveApplication(applicationId: string, reason: stri
     revalidatePath("/hr-payroll/leaves");
     return { success: true, data: updated, message: "Leave application rejected" };
   } catch (error) {
+    console.error("Error in leaves.ts:", error);
     return { success: false, error: "Failed to reject leave application" };
   }
 }
@@ -393,6 +397,7 @@ export async function getLeaveBalance(employeeId: string) {
 
     return { success: true, data: balance };
   } catch (error) {
+    console.error("Error in leaves.ts:", error);
     return { success: false, error: "Failed to fetch leave balance" };
   }
 }
@@ -456,6 +461,7 @@ export async function calculateUnpaidLeaveDeduction(
       },
     };
   } catch (error) {
+    console.error("Error in leaves.ts:", error);
     return { success: false, error: "Failed to calculate unpaid leave deduction" };
   }
 }

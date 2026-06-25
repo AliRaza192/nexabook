@@ -34,6 +34,7 @@ export async function getBudgets(fiscalYear?: string) {
 
     return { success: true, data: rows };
   } catch (error) {
+    console.error("Error in budget.ts:", error);
     return { success: false, error: "Failed to load budgets" };
   }
 }
@@ -131,6 +132,7 @@ export async function getBudgetVsActual(fiscalYear?: string) {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in budget.ts:", error);
     return { success: false, error: "Failed to load budget vs actual" };
   }
 }
@@ -175,6 +177,7 @@ export async function setBudget(data: {
     revalidatePath("/reports/budget");
     return { success: true };
   } catch (error) {
+    console.error("Error in budget.ts:", error);
     return { success: false, error: "Failed to set budget" };
   }
 }

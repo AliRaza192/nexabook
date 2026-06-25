@@ -5,6 +5,7 @@ import { products, productCategories, uoms, uomConversions, warehouses, warehous
 import { eq, and, or, ilike, desc, sql, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentOrgId } from "./shared";
+import { createAuditLog } from "./audit";
 
 // Product interfaces
 export interface ProductFormData {
@@ -150,6 +151,7 @@ export async function getProducts(searchQuery?: string, categoryId?: string) {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch products" };
   }
 }
@@ -225,8 +227,10 @@ export async function addProduct(data: ProductFormData) {
 
     revalidatePath('/inventory');
     
+    await createAuditLog({ action: "PRODUCT_CREATED", entityType: "product", entityId: newProduct.id });
     return { success: true, data: newProduct, message: "Product added successfully" };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to add product" };
   }
 }
@@ -247,6 +251,7 @@ export async function getCategories() {
 
     return { success: true, data: cats };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch categories" };
   }
 }
@@ -288,8 +293,10 @@ export async function addCategory(data: CategoryFormData) {
 
     revalidatePath('/inventory');
     
+    await createAuditLog({ action: "CATEGORY_CREATED", entityType: "category", entityId: newCategory.id });
     return { success: true, data: newCategory, message: "Category added successfully" };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to add category" };
   }
 }
@@ -314,6 +321,7 @@ export async function getProductById(productId: string) {
 
     return { success: true, data: product };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch product" };
   }
 }
@@ -371,8 +379,10 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
 
     revalidatePath('/inventory');
     
+    await createAuditLog({ action: "PRODUCT_UPDATED", entityType: "product", entityId: productId });
     return { success: true, data: updatedProduct, message: "Product updated successfully" };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to update product" };
   }
 }
@@ -393,6 +403,7 @@ export async function getUoms() {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch UOMs" };
   }
 }
@@ -420,8 +431,10 @@ export async function addUom(data: UomFormData) {
 
     revalidatePath('/inventory');
     
+    await createAuditLog({ action: "UOM_CREATED", entityType: "uom", entityId: newUom.id });
     return { success: true, data: newUom, message: "UOM added successfully" };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to add UOM" };
   }
 }
@@ -480,8 +493,10 @@ export async function deleteProduct(productId: string) {
 
     revalidatePath('/inventory');
     
+    await createAuditLog({ action: "PRODUCT_DELETED", entityType: "product", entityId: productId });
     return { success: true, message: "Product deleted successfully" };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to delete product" };
   }
 }
@@ -507,6 +522,7 @@ export async function getAvailableBatches(productId: string, warehouseId: string
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch available batches" };
   }
 }
@@ -594,6 +610,7 @@ export async function getExpiryReport() {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch expiry report" };
   }
 }
@@ -646,6 +663,7 @@ export async function getInventoryStats() {
       },
     };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch inventory stats" };
   }
 }
@@ -684,6 +702,7 @@ export async function getLowStockProducts() {
 
     return { success: true, data: filtered };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch low stock products" };
   }
 }
@@ -702,6 +721,7 @@ export async function getWarehouses() {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch warehouses" };
   }
 }
@@ -733,8 +753,10 @@ export async function addWarehouse(data: WarehouseFormData) {
       .returning();
 
     revalidatePath('/inventory/warehouses');
+    await createAuditLog({ action: "WAREHOUSE_CREATED", entityType: "warehouse", entityId: newWarehouse.id });
     return { success: true, data: newWarehouse, message: "Warehouse added successfully" };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to add warehouse" };
   }
 }
@@ -755,6 +777,7 @@ export async function getWarehouseStock(productId: string, warehouseId: string) 
 
     return { success: true, data: stock?.quantity || "0" };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch warehouse stock" };
   }
 }
@@ -783,6 +806,7 @@ export async function getProductStockByWarehouse(productId: string) {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: "Failed to fetch product stock by warehouse" };
   }
 }
@@ -905,8 +929,10 @@ export async function transferStock(data: StockTransferFormData) {
 
     revalidatePath('/inventory/transfers');
     revalidatePath('/inventory');
+    await createAuditLog({ action: "STOCK_TRANSFERRED", entityType: "stockTransfer", entityId: result.id });
     return { success: true, data: result, message: "Stock transferred successfully" };
   } catch (error) {
+    console.error("Error in inventory.ts:", error);
     return { success: false, error: error instanceof Error ? error.message : "Failed to transfer stock" };
   }
 }

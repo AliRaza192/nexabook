@@ -8,9 +8,11 @@ import {
   sendTextMessage,
   isWhatsAppConfigured,
 } from '@/lib/utils/whatsapp';
+import { validateCsrf } from '@/lib/csrf';
 
 export async function POST(request: NextRequest) {
   try {
+    await validateCsrf();
     const { userId } = await auth();
     if (!userId) {
       return NextResponse.json(

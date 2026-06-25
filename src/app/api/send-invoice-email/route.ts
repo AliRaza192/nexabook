@@ -7,12 +7,14 @@ import { formatPakistaniCurrency } from '@/lib/utils/number-format';
 import { db } from '@/db';
 import { invoices } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import { validateCsrf } from '@/lib/csrf';
 
 // Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(request: NextRequest) {
   try {
+    await validateCsrf();
     // Verify user authentication
     const { userId } = await auth();
     if (!userId) {

@@ -5,6 +5,7 @@ import { organizations, profiles, reminderSettings } from "@/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
+import { createAuditLog } from "./audit";
 import { revalidatePath } from "next/cache";
 
 // ─── Company Profile ───────────────────────────────────────────
@@ -22,6 +23,7 @@ export async function getCompanyProfile() {
 
     return { success: true, data: org };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     return { success: false, error: "Failed to load company profile" };
   }
 }
@@ -93,8 +95,10 @@ export async function updateCompanyProfile(data: CompanyProfileData) {
       .where(eq(organizations.id, orgId));
 
     revalidatePath("/settings");
+    await createAuditLog({ action: "PROFILE_UPDATED", entityType: "organization", entityId: orgId ? orgId : '' });
     return { success: true };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     const msg = error instanceof Error ? error.message : "Failed to update";
     return { success: false, error: msg };
   }
@@ -129,6 +133,7 @@ export async function getOrgUsers() {
 
     return { success: true, data: users };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     return { success: false, error: "Failed to load users" };
   }
 }
@@ -149,6 +154,7 @@ export async function getCurrentUserProfile() {
 
     return { success: true, data: profile };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     return { success: false, error: "Failed to load profile" };
   }
 }
@@ -195,8 +201,10 @@ export async function updateOrgUser(profileId: string, data: UpdateUserData) {
       .where(eq(profiles.id, profileId));
 
     revalidatePath("/settings");
+    await createAuditLog({ action: "ORG_USER_UPDATED", entityType: "profile", entityId: profileId });
     return { success: true };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     const msg = error instanceof Error ? error.message : "Failed to update user";
     return { success: false, error: msg };
   }
@@ -227,8 +235,10 @@ export async function updateMyProfile(data: {
       .where(and(eq(profiles.userId, userId), eq(profiles.orgId, orgId)));
 
     revalidatePath("/settings");
+    await createAuditLog({ action: "MY_PROFILE_UPDATED", entityType: "profile", entityId: userId });
     return { success: true };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     return { success: false, error: "Failed to update profile" };
   }
 }
@@ -257,8 +267,10 @@ export async function deactivateUser(profileId: string) {
       .where(and(eq(profiles.id, profileId), eq(profiles.orgId, orgId)));
 
     revalidatePath("/settings");
+    await createAuditLog({ action: "USER_DEACTIVATED", entityType: "profile", entityId: profileId });
     return { success: true };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     const msg = error instanceof Error ? error.message : "Failed";
     return { success: false, error: msg };
   }
@@ -276,8 +288,10 @@ export async function reactivateUser(profileId: string) {
       .where(and(eq(profiles.id, profileId), eq(profiles.orgId, orgId)));
 
     revalidatePath("/settings");
+    await createAuditLog({ action: "USER_REACTIVATED", entityType: "profile", entityId: profileId });
     return { success: true };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     return { success: false, error: "Failed" };
   }
 }
@@ -297,6 +311,7 @@ export async function getReminderSettings() {
 
     return { success: true, data: settings ?? null };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     return { success: false, error: "Failed to load reminder settings" };
   }
 }
@@ -328,8 +343,10 @@ export async function updateReminderSettings(data: {
     }
 
     revalidatePath("/settings");
+    await createAuditLog({ action: "REMINDER_SETTINGS_UPDATED", entityType: "settings", entityId: orgId ? orgId : '' });
     return { success: true };
   } catch (error) {
+    console.error("Error in settings.ts:", error);
     return { success: false, error: "Failed to update reminder settings" };
   }
 }

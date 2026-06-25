@@ -48,6 +48,7 @@ export async function getStockMovements(productId?: string, movementType?: strin
 
     return { success: true, data: movements };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to fetch stock movements" };
   }
 }
@@ -77,6 +78,7 @@ export async function getStockMovementsByProduct(productId: string) {
 
     return { success: true, data: movements };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to fetch stock movements" };
   }
 }
@@ -148,6 +150,7 @@ export async function addStockMovement(data: StockMovementFormData) {
     revalidatePath("/inventory/stock");
     return { success: true, data: movement, message: "Stock movement recorded" };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to record stock movement" };
   }
 }
@@ -185,6 +188,7 @@ export async function getStockAdjustments(searchQuery?: string) {
 
     return { success: true, data: adjustments };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to fetch stock adjustments" };
   }
 }
@@ -221,6 +225,7 @@ export async function getStockAdjustmentById(adjustmentId: string) {
 
     return { success: true, data: { ...adjustment, lines } };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to fetch adjustment" };
   }
 }
@@ -305,6 +310,7 @@ export async function addStockAdjustment(data: StockAdjustmentFormData) {
     revalidatePath("/inventory/stock");
     return { success: true, data: adjustment, message: "Stock adjustment created" };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to create stock adjustment" };
   }
 }
@@ -417,6 +423,7 @@ export async function approveStockAdjustment(adjustmentId: string) {
     revalidatePath("/inventory/stock");
     return { success: true, message: "Stock adjustment approved and GL posted" };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to approve stock adjustment" };
   }
 }
@@ -524,6 +531,7 @@ export async function runStockValuation(method: "fifo" | "weighted_average", val
     revalidatePath("/inventory/valuation");
     return { success: true, data: log, message: "Stock valuation completed" };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to run stock valuation" };
   }
 }
@@ -541,6 +549,7 @@ export async function getStockValuations() {
 
     return { success: true, data: valuations };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to fetch stock valuations" };
   }
 }
@@ -617,6 +626,7 @@ export async function getCurrentInventoryValue() {
       },
     };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to calculate inventory value" };
   }
 }
@@ -644,6 +654,7 @@ export async function getProductsForStockAdjustment() {
 
     return { success: true, data: prods };
   } catch (error) {
+    console.error("Error in inventory-depth.ts:", error);
     return { success: false, error: "Failed to fetch products" };
   }
 }

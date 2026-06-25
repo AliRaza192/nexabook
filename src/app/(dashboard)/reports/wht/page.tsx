@@ -2,11 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Loader2, Receipt, DollarSign, FileText, TrendingUp } from "lucide-react";
+import { Loader2, Receipt, DollarSign, FileText, TrendingUp, Download, Filter } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import ReportLayout from "@/components/reports/ReportLayout";
-import ReportFilterBar, { ReportFilters } from "@/components/reports/ReportFilterBar";
+import ReportFilterBar from "@/components/reports/ReportFilterBar";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { getWithholdingTaxReport } from "@/lib/actions/reports";
 import { formatPKR } from "@/lib/utils/number-format";
@@ -14,35 +18,35 @@ import { formatPKR } from "@/lib/utils/number-format";
 export default function WHTPage() {
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<any>(null);
-  const [filters, setFilters] = useState<ReportFilters>({
+  const [filters, setFilters] = useState<any>({
     dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0],
     dateTo: new Date().toISOString().split("T")[0],
   });
 
-  const loadReport = async (reportFilters: ReportFilters) => {
+  const loadReport = async (reportFilters: any) => {
     setLoading(true);
     setFilters(reportFilters);
     try {
       const result = await getWithholdingTaxReport(reportFilters.dateFrom, reportFilters.dateTo);
-      if (result.success && result.data) {
-        setReportData(result.data);
-      }
+      if (result.success && result.data) setReportData(result.data);
     } catch (error) {
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadReport(filters);
-  }, []);
+  useEffect(() => { loadReport(filters); }, []);
 
-  const formatCurrency = (value: number) => {
-    return formatPKR(value, 'south-asian');
-  };
+  const formatCurrency = (value: number) => formatPKR(value, 'south-asian');
 
   const totalWHT = reportData?.totalWHT || 0;
   const transactions = reportData?.transactions || [];
+
+  const downloadCertificate = async () => {
+    if (transactions.length === 0) return;
+    const url = `/api/wht-certificate?vendorId=${transactions[0].vendorId || ''}&dateFrom=${filters.dateFrom}&dateTo=${filters.dateTo}`;
+    window.open(url, '_blank');
+  };
 
   return (
     <ReportLayout
@@ -112,8 +116,8 @@ export default function WHTPage() {
                     <TrendingUp className="h-5 w-5 text-purple-600" />
                   </div>
                   <div>
-                    <p className="text-xs text-nexabook-600">Note</p>
-                    <p className="text-sm font-semibold text-purple-700">Calculated from vendor payments</p>
+                    <p className="text-xs text-nexabook-600">Transactions</p>
+                    <p className="text-lg font-bold text-purple-700">{transactions.length}</p>
                   </div>
                 </div>
               </CardContent>
@@ -122,10 +126,24 @@ export default function WHTPage() {
 
           <Card className="enterprise-card">
             <CardHeader>
-              <CardTitle className="text-xl text-nexabook-900">Withholding Tax Summary</CardTitle>
-              <p className="text-sm text-nexabook-600">
-                {reportData.dateFrom ? new Date(reportData.dateFrom).toLocaleDateString() : ""} - {reportData.dateTo ? new Date(reportData.dateTo).toLocaleDateString() : ""}
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-xl text-nexabook-900">Withholding Tax Summary</CardTitle>
+                  <p className="text-sm text-nexabook-600">
+                    {reportData.dateFrom ? new Date(reportData.dateFrom).toLocaleDateString() : ""} - {reportData.dateTo ? new Date(reportData.dateTo).toLocaleDateString() : ""}
+                  </p>
+                </div>
+                {transactions.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={downloadCertificate}>
+                      <Download className="h-4 w-4 mr-1" /> Download Certificate
+                    </Button>
+                    <Button variant="outline" size="sm">
+                      <Filter className="h-4 w-4 mr-1" /> Vendor Wise
+                    </Button>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               <Table id="wht-table">

@@ -33,9 +33,14 @@ import {
   Building,
   LogOut,
   ClipboardCheck,
+  FolderKanban,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
+import { ShieldCheck } from "lucide-react";
+import { Toaster } from "sonner";
+import { checkAdmin2FAStatus } from "@/lib/actions/admin-2fa";
+import { getOrgProfile } from "@/lib/actions/shared";
 
 interface NavItem {
   name: string;
@@ -63,6 +68,9 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
   const router = useRouter();
 
+  const [orgName, setOrgName] = useState("Acme Corporation");
+  const [orgPlan, setOrgPlan] = useState("Professional Plan");
+
   // Onboarding redirect
   useEffect(() => {
     if (pathname.startsWith("/onboarding") || pathname.startsWith("/login") || pathname === "/") return;
@@ -70,12 +78,39 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
       try {
         const { getOnboardingStatus } = await import("@/lib/actions/onboarding");
         const res = await getOnboardingStatus();
-        if (res.success && res.data && !res.data.isCompleted) {
+        if (res.success === false || !res.data || !res.data.isCompleted) {
           router.replace("/onboarding");
+        }
+      } catch {
+        router.replace("/onboarding");
+      }
+    }
+    checkOnboarding();
+  }, [pathname, router]);
+
+  // Load org profile and check 2FA
+  useEffect(() => {
+    async function loadOrgProfile() {
+      const result = await getOrgProfile();
+      if (result.success && result.data) {
+        setOrgName(result.data.name);
+        setOrgPlan(result.data.plan);
+      }
+    }
+    loadOrgProfile();
+  }, []);
+
+  useEffect(() => {
+    async function check2FA() {
+      if (pathname.startsWith("/settings/security")) return;
+      try {
+        const status = await checkAdmin2FAStatus();
+        if (status.isAdmin && !status.has2FA) {
+          router.replace("/settings/security?enforce=2fa");
         }
       } catch { /* ignore */ }
     }
-    checkOnboarding();
+    check2FA();
   }, [pathname, router]);
 
   const navItems: NavItem[] = [
@@ -214,6 +249,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         { name: "Tax Returns", href: "/reports/tax-returns" },
         { name: t("nav.purchaseTax", "Purchase Tax"), href: "/reports/purchase-tax" },
         { name: t("nav.whtReport", "WHT Report"), href: "/reports/wht" },
+        { name: "Annual WHT Return", href: "/reports/wht-return" },
         { name: t("nav.stockOnHand", "Stock on Hand"), href: "/reports/stock-on-hand" },
         { name: t("nav.stockMovement", "Stock Movement"), href: "/reports/stock-movement" },
         { name: t("nav.lowInventory", "Low Inventory"), href: "/reports/low-inventory" },
@@ -229,7 +265,20 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         { name: t("nav.auditTrail", "Audit Trail"), href: "/reports/audit-log" },
         { name: "Budget vs Actual", href: "/reports/budget" },
         { name: "Cost Center P&L", href: "/reports/cost-center-pl" },
+        { name: "Project Profitability", href: "/reports/project-profitability" },
+        { name: "Consolidated P&L", href: "/reports/consolidated-pl" },
+        { name: "Consolidated Balance Sheet", href: "/reports/consolidated-balance-sheet" },
       ],
+    },
+    {
+      name: "Projects",
+      icon: <FolderKanban className="h-5 w-5" />,
+      href: "/projects",
+    },
+    {
+      name: "Timesheets",
+      icon: <Clock className="h-5 w-5" />,
+      href: "/timesheets",
     },
     {
       name: "Approvals",
@@ -245,7 +294,12 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         { name: "Email Templates", href: "/settings/email-templates" },
         { name: "Webhooks", href: "/settings/webhooks" },
         { name: "Cost Centers", href: "/settings/cost-centers" },
+        { name: "Security", href: "/settings/security" },
+        { name: "Bank Feeds", href: "/settings/bank-feeds" },
         { name: "Dashboard", href: "/settings/dashboard" },
+        { name: "Billing", href: "/settings/billing" },
+        { name: "Fiscal Periods", href: "/settings/fiscal-periods" },
+        { name: "Consolidation", href: "/settings/consolidation" },
       ],
     },
   ];
@@ -317,8 +371,8 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
               <Building className="h-5 w-5 text-nexabook-300" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">Acme Corporation</p>
-              <p className="text-xs text-nexabook-400">Professional Plan</p>
+              <p className="text-sm font-medium truncate">{orgName}</p>
+              <p className="text-xs text-nexabook-400">{orgPlan}</p>
             </div>
             <ChevronDown className="h-4 w-4 text-nexabook-400" />
           </div>
@@ -521,6 +575,7 @@ function DashboardInner({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <ChatWidget />
+      <Toaster richColors />
     </>
   );
 }

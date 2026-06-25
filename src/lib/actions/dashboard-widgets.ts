@@ -36,6 +36,7 @@ export async function getDashboardWidgetSettings() {
 
     return { success: true, data: widgets };
   } catch (error) {
+    console.error("Error in dashboard-widgets.ts:", error);
     return { success: false, error: "Failed to load widget settings" };
   }
 }
@@ -64,6 +65,7 @@ export async function updateDashboardWidget(key: string, isVisible: boolean) {
     revalidatePath("/settings/dashboard");
     return { success: true };
   } catch (error) {
+    console.error("Error in dashboard-widgets.ts:", error);
     return { success: false, error: "Failed to update widget" };
   }
 }

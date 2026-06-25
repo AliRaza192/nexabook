@@ -27,6 +27,7 @@ export async function getProductAttributes(productId: string) {
 
     return { success: true, data: attrs };
   } catch (error) {
+    console.error("Error in product-attributes.ts:", error);
     return { success: false, error: "Failed to fetch attributes" };
   }
 }
@@ -62,6 +63,7 @@ export async function saveProductAttributes(
     revalidatePath("/inventory");
     return { success: true };
   } catch (error) {
+    console.error("Error in product-attributes.ts:", error);
     return { success: false, error: "Failed to save attributes" };
   }
 }
@@ -81,6 +83,7 @@ export async function getAllAttributeNames() {
     const names = attrs.map((a) => a.name);
     return { success: true, data: ["Size", "Color", "Weight", "Material", "Brand", ...names.filter(n => !["Size", "Color", "Weight", "Material", "Brand"].includes(n))] };
   } catch (error) {
+    console.error("Error in product-attributes.ts:", error);
     return { success: false, error: "Failed to fetch attribute names" };
   }
 }
@@ -102,6 +105,7 @@ export async function getAttributeValues(name: string) {
 
     return { success: true, data: attrs.map((a) => a.value) };
   } catch (error) {
+    console.error("Error in product-attributes.ts:", error);
     return { success: false, error: "Failed to fetch attribute values" };
   }
 }
@@ -122,6 +126,7 @@ export async function searchByAttribute(name: string, value: string) {
 
     return { success: true, data: results.map((r) => r.productId) };
   } catch (error) {
+    console.error("Error in product-attributes.ts:", error);
     return { success: false, error: "Failed to search by attribute" };
   }
 }

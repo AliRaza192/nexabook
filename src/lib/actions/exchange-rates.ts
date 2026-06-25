@@ -24,6 +24,7 @@ export async function getExchangeRates() {
 
     return { success: true, data: rates };
   } catch (error) {
+    console.error("Error in exchange-rates.ts:", error);
     return { success: false, error: "Failed to fetch exchange rates" };
   }
 }
@@ -70,6 +71,7 @@ export async function createExchangeRate(data: ExchangeRateFormData) {
 
     return { success: true, data: rate, message: "Exchange rate added" };
   } catch (error) {
+    console.error("Error in exchange-rates.ts:", error);
     return { success: false, error: "Failed to create exchange rate" };
   }
 }
@@ -86,6 +88,7 @@ export async function deleteExchangeRate(id: string) {
 
     return { success: true, message: "Exchange rate removed" };
   } catch (error) {
+    console.error("Error in exchange-rates.ts:", error);
     return { success: false, error: "Failed to delete exchange rate" };
   }
 }

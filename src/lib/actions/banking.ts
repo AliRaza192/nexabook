@@ -44,8 +44,7 @@ export async function getBankCOAAccounts() {
         eq(chartOfAccounts.type, "asset"),
         eq(chartOfAccounts.isActive, true),
         or(
-          ilike(chartOfAccounts.name, "%bank%"),
-          ilike(chartOfAccounts.name, "%cash%"),
+          sql`${chartOfAccounts.subType} IN ('bank', 'cash')`,
           ilike(chartOfAccounts.code, "%bank%"),
           ilike(chartOfAccounts.code, "%cash%"),
         )!
@@ -54,6 +53,7 @@ export async function getBankCOAAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to fetch bank accounts from COA" };
   }
 }
@@ -82,6 +82,7 @@ export async function getBankAccounts(searchQuery?: string) {
 
     return { success: true, data: accounts };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to fetch bank accounts" };
   }
 }
@@ -134,8 +135,8 @@ export async function addBankAccount(data: BankAccountFormData) {
         })
         .returning();
 
-      const bankAccountId = await findAccountByType(orgId, "asset", "Bank");
-      const cashAccountId = await findAccountByType(orgId, "asset", "Cash");
+      const bankAccountId = await findAccountBySubType(orgId, "bank", "asset");
+      const cashAccountId = await findAccountBySubType(orgId, "cash", "asset");
 
       if (openingBalance > 0) {
         // Debit Bank, Credit Opening Equity
@@ -158,6 +159,7 @@ export async function addBankAccount(data: BankAccountFormData) {
     revalidatePath("/accounts/banking");
     return { success: true, data: newAccount, message: "Bank account added successfully" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to add bank account" };
   }
 }
@@ -167,7 +169,7 @@ export async function updateBankAccount(accountId: string, data: Partial<BankAcc
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: Record<string, any> = {};
+    const updateData: Partial<typeof bankAccounts.$inferInsert> = {};
     if (data.accountName !== undefined) updateData.accountName = data.accountName;
     if (data.iban !== undefined) updateData.iban = data.iban;
     if (data.accountNumber !== undefined) updateData.accountNumber = data.accountNumber;
@@ -187,6 +189,7 @@ export async function updateBankAccount(accountId: string, data: Partial<BankAcc
     revalidatePath("/accounts/banking");
     return { success: true, data: updated, message: "Bank account updated successfully" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to update bank account" };
   }
 }
@@ -208,6 +211,7 @@ export async function approveBankAccount(accountId: string) {
     revalidatePath("/accounts/banking");
     return { success: true, message: "Bank account approved" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to approve bank account" };
   }
 }
@@ -252,6 +256,7 @@ export async function getBankDeposits(searchQuery?: string) {
 
     return { success: true, data: deposits };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to fetch bank deposits" };
   }
 }
@@ -306,6 +311,7 @@ export async function addBankDeposit(data: BankDepositFormData) {
     revalidatePath("/accounts/banking");
     return { success: true, data: deposit, message: "Bank deposit recorded successfully" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to record bank deposit" };
   }
 }
@@ -357,8 +363,8 @@ export async function approveBankDeposit(depositId: string) {
       })
       .returning();
 
-    const bankAccountId = await findAccountByType(orgId, "asset", "Bank");
-    const cashAccountId = await findAccountByType(orgId, "asset", "Cash");
+    const bankAccountId = await findAccountBySubType(orgId, "asset", "Bank");
+    const cashAccountId = await findAccountBySubType(orgId, "asset", "Cash");
 
     const lines = [
       { debitAmount: deposit.amount, creditAmount: "0" },
@@ -377,6 +383,7 @@ export async function approveBankDeposit(depositId: string) {
     revalidatePath("/accounts/banking");
     return { success: true, message: "Bank deposit approved and posted" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to approve bank deposit" };
   }
 }
@@ -418,6 +425,7 @@ export async function getFundsTransfers(searchQuery?: string) {
 
     return { success: true, data: transfers };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to fetch funds transfers" };
   }
 }
@@ -476,6 +484,7 @@ export async function addFundsTransfer(data: FundsTransferFormData) {
     revalidatePath("/accounts/banking");
     return { success: true, data: transfer, message: "Funds transfer recorded successfully" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to record funds transfer" };
   }
 }
@@ -546,6 +555,7 @@ export async function approveFundsTransfer(transferId: string) {
     revalidatePath("/accounts/banking");
     return { success: true, message: "Funds transfer approved and posted" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to approve funds transfer" };
   }
 }
@@ -589,6 +599,7 @@ export async function getMiscContacts(searchQuery?: string) {
 
     return { success: true, data: contacts };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to fetch misc contacts" };
   }
 }
@@ -625,6 +636,7 @@ export async function addMiscContact(data: MiscContactFormData) {
     revalidatePath("/accounts/banking");
     return { success: true, data: contact, message: "Transaction recorded successfully" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to record transaction" };
   }
 }
@@ -674,6 +686,7 @@ export async function approveMiscContact(contactId: string) {
     revalidatePath("/accounts/banking");
     return { success: true, message: "Transaction approved" };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to approve transaction" };
   }
 }
@@ -682,11 +695,11 @@ export async function approveMiscContact(contactId: string) {
 // HELPER FUNCTIONS
 // ==========================================
 
-async function findAccountByType(orgId: string, type: string, keyword: string): Promise<string> {
+async function findAccountBySubType(orgId: string, subType: string, type: string): Promise<string> {
   const [account] = await db
     .select({ id: chartOfAccounts.id })
     .from(chartOfAccounts)
-    .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.type, type), ilike(chartOfAccounts.name, `%${keyword}%`)))
+    .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, subType), eq(chartOfAccounts.type, type)))
     .limit(1);
 
   return account?.id || "";
@@ -821,6 +834,7 @@ export async function getBankReconciliation(
       },
     };
   } catch (error) {
+    console.error("Error in banking.ts:", error);
     return { success: false, error: "Failed to fetch bank reconciliation data" };
   }
 }

@@ -85,73 +85,21 @@ async function seedDefaultChartOfAccounts(orgId: string): Promise<void> {
   await db.insert(chartOfAccounts).values(accountsToInsert);
 }
 
-// Get the current user's organization ID, creating one with seeded COA if needed
+// Get the current user's organization ID
 export async function getCurrentOrgId(): Promise<string | null> {
   try {
     const { userId } = await auth();
+    if (!userId) return null;
 
-    if (!userId) {
-      return null;
-    }
-
-    // Get user's profile from database
     const userProfile = await db
-      .select({
-        orgId: profiles.orgId,
-      })
+      .select({ orgId: profiles.orgId })
       .from(profiles)
       .where(eq(profiles.userId, userId))
       .limit(1);
 
-    // If profile exists, return orgId
-    if (userProfile.length > 0 && userProfile[0].orgId) {
-      return userProfile[0].orgId;
-    }
-
-    // Auto-onboarding: User doesn't have a profile yet, create one automatically
-    const user = await currentUser();
-    if (!user) {
-      return null;
-    }
-
-    // Create a default organization for the user
-    const timestamp = Date.now();
-    const orgSlug = `my-business-${timestamp}`;
-
-    const newOrg = await db
-      .insert(organizations)
-      .values({
-        name: "My Business",
-        slug: orgSlug,
-        currency: "PKR",
-        fiscalYearStart: "07-01",
-        country: "Pakistan",
-      })
-      .returning({ id: organizations.id });
-
-    if (!newOrg || newOrg.length === 0) {
-      return null;
-    }
-
-    const newOrgId = newOrg[0].id;
-
-    // Create profile for this user linking to the new organization
-    const userEmail = user.emailAddresses[0]?.emailAddress || "";
-    const userFullName = user.fullName || user.username || "User";
-
-    await db.insert(profiles).values({
-      userId,
-      orgId: newOrgId,
-      role: "admin",
-      fullName: userFullName,
-      email: userEmail,
-    });
-
-    // Seed default Chart of Accounts for the new organization
-    await seedDefaultChartOfAccounts(newOrgId);
-
-    return newOrgId;
+    return userProfile.length > 0 ? userProfile[0].orgId : null;
   } catch (error) {
+    console.error("[getCurrentOrgId]", error);
     return null;
   }
 }
@@ -323,4 +271,24 @@ export async function generateJournalEntryNumber(orgId: string): Promise<string>
     .where(eq(journalEntries.orgId, orgId));
   const nextNum = (result[0]?.count || 0) + 1;
   return `JE-${String(nextNum).padStart(5, "0")}`;
+}
+
+export async function getOrgProfile() {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [org] = await db
+      .select({ name: organizations.name, planType: organizations.planType })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+
+    if (!org) return { success: false, error: "Organization not found" };
+
+    return { success: true, data: { name: org.name, plan: org.planType || "Professional" } };
+  } catch (error) {
+    console.error("Error fetching org profile:", error);
+    return { success: false, error: "Failed to fetch organization info" };
+  }
 }

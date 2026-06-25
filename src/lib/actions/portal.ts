@@ -14,6 +14,7 @@ export async function generatePortalToken(customerId: string) {
       .where(eq(customers.id, customerId));
     return { success: true, token };
   } catch (error) {
+    console.error("Error in portal.ts:", error);
     return { success: false, error: "Failed to generate portal token" };
   }
 }
@@ -67,6 +68,7 @@ export async function getPortalData(token: string) {
       },
     };
   } catch (error) {
+    console.error("Error in portal.ts:", error);
     return { success: false, error: "Failed to load portal data" };
   }
 }
@@ -80,6 +82,7 @@ export async function generateVendorPortalToken(vendorId: string) {
       .where(eq(vendors.id, vendorId));
     return { success: true, token };
   } catch (error) {
+    console.error("Error in portal.ts:", error);
     return { success: false, error: "Failed to generate portal token" };
   }
 }
@@ -132,6 +135,7 @@ export async function getVendorPortalData(token: string) {
       },
     };
   } catch (error) {
+    console.error("Error in portal.ts:", error);
     return { success: false, error: "Failed to load portal data" };
   }
 }

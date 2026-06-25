@@ -31,6 +31,7 @@ export async function getWebhookEndpoints() {
 
     return { success: true, data: endpoints };
   } catch (error) {
+    console.error("Error in webhooks.ts:", error);
     return { success: false, error: "Failed to load webhook endpoints" };
   }
 }
@@ -63,6 +64,7 @@ export async function createWebhookEndpoint(data: CreateWebhookData) {
     revalidatePath("/settings/webhooks");
     return { success: true, data: endpoint };
   } catch (error) {
+    console.error("Error in webhooks.ts:", error);
     return { success: false, error: "Failed to create webhook endpoint" };
   }
 }
@@ -98,6 +100,7 @@ export async function updateWebhookEndpoint(id: string, data: UpdateWebhookData)
     revalidatePath("/settings/webhooks");
     return { success: true, data: updated };
   } catch (error) {
+    console.error("Error in webhooks.ts:", error);
     return { success: false, error: "Failed to update webhook endpoint" };
   }
 }
@@ -121,6 +124,7 @@ export async function deleteWebhookEndpoint(id: string) {
     revalidatePath("/settings/webhooks");
     return { success: true };
   } catch (error) {
+    console.error("Error in webhooks.ts:", error);
     return { success: false, error: "Failed to delete webhook endpoint" };
   }
 }
@@ -139,6 +143,7 @@ export async function regenerateWebhookSecret(id: string) {
 
     return { success: true, data: updated };
   } catch (error) {
+    console.error("Error in webhooks.ts:", error);
     return { success: false, error: "Failed to regenerate webhook secret" };
   }
 }
@@ -160,6 +165,7 @@ export async function getWebhookDeliveries(endpointId?: string, limit = 50) {
 
     return { success: true, data: deliveries };
   } catch (error) {
+    console.error("Error in webhooks.ts:", error);
     return { success: false, error: "Failed to load webhook deliveries" };
   }
 }
@@ -182,6 +188,7 @@ export async function retryWebhookDelivery(deliveryId: string) {
 
     return result;
   } catch (error) {
+    console.error("Error in webhooks.ts:", error);
     return { success: false, error: "Failed to retry webhook delivery" };
   }
 }
@@ -238,6 +245,7 @@ async function deliverWebhook(
 
     return { success: true };
   } catch (error) {
+    console.error("Error in webhooks.ts:", error);
     const [endpoint] = await db
       .select()
       .from(webhookEndpoints)

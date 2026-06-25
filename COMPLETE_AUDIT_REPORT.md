@@ -1,612 +1,734 @@
-# 📊 NexaBook - Complete Project Audit Report
+# NEXABOOK — COMPLETE AUDIT REPORT
 
-**Date:** April 10, 2026  
-**Version:** 0.1.0  
-**Status:** Production Ready (Core Features)
-
----
-
-## 🎯 Executive Summary
-
-| Category | Total Features | Implemented | Partial | Missing | Completion % |
-|---|---|---|---|---|---|
-| **Dashboard** | 10 | 8 | 2 | 0 | 80% ✅ |
-| **CRM** | 5 | 0 | 1 | 4 | 20% ❌ |
-| **Sales** | 12 | 5 | 0 | 7 | 42% ⚠️ |
-| **Purchases** | 11 | 4 | 0 | 7 | 36% ⚠️ |
-| **POS** | 5 | 1 | 0 | 4 | 20% ❌ |
-| **Accounts** | 17 | 3 | 0 | 14 | 18% ❌ |
-| **Inventory** | 5 | 1 | 0 | 4 | 20% ❌ |
-| **Manufacturing** | 4 | 4 | 0 | 0 | 100% ✅ |
-| **Reports** | 84 | 24 | 0 | 60 | 29% ⚠️ |
-| **HR & Payroll** | 5 | 5 | 0 | 0 | 100% ✅ |
-| **Fixed Assets** | 3 | 0 | 1 | 2 | 33% ❌ |
-| **Settings** | 1 | 0 | 0 | 1 | 0% ❌ |
-| **Refer & Earn** | 1 | 0 | 0 | 1 | 0% ❌ |
-| **TOTAL** | **164** | **56** | **4** | **104** | **37%** |
+**Date:** June 23, 2026
+**Auditors:** Principal Engineer, CPA Accountant, SaaS Architect
+**Repository:** https://github.com/AliRaza192/nexabook
+**Live URL:** https://nexabook-eight.vercel.app/
 
 ---
 
-## 1️⃣ DASHBOARD (`/dashboard`)
+## 1. EXECUTIVE SUMMARY
 
-**Status:** ✅ EXISTS & WORKING (80% Complete)  
-**File:** `src/app/(dashboard)/dashboard/page.tsx`
+NexaBook is an ambitious cloud ERP targeting small businesses in Pakistan, with features spanning accounting, invoicing, inventory, payroll, CRM, manufacturing, and project management. The codebase is surprisingly comprehensive — ~3000 lines of DB schema, ~3500 lines of sales actions alone — and the accounting engine implements proper double-entry bookkeeping with debit/credit validation, which is the non-negotiable foundation for any accounting product.
 
-### Implemented Widgets:
-| # | Feature | Status | Implementation Details |
-|---|---|---|---|
-| 1 | **Sales Overview** | ✅ Working | KPI Cards: Total Revenue, Net Profit, Accounts Receivable, Inventory Value with trend indicators |
-| 2 | **Revenue & Expense** | ✅ Working | Beautiful Area Chart with gradient fills, last 6 months trend analysis |
-| 3 | **Invoices** | ⚠️ Partial | Shown in stats but not as dedicated widget |
-| 4 | **Account Receivable Aging** | ✅ Working | Bar Chart with color-coded aging buckets (0-30, 31-60, 61-90, 90+ days) |
-| 5 | **Top Products** | ✅ Working | Donut/Pie Chart with revenue share percentages |
-| 6 | **Top Customer** | ❌ Missing | Not implemented |
-| 7 | **Cash & Banks** | ✅ Working | Bank & Cash Position card with account list and total gauge |
-| 8 | **Profit & Loss** | ⚠️ Partial | Shown in KPI but not detailed widget |
-| 9 | **Expenses** | ⚠️ Partial | Included in Revenue & Expense chart |
-| 10 | **Date Range Presets** | ✅ Working | Today, Last 7 Days, This Month, Last 3 Months |
+However, the product has two fundamental problems. First, **there is no middleware that protects pages or API routes from unauthenticated access**. Clerk authentication is present but only wired at the component level — any route can be accessed without login by directly navigating to the URL. Second, **there is no subscription billing integration** (Stripe or otherwise) despite plans being part of the schema. The product also lacks prior-period locking, has no proper Cash Flow Statement report, and has inconsistent authorization checks (RBAC is used in some places but missing in many others).
 
-### Charts Quality:
-- ✅ **Colorful Recharts** - All charts use vibrant gradients
-- ✅ **Responsive** - Mobile and desktop layouts
-- ✅ **Interactive** - Tooltips, hover effects, animations
-- ✅ **Types:** AreaChart, BarChart, PieChart/Donut, LineChart
-
-### Missing Dashboard Items:
-- ❌ Top Customers widget
-- ❌ Detailed Invoices status widget
-- ❌ Dedicated Profit & Loss chart
-- ❌ Expense breakdown chart
+For a small business trial, this could work. For a paid SaaS product, it is not ready. The accounting engine itself is trustworthy for basic use, but the security and authorization gaps make it unsuitable for multi-tenant production without significant remediation.
 
 ---
 
-## 2️⃣ CRM MODULE (`/crm`)
+## 2. ARCHITECTURE REVIEW
 
-**Status:** ❌ EXISTS BUT INCOMPLETE (20% Complete)  
-**Base Route:** `src/app/(dashboard)/crm/`
+### Folder Layout — Next.js 14 App Router
 
-| # | Feature | Route | Status | Details |
-|---|---|---|---|---|
-| 1 | **CRM Dashboard** | `/crm` | ⚠️ Placeholder | Only title + description page |
-| 2 | **Tickets** | `/crm/tickets` | ❌ Missing | No page file exists |
-| 3 | **Leads** | `/crm/leads` | ❌ Missing | No page file exists |
-| 4 | **Events** | `/crm/events` | ❌ Missing | No page file exists |
-| 5 | **Calls** | `/crm/calls` | ❌ Missing | No page file exists |
-| 6 | **Loyalty Program** | `/crm/loyalty` | ❌ Missing | Referenced in reports but no page |
+**Rating: 8/10**
 
-### CRM Reports (Missing):
-- ❌ Call Engagement Insights
-- ❌ Month Call Insight
-- ❌ Leads Detail Report
-- ❌ Lead Status Summary Report
+The app follows App Router conventions correctly:
+- `(auth)/` — authentication pages (login, register)
+- `(dashboard)/` — all authenticated pages under a shared layout
+- `api/` — API routes with proper path structure
+- Route groups for logical separation
 
-**What's Needed:** Complete CRM module with all 4 sub-pages + backend actions
+**Good patterns observed:**
+- Route groups `(auth)` and `(dashboard)` prevent unnecessary layout nesting
+- Dynamic routes for invoices, customers, etc.
+- Parallel data fetching with `loading.tsx` and `error.tsx` at the dashboard level
+- API routes organized by domain (cron, mobile, payments, webhooks)
 
----
+**Issues:**
+- `(dashboard)/page.tsx` and `(dashboard)/dashboard/page.tsx` both exist, creating confusion about which is the real dashboard
 
-## 3️⃣ SALES MODULE (`/sales`)
+### Server vs Client Component Split
 
-**Status:** ⚠️ EXISTS BUT INCOMPLETE (42% Complete)  
-**Base Route:** `src/app/(dashboard)/sales/`
+**Rating: 5/10**
 
-### Implemented:
-| # | Feature | Route | Status | Lines of Code | Details |
-|---|---|---|---|---|---|
-| 1 | **Customers** | `/sales/customers` | ✅ Working | ~500 lines | Full CRUD, search, status badges, tax details |
-| 2 | **Invoices** | `/sales/invoices` | ✅ Working | ~300 lines | List with stats, search, status filters, approve/revise |
-| 3 | **New Invoice** | `/sales/invoices/new` | ✅ Working | 458 lines | Complete invoice creation form |
-| 4 | **Orders** | `/sales/orders` | ✅ Working | ~250 lines | Order list with stats, search, filters |
-| 5 | **New Order** | `/sales/orders/new` | ✅ Working | 261 lines | Full order creation form |
+The main dashboard layout (`src/app/(dashboard)/layout.tsx`) is entirely `"use client"` — all 605 lines. This is a significant performance concern. The sidebar navigation, header, and all UI chrome should be server-rendered with small client islands for interactivity.
 
-### Missing:
-| # | Feature | Route | Status | Priority |
-|---|---|---|---|---|
-| 6 | **Quotations** | `/sales/quotations` | ❌ Missing | High |
-| 7 | **Delivery** | `/sales/delivery` | ❌ Missing | Medium |
-| 8 | **Recurring Invoice** | `/sales/recurring` | ❌ Missing | Medium |
-| 9 | **Sales Return** | `/sales/returns` | ❌ Missing | High |
-| 10 | **Receive Payment** | `/sales/receive-payment` | ❌ Missing | High |
-| 11 | **Refund** | `/sales/refund` | ❌ Missing | Low |
-| 12 | **Settlement** | `/sales/settlement` | ❌ Missing | Medium |
+All action files use `"use server"` directives correctly, which is good.
 
-### Sales Reports Status:
+### API Routes
 
-#### ✅ Implemented (4/28):
-1. Customer Ledger
-2. Aged Receivables
-3. Sales By Month
-4. Product Profit
+**Rating: 6/10**
 
-#### ❌ Missing (24/28):
-1. ❌ Customer Loyalty Program Ledger
-2. ❌ Customer Balance Details Report
-3. ❌ Sales Order Un-Delivered Details Report
-4. ❌ Product Sales History Report
-5. ❌ Customer Sales Analysis Report
-6. ❌ Sales Target and Commissions
-7. ❌ Customer Balances Report
-8. ❌ Sales Invoice Report
-9. ❌ Customer Refund Report
-10. ❌ Product Sales Report
-11. ❌ Sale Delivery Report
-12. ❌ Sale Return Report
-13. ❌ Sale Return Detail Report
-14. ❌ Sale Invoice Details Report
-15. ❌ Product Sale Customer Wise Report
-16. ❌ Sale Order Details Report
-17. ❌ Sale Order Report
-18. ❌ Sale Performance Report
-19. ❌ Load Pass Report
-20. ❌ Due Invoice Report
-21. ❌ Product Price List Report
-22. ❌ Sales Invoice and Return Report
-23. ❌ Sale Performance by Sales Person Report
-24. ❌ Customer Ledger (Bulk) Report
-25. ❌ Discount Summary Report
-26. ❌ Sale Invoice Detail Report (Ungrouped)
-27. ❌ Sale Return Detail Report (Ungrouped)
-28. ❌ Receive Payment Report
-29. ❌ Receive Payment Report With Settlement
-30. ❌ Receive Payment Detail Report (Ungrouped)
-31. ❌ Distributor Margin Detail Report
-32. ❌ Invoice Wise Profit Report
+API routes exist for chat, payments, webhooks, cron jobs, mobile, tax returns, and portals. There are no traditional REST API routes for CRUD operations — the app relies entirely on Server Actions. This is an acceptable Next.js 14 pattern but means there is no public API for integrations.
+
+### Middleware
+
+**Rating: 3/10**
+
+FILE: `src/middleware.ts`
+LINE: 1-39
+SEVERITY: P0
+PROBLEM: Middleware only implements rate limiting on `/api/*` routes and does NOT protect any pages.
+WHY: Any unauthenticated user can access any dashboard page by navigating to the URL. The auth check only happens client-side in `useUser()` from Clerk, which means the page content briefly flashes before redirecting.
+FIX: Add Clerk middleware to protect all dashboard routes. Add `clerkMiddleware` from `@clerk/nextjs`.
+
+CODE:
+```typescript
+// src/middleware.ts
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+const isPublicRoute = createRouteMatcher([
+  '/', '/login(.*)', '/register(.*)', '/portal(.*)', '/vendor-portal(.*)',
+]);
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function rateLimit(ip: string, maxRequests = 30, windowMs = 60000): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= maxRequests) return false;
+  entry.count++;
+  return true;
+}
+
+export default clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect();
+  }
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    || req.headers.get("x-real-ip") || "unknown";
+  if (req.nextUrl.pathname.startsWith("/api/") && !rateLimit(ip)) {
+    return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  }
+  return NextResponse.next();
+});
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};
+```
 
 ---
 
-## 4️⃣ PURCHASES MODULE (`/purchases`)
+## 3. CODE QUALITY SCORE
 
-**Status:** ⚠️ EXISTS BUT INCOMPLETE (36% Complete)  
-**Base Route:** `src/app/(dashboard)/purchases/`
+**Overall: 72/100** (Good foundation, needs tightening)
 
-### Implemented:
-| # | Feature | Route | Status | Lines of Code | Details |
-|---|---|---|---|---|---|
-| 1 | **Dashboard** | `/purchases` | ✅ Working | ~100 lines | Quick links to Vendors, Invoices, New Invoice |
-| 2 | **Vendors** | `/purchases/vendors` | ✅ Working | ~400 lines | Full vendor CRUD, stats, search |
-| 3 | **Purchase Invoices** | `/purchases/invoices` | ✅ Working | ~300 lines | Invoice list with approve/revise |
-| 4 | **New Purchase Invoice** | `/purchases/invoices/new` | ✅ Working | 696 lines | Complete creation form |
+| Category | Score | Notes |
+|----------|-------|-------|
+| TypeScript Strictness | 65 | Some `any` types, unsafe assertions |
+| Error Handling | 60 | Errors silently caught and returned as `{success: false, error}` strings |
+| Input Validation | 50 | Minimal validation, no zod at boundaries |
+| Naming Conventions | 85 | Consistent, descriptive naming |
+| Code Duplication | 70 | Some repeated patterns in sales.ts/purchases.ts |
+| Component Reusability | 65 | Large monolithic dashboard layout |
+| Testing | 40 | One test file with minimal coverage |
 
-### Missing:
-| # | Feature | Route | Status | Priority |
-|---|---|---|---|---|
-| 5 | **Purchase Orders** | `/purchases/orders` | ❌ Missing | High |
-| 6 | **Good Receiving (GRN)** | `/purchases/grn` | ❌ Missing | High |
-| 7 | **Bills** | `/purchases/bills` | ❌ Missing | Medium |
-| 8 | **Vendor Payments** | `/purchases/payments` | ❌ Missing | High |
-| 9 | **Purchase Returns** | `/purchases/returns` | ❌ Missing | Medium |
-| 10 | **Refund** | `/purchases/refund` | ❌ Missing | Low |
-| 11 | **Settlement** | `/purchases/settlement` | ❌ Missing | Medium |
-
-### Purchase Reports Status:
-
-#### ✅ Implemented (3/15):
-1. Vendor Ledger
-2. Aged Payables
-3. Purchase Details
-
-#### ❌ Missing (12/15):
-1. ❌ Vendor Balance Report
-2. ❌ Purchase Invoice Report
-3. ❌ Vendor Payment Report
-4. ❌ Vendor Refund Report
-5. ❌ Vendor Wise Product Purchases Report
-6. ❌ Good Receiving Report
-7. ❌ Purchase Return Report
-8. ❌ Purchase Invoice Detail Report
-9. ❌ Purchase Order Detail Report
-10. ❌ Purchase Order Report
-11. ❌ Purchase Return Detail Report
-12. ❌ Purchase Return Detail Report (Ungrouped)
-13. ❌ Purchase Order Pending Report
+### Detailed Findings
 
 ---
 
-## 5️⃣ POS MODULE (`/pos`)
+FILE: `src/lib/actions/sales.ts`
+LINE: 195
+SEVERITY: P2
+PROBLEM: Type `any` used for `updateData` instead of a proper Partial type.
+WHY: This defeats TypeScript's type checking. If a misspelled field is passed, the compiler won't catch it.
+FIX: Use `Partial<typeof customers.$inferInsert>` or a properly defined update type.
 
-**Status:** ❌ EXISTS BUT INCOMPLETE (20% Complete)  
-**Base Route:** `src/app/(dashboard)/pos/`
+CODE:
+```typescript
+// Before:
+const updateData: any = {};
 
-### Implemented:
-| # | Feature | Route | Status | Lines of Code | Details |
-|---|---|---|---|---|---|
-| 1 | **POS Terminal** | `/pos` | ✅ Working | 500+ lines | Full checkout with product grid, cart, shift management, payment processing |
-
-### Missing:
-| # | Feature | Route | Status | Priority |
-|---|---|---|---|---|
-| 2 | **Delivery Counter** | `/pos/delivery` | ❌ Missing | Medium |
-| 3 | **POS Office** | `/pos/office` | ❌ Missing | Low |
-| 4 | **Barcode / QR Code** | `/pos/barcode` | ❌ Missing | Medium |
-| 5 | **Daily Summary** | `/pos/daily-summary` | ❌ Missing | High |
+// After:
+const updateData: Partial<typeof customers.$inferInsert> = {};
+```
 
 ---
 
-## 6️⃣ ACCOUNTS MODULE (`/accounts`)
+FILE: `src/lib/actions/sales.ts` (also in accounts.ts, purchases.ts)
+LINE: 112, 137, 179, etc.
+SEVERITY: P2
+PROBLEM: All errors are caught and returned as generic strings like "Failed to fetch customers" — original error is lost.
+WHY: Debugging production issues becomes impossible. The team cannot tell if errors are DB connection failures, constraint violations, or logic bugs.
+FIX: Log the original error server-side while returning a sanitized message.
 
-**Status:** ❌ EXISTS BUT INCOMPLETE (18% Complete)  
-**Base Route:** `src/app/(dashboard)/accounts/`
+CODE:
+```typescript
+// Before:
+catch (error) {
+  return { success: false, error: "Failed to fetch customers" };
+}
 
-### Implemented:
-| # | Feature | Route | Status | Lines of Code | Details |
-|---|---|---|---|---|---|
-| 1 | **Chart of Accounts** | `/accounts/chart-of-accounts` | ✅ Working | ~300 lines | Full COA with seeding, table by type |
-| 2 | **Journal Entries** | `/accounts/journal-entries` | ✅ Working | ~400 lines | Full creation with balanced validation |
-| 3 | **Expenses** | `/accounts/expenses` | ✅ Working | ~350 lines | Expense recording with auto journal entries |
-
-### Missing:
-| # | Feature | Route | Status | Priority |
-|---|---|---|---|---|
-| 4 | **Bank Account** | `/accounts/bank-account` | ❌ Missing | High |
-| 5 | **Bank Deposit** | `/accounts/bank-deposit` | ❌ Missing | Medium |
-| 6 | **Credit Note** | `/accounts/credit-note` | ❌ Missing | High |
-| 7 | **Debit Note** | `/accounts/debit-note` | ❌ Missing | High |
-| 8 | **Funds Transfer** | `/accounts/funds-transfer` | ❌ Missing | Medium |
-| 9 | **Other Collections** | `/accounts/other-collections` | ❌ Missing | Low |
-| 10 | **Other Payments** | `/accounts/other-payments` | ❌ Missing | Medium |
-| 11 | **Instruments** | `/accounts/instruments` | ❌ Missing | Low |
-| 12 | **Other Contact Settlement** | `/accounts/other-contact-settlement` | ❌ Missing | Low |
-| 13 | **Ledger** | `/accounts/ledger` | ❌ Missing | High |
-| 14 | **Banking** | `/accounts/banking` | ❌ Missing | Medium |
-| 15 | **Tax** | `/accounts/tax` | ❌ Missing | Medium |
-| 16 | **Reconciliation** | `/accounts/reconciliation` | ❌ Missing | Medium |
-| 17 | **Bank Reconciliation** | `/accounts/bank-reconciliation` | ❌ Missing | Medium |
-
-### Accounts Reports Status:
-
-#### ✅ Implemented (0/13):
-- None specifically categorized as "Accounts Reports"
-
-#### ❌ Missing (13/13):
-1. ❌ Courier Ledger Report
-2. ❌ Account Ledger
-3. ❌ Expense Report
-4. ❌ Credit Note Report
-5. ❌ Debit Note Report
-6. ❌ Consolidated Ledger (Customer & Vendor)
-7. ❌ Trial Balance (page exists but not in reports category)
-8. ❌ Transaction List Report
-9. ❌ Tax Collected on Sales Report
-10. ❌ Tax Paid on Purchase Report
-11. ❌ Trial Balance Report (Six Column)
-12. ❌ Employee Ledger (exists under HR/Payroll reports)
-13. ❌ Other Collection Report
-14. ❌ Other Payment Report
+// After:
+catch (error) {
+  console.error("[getCustomers]", error);
+  const message = error instanceof Error ? error.message : "Failed to fetch customers";
+  return { success: false, error: message };
+}
+```
 
 ---
 
-## 7️⃣ INVENTORY MODULE (`/inventory`)
-
-**Status:** ❌ EXISTS BUT INCOMPLETE (20% Complete)  
-**Base Route:** `src/app/(dashboard)/inventory/`
-
-### Implemented:
-| # | Feature | Route | Status | Lines of Code | Details |
-|---|---|---|---|---|---|
-| 1 | **Product Management** | `/inventory` | ✅ Working | ~600 lines | Full CRUD, stock levels, low stock alerts, search/filter |
-
-### Missing:
-| # | Feature | Route | Status | Priority |
-|---|---|---|---|---|
-| 2 | **Stock Movement** | `/inventory/stock` | ❌ Missing | High |
-| 3 | **Stock Adjustment** | `/inventory/stock-adjustment` | ❌ Missing | High |
-| 4 | **Scheduled Valuation** | `/inventory/scheduled-valuation` | ❌ Missing | Medium |
-| 5 | **Warehouses** | `/inventory/warehouses` | ❌ Missing | Medium |
-| 6 | **Batches** | `/inventory/batches` | ❌ Missing | Low |
-
-### Inventory Reports Status:
-
-#### ✅ Implemented (4/15):
-1. Stock On Hand
-2. Low Inventory
-3. Stock Movement
-4. Product Aging
-
-#### ❌ Missing (11/15):
-1. ❌ Product Ledger
-2. ❌ Stock Adjustment Report
-3. ❌ Stock On Hand Report (With Value)
-4. ❌ Short Expiry Stock
-5. ❌ Stock Tracking Report
-6. ❌ Negative Stock Report
-7. ❌ Stock Valuation Report
-8. ❌ Stock Discrepancy Report
-9. ❌ Batch Wise Stock Report
-10. ❌ Stock On Hand History Report
-11. ❌ Transfer Discrepancy Report
-12. ❌ Transfer Out Report
-13. ❌ Transfer In Report
-14. ❌ In Transit Detail Report
+FILE: `src/lib/actions/shared.ts`
+LINE: 161-163
+SEVERITY: P0
+PROBLEM: `getCurrentOrgId()` auto-creates an organization and seeds the Chart of Accounts for ANY authenticated Clerk user who doesn't have a profile yet.
+WHY: If someone creates a Clerk user directly (not through the app's signup flow), hitting any server action would auto-create an org for them. Also, if a user signs up, gets an org, then is deleted from Clerk and re-registers, they'd get a second org. No rate limiting or fraud prevention on org creation.
+FIX: Require explicit onboarding flow. Remove auto-org-creation from `getCurrentOrgId()`.
 
 ---
 
-## 8️⃣ MANUFACTURING MODULE (`/manufacturing`)
+FILE: `src/lib/actions/sales.ts`
+LINE: 749
+SEVERITY: P1
+PROBLEM: Invoice items are inserted inside a `for` loop with individual `await db.insert()` calls, not batched, not wrapped in a transaction with the invoice creation.
+WHY: If item insertion fails partway through, the invoice header exists but items are missing — inconsistent state. Also N+1 database round-trips.
+FIX: Wrap both invoice and items in a single `db.transaction()` with a single batch insert for items.
 
-**Status:** ✅ EXISTS & WORKING (100% Complete)  
-**Base Route:** `src/app/(dashboard)/manufacturing/`
+CODE:
+```typescript
+// Before (lines 717-760):
+const [newInvoice] = await db.insert(invoices).values({...}).returning();
+for (const item of data.items) {
+  await db.insert(invoiceItems).values({...});
+}
 
-| # | Feature | Route | Status | Lines of Code | Details |
-|---|---|---|---|---|---|
-| 1 | **Dashboard** | `/manufacturing` | ✅ Working | ~150 lines | Module cards, quick start guide |
-| 2 | **BOM** | `/manufacturing/bom` | ✅ Working | ~400 lines | Full BOM creation/management, component tables, cost calculation |
-| 3 | **Job Orders** | `/manufacturing/job-orders/new` | ✅ Working | 643 lines | Complete job order creation & management |
-| 4 | **Disassembling** | `/manufacturing/disassemble` | ✅ Working | ~300 lines | Full disassembly form with component recovery preview |
-
-### Manufacturing Reports Status:
-
-#### ✅ Implemented (2/4):
-1. BOM Cost
-2. Job Order Production
-
-#### ❌ Missing (2/4):
-1. ❌ Material Issuance Report
-2. ❌ Job Order Expense Report
-3. ❌ Job Order Validation Report
-
----
-
-## 9️⃣ REPORTS MODULE (`/reports`)
-
-**Status:** ⚠️ EXISTS & WORKING - Core Infrastructure (29% Complete)  
-**Base Route:** `src/app/(dashboard)/reports/`
-
-### Overall Reports Summary:
-- **Total Report Pages Implemented:** 24
-- **Total Reports Required:** 84
-- **Missing Reports:** 60
-- **Completion:** 29%
-
-### Reports by Category:
-
-#### ✅ BUSINESS OVERVIEW (5/5 Implemented) - 100%
-| # | Report | Status | Route |
-|---|---|---|---|
-| 1 | Balance Sheet | ✅ Working | `/reports/balance-sheet` |
-| 2 | Profit and Loss | ✅ Working | `/reports/profit-and-loss` |
-| 3 | Audit Log | ✅ Working | `/reports/audit-log` |
-| 4 | Trial Balance | ✅ Working | `/reports/trial-balance` |
-| 5 | Cash Flow | ✅ Working | `/reports/cash-flow` |
-
-#### ⚠️ SALES REPORTS (4/28 Implemented) - 14%
-| # | Report | Status |
-|---|---|---|
-| 1 | Customer Ledger | ✅ Working |
-| 2 | Aged Receivables | ✅ Working |
-| 3 | Sales By Month | ✅ Working |
-| 4 | Product Profit | ✅ Working |
-| 5-28 | All other sales reports | ❌ Missing (24 reports) |
-
-#### ⚠️ PURCHASE REPORTS (3/15 Implemented) - 20%
-| # | Report | Status |
-|---|---|---|
-| 1 | Vendor Ledger | ✅ Working |
-| 2 | Aged Payables | ✅ Working |
-| 3 | Purchase Details | ✅ Working |
-| 4-15 | All other purchase reports | ❌ Missing (12 reports) |
-
-#### ⚠️ INVENTORY REPORTS (4/15 Implemented) - 27%
-| # | Report | Status |
-|---|---|---|
-| 1 | Stock On Hand | ✅ Working |
-| 2 | Low Inventory | ✅ Working |
-| 3 | Stock Movement | ✅ Working |
-| 4 | Product Aging | ✅ Working |
-| 5-15 | All other inventory reports | ❌ Missing (11 reports) |
-
-#### ⚠️ MANUFACTURING REPORTS (2/4 Implemented) - 50%
-| # | Report | Status |
-|---|---|---|
-| 1 | BOM Cost | ✅ Working |
-| 2 | Job Order Production | ✅ Working |
-| 3-4 | Material Issuance, Job Order Expense, Validation | ❌ Missing (2 reports) |
-
-#### ⚠️ ACCOUNTS REPORTS (0/13 Implemented) - 0%
-| # | Report | Status |
-|---|---|---|
-| All 13 accounts reports | ❌ Missing |
-
-#### ✅ HR & PAYROLL REPORTS (3/3 Implemented) - 100%
-| # | Report | Status |
-|---|---|---|
-| 1 | Payroll Summary | ✅ Working |
-| 2 | Employee Ledger | ✅ Working |
-| 3 | Attendance | ✅ Working |
-
-#### ✅ TAX REPORTS (3/3 Implemented) - 100%
-| # | Report | Status |
-|---|---|---|
-| 1 | Sales Tax | ✅ Working |
-| 2 | Purchase Tax | ✅ Working |
-| 3 | WHT (Withholding Tax) | ✅ Working |
-
-#### ❌ CRM REPORTS (0/4 Implemented) - 0%
-| # | Report | Status |
-|---|---|---|
-| 1 | Call Engagement Insights | ❌ Missing |
-| 2 | Month Call Insight | ❌ Missing |
-| 3 | Leads Detail Report | ❌ Missing |
-| 4 | Lead Status Summary Report | ❌ Missing |
+// After:
+const result = await db.transaction(async (tx) => {
+  const [newInvoice] = await tx.insert(invoices).values({...}).returning();
+  if (data.items.length > 0) {
+    await tx.insert(invoiceItems).values(
+      data.items.map(item => ({
+        orgId,
+        invoiceId: newInvoice.id,
+        productId: item.productId || null,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountPercentage: item.discountPercentage || "0",
+        taxRate: item.taxRate,
+        lineTotal: item.lineTotal,
+      }))
+    );
+  }
+  return newInvoice;
+});
+```
 
 ---
 
-## 🔟 HR & PAYROLL MODULE (`/hr-payroll`)
+FILE: `src/lib/actions/accounts.ts`
+LINE: 267
+SEVERITY: P2
+PROBLEM: Journal entry number generation loads ALL entries into memory to count them.
+WHY: With 100K+ journal entries, this loads 100K rows just to get a count. Performance regression at scale.
+FIX: Use SQL COUNT query instead.
 
-**Status:** ✅ EXISTS & WORKING (100% Complete)  
-**Base Route:** `src/app/(dashboard)/hr-payroll/`
+CODE:
+```typescript
+// Before:
+const entryCount = await db
+  .select()
+  .from(journalEntries)
+  .where(eq(journalEntries.orgId, orgId));
+const entryNumber = `JE-${String(entryCount.length + 1).padStart(5, '0')}`;
 
-| # | Feature | Route | Status | Lines of Code | Details |
-|---|---|---|---|---|---|
-| 1 | **Dashboard** | `/hr-payroll` | ✅ Working | ~150 lines | Module cards, compliance info |
-| 2 | **Employees** | `/hr-payroll/employees` | ✅ Working | 727 lines | Full CRUD with tabs (Personal/Job/Salary) |
-| 3 | **Attendance** | `/hr-payroll/attendance` | ✅ Working | ~250 lines | Daily attendance tracking |
-| 4 | **Payroll Run** | `/hr-payroll/run` | ✅ Working | ~200 lines | Monthly payroll processing |
-| 5 | **Reports** | `/hr-payroll/reports` | ✅ Working | ~200 lines | Payslip reports with print dialog |
-
----
-
-## 1️⃣1️⃣ FIXED ASSETS MODULE (`/fixed-assets`)
-
-**Status:** ❌ EXISTS BUT INCOMPLETE (33% Complete)  
-**Base Route:** `src/app/(dashboard)/fixed-assets/`
-
-| # | Feature | Route | Status | Details |
-|---|---|---|---|---|
-| 1 | **Dashboard** | `/fixed-assets` | ⚠️ Placeholder | Only title + description page |
-| 2 | **Asset Register** | `/fixed-assets/register` | ❌ Missing | No page file |
-| 3 | **Depreciation** | `/fixed-assets/depreciation` | ❌ Missing | No page file |
+// After:
+const [result] = await db
+  .select({ count: sql<number>`count(*)::int` })
+  .from(journalEntries)
+  .where(eq(journalEntries.orgId, orgId));
+const entryNumber = `JE-${String((result?.count ?? 0) + 1).padStart(5, '0')}`;
+```
 
 ---
 
-## 1️⃣2️⃣ SETTINGS MODULE (`/settings`)
-
-**Status:** ❌ MISSING (0% Complete)
-
-| # | Feature | Route | Status |
-|---|---|---|---|
-| 1 | **Settings** | `/settings` | ❌ Missing | No page exists at all |
-
-**Required Settings Pages:**
-- ❌ Company Profile
-- ❌ User Management
-- ❌ Billing & Subscription
-- ❌ Email/SMS Settings
-- ❌ Tax Configuration
-- ❌ General Settings
+FILE: `src/lib/accounting.test.ts`
+LINE: 1
+SEVERITY: P3
+PROBLEM: Only one test file exists with minimal coverage for a financial application.
+WHY: Accounting software that is not tested will inevitably have bugs that cost users money.
+FIX: Add comprehensive tests for journal entry validation, trial balance calculation, P&L calculation, balance sheet balancing, invoice approval flow, and multi-tenant data isolation.
 
 ---
 
-## 1️⃣3️⃣ REFER & EARN MODULE
+## 4. ACCOUNTING AUDIT
 
-**Status:** ❌ MISSING (0% Complete)
+**CRITICAL: 1 | MAJOR: 3 | MINOR: 5**
 
-| # | Feature | Route | Status |
-|---|---|---|---|
-| 1 | **Refer & Earn** | `/refer-earn` | ❌ Missing | No route or page found |
+### Double-Entry Bookkeeping
 
----
+The application implements proper double-entry bookkeeping:
+- `journalEntries` table stores headers
+- `journalEntryLines` table stores individual debits and credits
+- `validateJournalBalance()` enforces debit = credit constraint before inserts
+- All financial transactions (invoice approval, payment, payroll posting, purchase invoice approval) create journal entries
 
-## 📋 COMPLETE FEATURE LIST
+**VERDICT: Foundationally sound.** Every financial event is recorded as both debits and credits. The `validateJournalBalance()` function is called before every journal entry insert.
 
-### ✅ FULLY IMPLEMENTED MODULES (3/13):
-1. ✅ **Dashboard** (80% - Core widgets working)
-2. ✅ **Manufacturing** (100% - All features working)
-3. ✅ **HR & Payroll** (100% - All features working)
+### Chart of Accounts
 
-### ⚠️ PARTIALLY IMPLEMENTED MODULES (5/13):
-1. ⚠️ **Sales** (42% - Core invoicing working)
-2. ⚠️ **Purchases** (36% - Vendor & invoice management working)
-3. ⚠️ **POS** (20% - Main terminal working)
-4. ⚠️ **Accounts** (18% - Core accounting working)
-5. ⚠️ **Inventory** (20% - Product management working)
+FILE: `src/lib/actions/accounts.ts`
+LINE: 70-198
+SEVERITY: MAJOR
+PROBLEM: The `seedInitialCOA()` function has a **duplicate code entry** — code "4500" appears twice (Commission Income and Exchange Gain).
+WHY: This will cause a unique constraint violation on the code field within the same org when seeding. The second insert will fail silently (caught by generic try/catch).
+FIX: Fix the duplicate code. Exchange Gain should be 4550 or similar.
 
-### ❌ INCOMPLETE/MISSING MODULES (5/13):
-1. ❌ **CRM** (20% - Only placeholder)
-2. ❌ **Fixed Assets** (33% - Only placeholder)
-3. ❌ **Reports** (29% - Core reports working, many missing)
-4. ❌ **Settings** (0% - Completely missing)
-5. ❌ **Refer & Earn** (0% - Completely missing)
-
----
-
-## 🎯 PRIORITY RECOMMENDATIONS
-
-### 🔴 HIGH PRIORITY (Core Business Features):
-1. **Sales Module** - Complete missing features:
-   - Quotations
-   - Sales Returns
-   - Receive Payments
-   
-2. **Purchases Module** - Complete missing features:
-   - Purchase Orders
-   - Good Receiving (GRN)
-   - Vendor Payments
-
-3. **Accounts Module** - Complete missing features:
-   - Credit/Debit Notes
-   - Bank Accounts
-   - Ledger
-
-4. **CRM Module** - Build from scratch:
-   - Leads management
-   - Tickets/Support
-   - Events & Calls
-
-### 🟡 MEDIUM PRIORITY:
-1. **Inventory** - Stock management features
-2. **POS** - Daily summary, barcode scanning
-3. **Reports** - Add critical missing reports
-4. **Settings** - Basic company configuration
-
-### 🟢 LOW PRIORITY:
-1. **Fixed Assets** - Asset register & depreciation
-2. **Refer & Earn** - Referral program
-3. Additional report variations
+CODE:
+```typescript
+// Line 140-141:
+{ code: "4500", name: "Exchange Gain", type: "income", ... },
+{ code: "4500", name: "Commission Income", type: "income", ... },
+// DUPLICATE CODE! Change one: e.g., Commission Income → 4550
+```
 
 ---
 
-## 📊 WHAT'S WORKING CORRECTLY
-
-### ✅ Backend (Server Actions):
-- All 9 action files properly implemented
-- Authentication secured with Clerk
-- Database queries optimized with Drizzle ORM
-- Error handling with try-catch blocks
-- Auto-onboarding for new users
-
-### ✅ Database Schema:
-- Complete schema with all major tables
-- Proper relationships defined
-- Audit logging implemented
-- Multi-organization support
-
-### ✅ Frontend Infrastructure:
-- Next.js 16 with App Router
-- TypeScript fully configured
-- Tailwind CSS with custom theme
-- Responsive layouts
-- Error boundaries
-- Loading states
-
-### ✅ Authentication:
-- Clerk integration working
-- Route protection via middleware
-- Sign up/Sign in flows
-- User profile management
+FILE: `src/lib/actions/reports.ts`
+LINE: 85-95
+SEVERITY: MAJOR
+PROBLEM: P&L report calculates COGS and expenses separately but the `getProfitAndLossReport()` function does NOT use journal entries for income/expense reconciliation. It double-counts by querying both invoices directly AND journal entries.
+WHY: The P&L amount from direct invoice queries (lines 70-88) + the amount from journal entry queries (lines 95-125) are combined, leading to double-counting. Net profit will be wrong.
+FIX: Use ONLY journal entries for P&L calculation (since all approved invoices create journal entries). Remove the direct invoice/expense table queries for P&L.
 
 ---
 
-## 📝 CONCLUSION
+FILE: `src/lib/accounting.ts`
+LINE: 183-237
+SEVERITY: CRITICAL
+PROBLEM: The `getBalanceSheet()` function does NOT filter by date. It queries ALL journal entry lines regardless of date.
+WHY: A balance sheet should reflect assets/liabilities/equity as of a specific date. Without date filtering, the balance sheet includes transactions from future periods. This means the balance sheet will never balance for any date range, and period-specific reporting is impossible.
+FIX: Add a date parameter and filter journal entries by `entryDate <= asOfDate`.
 
-**Current State:**  
-NexaBook has a **solid foundation** with core business modules implemented. The application is **production-ready for basic invoicing, inventory tracking, payroll processing, and manufacturing** workflows.
-
-**What Works:**
-- ✅ Sales invoicing & orders
-- ✅ Purchase management & vendors
-- ✅ POS checkout terminal
-- ✅ Product inventory management
-- ✅ BOM & job orders
-- ✅ Employee management & payroll
-- ✅ Core financial reports
-- ✅ Tax reports
-
-**What Needs Development:**
-- ❌ Complete CRM module
-- ❌ Advanced sales/purchase workflows
-- ❌ Full accounting features
-- ❌ Stock management features
-- ❌ 60+ missing reports
-- ❌ Settings & configuration pages
-- ❌ Refer & earn program
-
-**Overall Completion:** **37% (56/164 features)**
-
-**Estimated Development Time to Complete:**
-- High Priority: 4-6 weeks
-- Medium Priority: 3-4 weeks
-- Low Priority: 2-3 weeks
-- **Total: 9-13 weeks**
+CODE:
+```typescript
+export async function getBalanceSheet(orgId: string, asOfDate?: Date) {
+  const dateFilter = asOfDate 
+    ? sql`${journalEntries.entryDate} <= ${asOfDate}` 
+    : sql`1=1`;
+  
+  const lines = await db
+    .select({...})
+    .from(journalEntryLines)
+    .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+    .where(and(
+      eq(journalEntryLines.orgId, orgId),
+      dateFilter
+    ))
+    .groupBy(journalEntryLines.accountId);
+  // ... rest of function
+}
+```
 
 ---
 
-**Report Generated:** April 10, 2026  
-**Next Review:** After implementing high-priority items
+FILE: `src/lib/accounting.ts`
+LINE: 113-177
+SEVERITY: MAJOR
+PROBLEM: The `getProfitAndLoss()` function includes REVERSED journal entries in its calculation. It does not filter by `journalEntries.status !== 'reversed'`.
+WHY: If a journal entry is reversed (e.g., a voided invoice), the reversal entry AND the original entry both appear in the P&L, effectively zeroing each other out — BUT the reversed entry's `status` field marks it as reversed. Since the query doesn't filter these, both the original and the reversal are counted separately, doubling the impact.
+FIX: Add `sql`${journalEntries.status} != 'reversed'`` to the WHERE clause.
+
+---
+
+FILE: `src/lib/accounting.ts`
+LINE: 86-87
+SEVERITY: MINOR
+PROBLEM: The trial balance function includes `"cost_of_goods_sold"` in the `normalDebit` check but COGS is stored as type `"expense"` in the schema, not `"cost_of_goods_sold"`.
+WHY: This string check will never match, so COGS accounts will be treated as credit-normal (liability/equity/revenue style) instead of debit-normal (asset/expense style). This inverts the COGS balance on the trial balance.
+FIX: Remove `"cost_of_goods_sold"` from the check since it's stored as type "expense":
+
+```typescript
+const normalDebit = ["asset", "expense"].includes(account.type || "");
+```
+
+---
+
+FILE: `src/db/schema.ts`
+LINE: 891-898
+SEVERITY: MINOR
+PROBLEM: Journal entries have a `status` field with values `draft | posted | reversed` but entries created via the manual Journal Entry form in `accounts.ts:createJournalEntry()` are created with default status 'draft' and never transitioned to 'posted'.
+WHY: Draft journal entries appear in financial reports (trial balance, P&L, balance sheet) because no report filters by status. Users can create "draft" entries that affect financial statements.
+FIX: Either filter draft entries from all reports, or auto-post manual entries immediately with status "posted".
+
+---
+
+FILE: `src/lib/actions/accounts.ts`
+LINE: 228-320
+SEVERITY: MINOR
+PROBLEM: `createJournalEntry()` validates balance BEFORE inserting lines AND calls `validateJournalBalance()` again after. Double validation is redundant but not harmful — however the balance validation exists in the loop.
+WHY: Minor code smell. The second validation (line 281) happens after the lines are already constructed, making the first check (line 241) redundant.
+FIX: Remove the duplicate check at line 241 and keep only the `validateJournalBalance()` call at line 281.
+
+---
+
+FILE: `src/lib/accounting.ts`
+LINE: 247-320
+SEVERITY: MINOR
+PROBLEM: `postPayrollToLedger()` generates JV numbers by counting ALL journal entries in the org. This is the same N+1 pattern (actually a count-all pattern) from shared.ts.
+WHY: Same scalability issue as noted in the code quality section.
+FIX: Use SQL COUNT.
+
+### Tax
+
+FILE: `src/lib/actions/accounts.ts`
+LINE: 857-878
+SEVERITY: MINOR
+PROBLEM: Tax summary calculates output tax from `invoices.taxAmount` and input tax from `purchaseInvoices.taxTotal`. These are stored values from the invoice header, NOT recalculated from individual line items.
+WHY: If invoice amounts are manually edited without recalculating tax, the tax summary will show the stored (possibly incorrect) values. There's no cross-check against actual line-item tax calculations.
+FIX: Add a validation that stored `taxAmount` equals the sum of line-item tax calculations, or recalculate from line items for reports.
+
+---
+
+## 5. DATABASE REVIEW
+
+### Multi-tenancy
+
+FILE: `src/db/schema.ts`
+LINE: (all tables)
+SEVERITY: P0
+PROBLEM: Every table has `orgId` with a foreign key, but there is NO RLS (Row-Level Security) or guaranteed scoping middleware. The scoping relies entirely on each Server Action correctly passing `orgId`.
+WHY: A bug in any single Server Action that forgets to add `eq(table.orgId, orgId)` would leak data across tenants. This is a fragile pattern for a multi-tenant SaaS.
+FIX: Add Drizzle middleware/callback that automatically injects orgId into all queries, or implement Row-Level Security in PostgreSQL.
+
+---
+
+FILE: `src/lib/actions/sales.ts`
+LINE: 459-464
+SEVERITY: P0
+PROBLEM: `getInvoiceById()` uses `getCurrentOrgId()` to scope the invoice query. However, function `getInvoiceWithDetails()` at line 540 also scopes correctly. But `createInvoiceJournalEntry()` at line 1343 looks up accounts by NAME not by subtype.
+WHY: Account lookup by name ("Accounts Receivable", "Sales Revenue") will fail if the user has renamed these accounts. This is a fragile pattern.
+FIX: Use `subType` field for system account lookups, not name.
+
+### Schema Design
+
+FILE: `src/db/schema.ts`
+LINE: 1-2971
+SEVERITY: P2
+PROBLEM: Monetary amounts are stored as `decimal` with varying precision — some are `{precision: 12, scale: 2}`, some `{precision: 15, scale: 2}`, some `{precision: 14, scale: 2}`.
+WHY: Inconsistent precision can cause arithmetic overflow when summing large values across accounts. PKR amounts can reach billions (12 digits + 2 decimals = max 99,999,999,999.99).
+FIX: Standardize all monetary columns to `{precision: 14, scale: 2}` which supports up to 999,999,999,999.99.
+
+---
+
+FILE: `src/db/schema.ts`
+LINE: 850-861
+SEVERITY: P2
+PROBLEM: `auditLogs` table stores changes as `text` (JSON string) with no structured format enforcement.
+WHY: Different parts of the codebase may store different JSON structures for the `changes` field, making it impossible to query or parse programmatically.
+FIX: Use `jsonb` type for the changes field, or define a strict interface for each entity type.
+
+---
+
+FILE: `src/db/schema.ts`
+LINE: 569-605 (invoices table)
+SEVERITY: P1
+PROBLEM: The `invoices` table has individual columns for `grossAmount`, `discountPercentage`, `discountAmount`, `taxAmount`, `shippingCharges`, `roundOff`, `netAmount`, `receivedAmount`, `balanceAmount`.
+WHY: Each of these must be kept in sync manually. If a user edits the invoice items, all these computed columns need to be recalculated. This is a denormalized design that invites data inconsistency.
+FIX: Store only line items and compute totals at query time. Or add a trigger/computed column for derived values.
+
+### Indexes
+
+FILE: `src/db/schema.ts`
+LINE: (all tables)
+SEVERITY: P1
+PROBLEM: There are NO explicit indexes on foreign keys or commonly queried columns beyond unique constraints.
+WHY: Every query that filters by `orgId` (which is ALL of them) performs a sequential scan. With even 10K records per tenant, performance degrades significantly. Similarly, queries on `status`, `issueDate`, `customerId`, etc., lack indexes.
+FIX: Add compound indexes:
+
+```sql
+CREATE INDEX idx_invoices_org_status ON invoices(org_id, status);
+CREATE INDEX idx_invoices_org_customer ON invoices(org_id, customer_id);
+CREATE INDEX idx_invoices_org_date ON invoices(org_id, issue_date);
+CREATE INDEX idx_journal_entries_org_date ON journal_entries(org_id, entry_date);
+CREATE INDEX idx_journal_entry_lines_org_account ON journal_entry_lines(org_id, account_id);
+CREATE INDEX idx_products_org_sku ON products(org_id, sku);
+CREATE INDEX idx_audit_logs_org_entity ON audit_logs(org_id, entity_type, created_at);
+```
+
+### Transactions
+
+FILE: `src/lib/actions/sales.ts`
+LINE: 815-1107
+SEVERITY: P1
+PROBLEM: `approveInvoice()` wraps inventory and journal entry creation in `db.transaction()` which is correct. However, `createInvoice()` (line 665-788) does NOT use a transaction — invoice header and items are inserted separately.
+WHY: If the server crashes between inserting the invoice header and the first item, the invoice is orphaned.
+FIX: Wrap createInvoice in a transaction.
+
+---
+
+## 6. AUTHENTICATION AUDIT
+
+### Authentication — Clerk
+
+FILE: `src/app/layout.tsx`
+LINE: 51-69
+SEVERITY: P0
+PROBLEM: ClerkProvider wraps the entire app, which is correct. However, there is NO middleware protecting routes. See middleware finding in Architecture Review.
+ATTACK VECTOR: An attacker navigates directly to `/dashboard`, `/sales/invoices`, or any protected page URL. The page briefly renders client-side before `useUser()` detects no session and redirects. During this flash, API calls with empty auth are made.
+IMPACT: Information disclosure via client-side rendering flash. Potential data exposure if any server action doesn't properly check auth.
+
+---
+
+FILE: `src/middleware.ts`
+LINE: 37-38
+SEVERITY: P0
+PROBLEM: Middleware only matches `/api/:path*` — dashboard pages and API routes not under `/api/` are unprotected.
+FIX: See architecture fix above.
+
+### Rate Limiting
+
+FILE: `src/middleware.ts`
+LINE: 4-18
+SEVERITY: P1
+PROBLEM: Rate limiting uses an in-memory Map, which does NOT work across multiple serverless function instances.
+WHY: In a serverless deployment (Vercel), each request may hit a different Node.js instance. The in-memory Map is local to a single instance, so rate limiting is completely ineffective at scale. An attacker can bypass rate limiting by sending requests through different instances.
+FIX: Use Upstash Rate Limiting (Redis) or Database-backed rate limiting.
+
+---
+
+## 7. STRIPE BILLING AUDIT
+
+**Finding: There is NO Stripe integration.**
+
+The grep for "stripe" returned only a CSS property `theme: "striped"` in the portal-statement route. The `package.json` has no Stripe SDK. No webhook handlers, no checkout sessions, no subscription management.
+
+The schema has `planTypeEnum` with values `['free', 'professional', 'enterprise']` and `organizations.planType` field, but nothing writes to it from any billing system. The sidebar hardcodes "Professional Plan" text at line 358 of `layout.tsx`.
+
+FILE: `src/app/(dashboard)/layout.tsx`
+LINE: 358
+SEVERITY: P0
+PROBLEM: Plan name is hardcoded as "Professional Plan" with no connection to actual subscription data.
+WHY: Users on the "Free" plan would still see "Professional Plan". There's no feature gating based on plan type anywhere in the codebase.
+
+**RECOMMENDATION:** Before charging users, implement:
+1. Stripe checkout with price IDs mapped to plan types
+2. Stripe webhook handler for `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`
+3. Feature flags gated by `org.planType`
+4. Graceful downgrade handling (keep data, lock write access)
+
+---
+
+## 8. UI/UX REVIEW
+
+Based on live site analysis and code review:
+
+| Area | Score | Notes |
+|------|-------|-------|
+| Landing Page | 7 | Clean, clear CTA. Missing social proof, screenshots |
+| Dashboard | 6 | Good KPIs. Missing empty state guidance for new users |
+| Forms | 7 | Well-structured. Some lack inline validation errors |
+| Tables | 6 | Basic sorting, no pagination on large lists |
+| Navigation | 8 | Comprehensive sidebar, good hierarchy |
+| Mobile Responsiveness | 5 | Sidebar works but tables overflow on small screens |
+| Accessibility | 4 | No ARIA labels, keyboard nav limited, color contrast issues |
+| Loading States | 7 | Skeleton loading present in dashboard layout |
+| Typography/Spacing | 8 | Clean, consistent design language |
+
+---
+
+FILE: `src/app/(dashboard)/layout.tsx`
+LINE: 357
+SEVERITY: P3
+PROBLEM: Company name hardcoded as "Acme Corporation".
+WHY: All users see "Acme Corporation" as their company name in the sidebar regardless of their actual organization name.
+FIX: Fetch the actual org name from the database.
+
+---
+
+## 9. FUNCTIONAL TESTING RESULTS
+
+| Flow | Result | Notes |
+|------|--------|-------|
+| Signup with new email | PASS | Clerk handles signup |
+| Login with correct credentials | PASS | |
+| Login with wrong password | PASS | Clerk shows error |
+| Create a customer | PASS | |
+| Create a product | PASS | |
+| Create an invoice | PASS | |
+| Mark invoice as paid | PASS | |
+| View dashboard | PASS | |
+| Navigate to all pages | PASS | No 404s found |
+| Browser console errors | PASS | Clean console |
+
+*Note: Functional testing was performed on the live Vercel deployment. All basic flows work.*
+
+---
+
+## 10. PERFORMANCE REVIEW
+
+### Lighthouse Scores (estimated based on code analysis)
+
+| Metric | Score | Notes |
+|--------|-------|-------|
+| LCP | ~3.5s | Large client-side JS bundle due to all-client dashboard layout |
+| FID | ~100ms | Acceptable |
+| CLS | ~0.05 | Good — no layout shift issues observed |
+
+### Bundle Analysis
+
+FILE: `src/app/(dashboard)/layout.tsx`
+LINE: 1-605
+SEVERITY: P1
+PROBLEM: Entire dashboard layout is `"use client"` with 38+ icon imports, framer-motion, and heavy dependencies. This creates a large client-side bundle.
+WHY: Visitors to any dashboard page download the entire layout JS including sidebar, header, command palette, chat widget, and all navigation logic — even for the simplest page.
+FIX: Split into server layout shell + client interactive parts. Move icons to dynamic imports.
+
+### N+1 Query Patterns
+
+FILE: `src/lib/actions/sales.ts`
+LINE: 825-903
+SEVERITY: P1
+PROBLEM: Inside `approveInvoice()`, for EACH invoice item, a separate query is made to fetch the product, check batch, update warehouse stock, update batch stock, update product stock, and insert stock movement. For an invoice with 20 items, this is ~80 database round-trips inside a transaction.
+WHY: This is a classic N+1 that will timeout for invoices with many items. The transaction holds locks for the entire duration.
+FIX: Batch all product fetches upfront with a single `inArray()` query, then process in memory.
+
+---
+
+## 11. SECURITY REVIEW
+
+| Vulnerability | Severity | CVSS | Remediation |
+|--------------|----------|------|-------------|
+| No page-level auth middleware | P0 | 8.2 | Add Clerk middleware |
+| In-memory rate limiting | P1 | 5.0 | Use Redis-based rate limiting |
+| No CSRF protection | P1 | 6.1 | Add CSRF token to mutation server actions |
+| Missing security headers | P2 | 5.0 | Add CSP, X-Frame-Options, HSTS |
+| `any` type bypassing validation | P2 | 4.0 | Strict TypeScript types |
+| No SQL injection check | PASS | — | Drizzle ORM parameterizes queries |
+| Secrets in client bundle | PASS | — | No visible secrets |
+| Webhook signature verification | PASS | — | Webhook handler exists (not Stripe) but for customer webhooks |
+
+---
+
+FILE: `src/lib/actions/accounts.ts`
+LINE: 324-328
+SEVERITY: P1
+PROBLEM: `getAccountById()` does NOT scope by `orgId`.
+ATTACK VECTOR: An attacker can pass any account UUID and retrieve account details from any tenant.
+IMPACT: Information disclosure — account names, balance data.
+FIX: Add `eq(chartOfAccounts.orgId, orgId)` to the WHERE clause.
+
+---
+
+## 12. MISSING FEATURES TABLE
+
+| Feature | NexaBook | Wave | Gap |
+|---------|----------|------|-----|
+| Double-entry bookkeeping | Yes | Yes | None |
+| Invoice customization | Basic | Good | No template editor, no logo auto-sizing |
+| Bank reconciliation | Partial | Good | Statement upload exists but reconciliation UI is basic |
+| Payroll | Basic | Add-on | Pakistan-specific (EOBI), no tax slabs |
+| Mobile app | No | Yes | No mobile app |
+| Receipt scanning | No | Yes | No OCR |
+| Inventory management | Good | Limited | BOM, batches, serials — better than Wave |
+| Multi-currency | Basic | Yes | No auto-exchange rate updates |
+| Project management | Basic | No | Actually ahead of Wave |
+| Time tracking | Yes | Add-on | Adequate |
+| Reports | 20+ reports | 12 reports | More reports than Wave |
+| **Cash Flow Statement** | **No** | Yes | **CRITICAL GAP** |
+| **Bank Feeds (auto-sync)** | **Partial** | Yes | Schema exists, no Plaid/Salt Edge integration |
+| **Stripe/Subscription billing** | **No** | No (Wave is free) | N/A for comparison |
+| **Prior-period locking** | **No** | Yes | Can edit any period |
+
+---
+
+## 13. P0 BUGS (Launch Blockers)
+
+1. **No page-level auth protection** — `src/middleware.ts` only protects `/api/*` routes.
+2. **Balance Sheet has no date filter** — `src/lib/accounting.ts:183` queries ALL journal entries without date parameter.
+3. **P&L double-counts revenue/expenses** — `src/lib/actions/reports.ts:85-125` queries both invoices AND journal entries.
+4. **Auto-org creation in getCurrentOrgId** — `src/lib/actions/shared.ts:121-163` creates orgs for any Clerk user automatically.
+5. **Missing orgId scope on getAccountById** — `src/lib/actions/accounts.ts:324-328` allows cross-tenant account access.
+
+---
+
+## 14. P1 BUGS (Fix Within 2 Weeks)
+
+1. **Duplicate account code 4500** — `src/lib/actions/accounts.ts:140-141` has two entries with code "4500".
+2. **Rate limiting ineffective in serverless** — `src/middleware.ts:4-18` uses in-memory Map.
+3. **Invoice creation not wrapped in transaction** — `src/lib/actions/sales.ts:717-760`.
+4. **N+1 queries in approveInvoice** — `src/lib/actions/sales.ts:825-903` does per-item DB queries.
+5. **No indexes on foreign keys** — All tables missing compound indexes on (orgId, status), (orgId, date), etc.
+6. **Missing CSRF protection** — No CSRF tokens on server actions.
+7. **COGS trial balance incorrect** — `src/lib/accounting.ts:86` has wrong type string.
+8. **Draft journal entries affect financial reports** — No status filter on any report query.
+9. **Account lookup by name not subtype** — `src/lib/actions/sales.ts:1343-1393` fragile pattern.
+
+---
+
+## 15. P2 BUGS (Next Sprint)
+
+1. **`any` types in action files** — Multiple locations in sales.ts, accounts.ts.
+2. **Error messages too generic** — Original error swallowed everywhere.
+3. **Hardcoded "Acme Corporation"** — `src/app/(dashboard)/layout.tsx:357`.
+4. **Hardcoded "Professional Plan"** — `src/app/(dashboard)/layout.tsx:358`.
+5. **Journal entry number generation loads all rows** — `src/lib/actions/accounts.ts:261-266`.
+6. **Missing audit trail on critical operations** — Some mutations don't create audit log entries.
+7. **No pagination on list views** — All tables fetch ALL records at once.
+8. **FBR submission is non-blocking but doesn't queue** — `src/lib/actions/sales.ts:1110-1162` could have race condition on FBR status updates.
+
+---
+
+## 16. PRODUCTION READINESS SCORE
+
+**Score: 45/100**
+
+| Factor | Score | Reasoning |
+|--------|-------|-----------|
+| Auth & Security | 30 | No middleware, no CSRF, weak rate limiting |
+| Data Consistency | 60 | Good transaction usage but gaps exist |
+| Error Handling | 40 | Silent catch blocks, no monitoring |
+| Testing | 20 | Minimal test coverage |
+| Performance | 50 | No indexes, client-heavy bundle |
+| Documentation | 70 | Extensive .md files but no inline docs |
+| Monitoring | 10 | No error tracking, no logging infrastructure |
+| Deployment | 80 | Vercel-ready, proper build config |
+
+---
+
+## 17. MARKET READINESS SCORE
+
+**Score: 35/100**
+
+| Factor | Score | Reasoning |
+|--------|-------|-----------|
+| Feature Completeness | 60 | Good breadth, shallow depth |
+| Accounting Correctness | 70 | Fundamentally sound, reports need fixes |
+| UX Polish | 55 | Clean but generic, missing empty states |
+| Mobile | 30 | Desktop-only, tables overflow on mobile |
+| Integrations | 20 | No bank feeds, no Stripe, no Zapier |
+| Compliance (Pakistan) | 65 | FBR integration, provincial taxes, Islamic finance mode |
+
+---
+
+## 18. 6-MONTH ROADMAP
+
+1. **Security Hardening (Week 1-2)** — Clerk middleware, CSRF, rate limiting, org-scoping audit.
+2. **Financial Report Fixes (Week 2-3)** — Date-filtered balance sheet, fix P&L double-count, add Cash Flow Statement.
+3. **Database Indexing (Week 3)** — Add all missing compound indexes.
+4. **Transaction Integrity (Week 3-4)** — Wrap all create/update operations in transactions.
+5. **Stripe Integration (Month 2)** — Checkout, webhooks, plan gating, subscription management.
+6. **Prior-Period Locking (Month 2)** — Lock journal entries for closed fiscal periods.
+7. **Testing Infrastructure (Month 2-3)** — Unit tests for accounting engine, integration tests for critical flows.
+8. **Mobile Responsiveness (Month 3)** — Responsive tables, mobile navigation.
+9. **Bank Feed Integration (Month 3-4)** — Plaid or Salt Edge for auto-reconciliation.
+10. **Public API (Month 4-6)** — REST API for integrations with API keys.
+
+---
+
+## 19. FINAL VERDICT
+
+**Should this product be launched today?** No.
+
+**The 5 things that must happen first:**
+
+1. **Fix authentication middleware** — Without it, all data is exposed to anyone who guesses a URL. This is a P0 blocker.
+2. **Fix the Balance Sheet and P&L reports** — These two reports are the core output of an accounting product. The balance sheet has no date filter (showing all historical data) and the P&L double-counts revenue. An accountant who spots these errors will immediately lose trust.
+3. **Add database indexes** — The app will become unusably slow with even moderate data volumes. Real businesses hit thousands of transactions quickly.
+4. **Implement prior-period locking** — Without it, users can edit or delete posted journal entries from any period, making the financial statements unreliable for audit or tax purposes.
+5. **Add the Cash Flow Statement** — This is a fundamental financial statement required by GAAP/IFRS. Wave has it, QuickBooks has it, and NexaBook doesn't.
+
+**What NexaBook does well:** The accounting engine is built on sound double-entry principles. The schema is comprehensive and shows deep understanding of Pakistan-specific requirements (FBR, provincial taxes, Islamic finance). The feature set is ambitious and covers more ground than many competitors.
+
+**Market positioning:** NexaBook's strongest differentiator is its Pakistan localization — FBR integration, provincial tax handling (SRB, PRA, KPRA, BRA), Islamic finance mode, and Urdu language support. No major competitor offers this. If the team can secure the product, fix the financial reports, and bring it to production quality, it has a real market opportunity.
+
+**Recommendation:** Target a Beta launch for Pakistan-based small businesses in 2-3 months after the 5 critical fixes. Charge $9-19/month (significantly below Zoho Books at $20-50/month and QuickBooks at $25-90/month). Build trust with Pakistani accountants before expanding globally.

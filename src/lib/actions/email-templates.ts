@@ -68,6 +68,7 @@ export async function getEmailTemplate(templateType: string = "invoice") {
 
     return { success: true, data: template };
   } catch (error) {
+    console.error("Error in email-templates.ts:", error);
     return { success: false, error: "Failed to load template" };
   }
 }
@@ -104,6 +105,7 @@ export async function saveEmailTemplate(data: {
     revalidatePath("/settings/email-templates");
     return { success: true };
   } catch (error) {
+    console.error("Error in email-templates.ts:", error);
     return { success: false, error: "Failed to save template" };
   }
 }

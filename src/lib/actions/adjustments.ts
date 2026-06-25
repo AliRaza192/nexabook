@@ -7,6 +7,7 @@ import {
   journalEntries, journalEntryLines, bankAccounts,
   customers, vendors, products,
 } from "@/db/schema";
+import { createAuditLog } from "./audit";
 import { eq, and, desc, ilike, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
@@ -57,6 +58,7 @@ export async function getCreditDebitNotes(searchQuery?: string) {
 
     return { success: true, data: notes };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to fetch credit/debit notes" };
   }
 }
@@ -81,6 +83,7 @@ export async function getCreditDebitNoteById(noteId: string) {
 
     return { success: true, data: { ...note, lines } };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to fetch note" };
   }
 }
@@ -162,8 +165,10 @@ export async function addCreditDebitNote(data: CreditDebitNoteFormData) {
     }
 
     revalidatePath("/accounts/credit-debit-notes");
+    await createAuditLog({ action: "NOTE_CREATED", entityType: "creditDebitNote", entityId: note.id });
     return { success: true, data: note, message: `${data.noteType === "credit_note" ? "Credit" : "Debit"} note created` };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to create note" };
   }
 }
@@ -190,8 +195,10 @@ export async function approveCreditDebitNote(noteId: string) {
       .where(eq(creditDebitNotes.id, noteId));
 
     revalidatePath("/accounts/credit-debit-notes");
+    await createAuditLog({ action: "NOTE_APPROVED", entityType: "creditDebitNote", entityId: noteId });
     return { success: true, message: "Note approved" };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to approve note" };
   }
 }
@@ -233,6 +240,7 @@ export async function getPdcInstruments(status?: string) {
 
     return { success: true, data: instruments };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to fetch PDC instruments" };
   }
 }
@@ -258,6 +266,7 @@ export async function getPdcInstrumentsDashboard() {
 
     return { success: true, data: { instruments: allInstruments, stats } };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to fetch PDC dashboard" };
   }
 }
@@ -303,8 +312,10 @@ export async function addPdcInstrument(data: PdcInstrumentFormData) {
       .returning();
 
     revalidatePath("/accounts/instruments");
+    await createAuditLog({ action: "PDC_CREATED", entityType: "pdcInstrument", entityId: instrument.id });
     return { success: true, data: instrument, message: "PDC instrument recorded" };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to record PDC instrument" };
   }
 }
@@ -314,7 +325,7 @@ export async function updatePdcStatus(instrumentId: string, status: "received" |
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: Record<string, any> = { status };
+    const updateData: Record<string, unknown> = { status };
     if (status === "deposited") updateData.depositedDate = new Date();
     if (status === "cleared") updateData.clearedDate = new Date();
     if (status === "bounced" && bounceReason) updateData.bounceReason = bounceReason;
@@ -328,8 +339,10 @@ export async function updatePdcStatus(instrumentId: string, status: "received" |
     if (!updated) return { success: false, error: "Instrument not found" };
 
     revalidatePath("/accounts/instruments");
+    await createAuditLog({ action: "PDC_STATUS_UPDATED", entityType: "pdcInstrument", entityId: instrumentId });
     return { success: true, message: `PDC status updated to ${status}` };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to update PDC status" };
   }
 }
@@ -374,6 +387,7 @@ export async function getMiscContactSettlements(searchQuery?: string) {
 
     return { success: true, data: settlements };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to fetch settlements" };
   }
 }
@@ -410,8 +424,10 @@ export async function addMiscContactSettlement(data: MiscContactSettlementFormDa
       .returning();
 
     revalidatePath("/accounts/contact-settlement");
+    await createAuditLog({ action: "SETTLEMENT_CREATED", entityType: "settlement", entityId: settlement.id });
     return { success: true, data: settlement, message: "Settlement recorded" };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to record settlement" };
   }
 }
@@ -457,8 +473,10 @@ export async function approveMiscContactSettlement(settlementId: string) {
       .where(eq(miscContactSettlements.id, settlementId));
 
     revalidatePath("/accounts/contact-settlement");
+    await createAuditLog({ action: "SETTLEMENT_APPROVED", entityType: "settlement", entityId: settlementId });
     return { success: true, message: "Settlement approved" };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to approve settlement" };
   }
 }
@@ -480,6 +498,7 @@ export async function getCustomersForDropdown() {
 
     return { success: true, data: custs };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to fetch customers" };
   }
 }
@@ -497,6 +516,7 @@ export async function getVendorsForDropdown() {
 
     return { success: true, data: vends };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to fetch vendors" };
   }
 }
@@ -514,6 +534,7 @@ export async function getProductsForDropdown() {
 
     return { success: true, data: prods };
   } catch (error) {
+    console.error("Error in adjustments.ts:", error);
     return { success: false, error: "Failed to fetch products" };
   }
 }

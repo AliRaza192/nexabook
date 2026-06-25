@@ -79,6 +79,7 @@ export async function getBarcodePrintData(
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in barcodes.ts:", error);
     return { success: false, error: "Failed to get print data" };
   }
 }

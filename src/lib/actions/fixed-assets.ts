@@ -79,6 +79,7 @@ export async function getFixedAsset(assetId: string) {
 
     return { success: true, data: asset };
   } catch (error) {
+    console.error("Error in fixed-assets.ts:", error);
     return { success: false, error: "Failed to fetch asset" };
   }
 }
@@ -165,7 +166,7 @@ export async function updateFixedAsset(
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.category !== undefined) updateData.category = data.category;
     if (data.purchaseDate !== undefined)
@@ -195,6 +196,7 @@ export async function updateFixedAsset(
       message: "Fixed asset updated successfully",
     };
   } catch (error) {
+    console.error("Error in fixed-assets.ts:", error);
     return { success: false, error: "Failed to update fixed asset" };
   }
 }
@@ -238,6 +240,7 @@ export async function deleteFixedAsset(assetId: string) {
     revalidatePath("/fixed-assets/register");
     return { success: true, message: "Fixed asset deleted successfully" };
   } catch (error) {
+    console.error("Error in fixed-assets.ts:", error);
     return { success: false, error: "Failed to delete fixed asset" };
   }
 }
@@ -651,6 +654,7 @@ export async function getDepreciationHistory(assetId: string) {
 
     return { success: true, data: logs };
   } catch (error) {
+    console.error("Error in fixed-assets.ts:", error);
     return { success: false, error: "Failed to fetch depreciation history" };
   }
 }

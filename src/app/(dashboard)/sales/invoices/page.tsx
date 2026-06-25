@@ -48,6 +48,8 @@ import {
 } from "@/lib/actions/sales";
 import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
 import { formatPKR } from "@/lib/utils/number-format";
+import { Pagination } from "@/components/ui/pagination";
+import { ResponsiveTable } from "@/components/ui/responsive-table";
 
 interface Invoice {
   id: string;
@@ -163,6 +165,10 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const pageSize = 25;
 
   // Email dialog state
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
@@ -179,12 +185,16 @@ export default function InvoicesPage() {
     setLoading(true);
     try {
       const [invoicesRes, statsRes] = await Promise.all([
-        getInvoices(searchQuery, statusFilter === "all" ? undefined : statusFilter),
+        getInvoices(searchQuery, statusFilter === "all" ? undefined : statusFilter, { page, pageSize }),
         getInvoiceStats(),
       ]);
 
       if (invoicesRes.success && invoicesRes.data) {
         setInvoices(invoicesRes.data as Invoice[]);
+      }
+      if (invoicesRes.pagination) {
+        setTotalPages(invoicesRes.pagination.totalPages);
+        setTotalItems(invoicesRes.pagination.total);
       }
 
       if (statsRes.success && statsRes.data) {
@@ -198,7 +208,7 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     loadData();
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, page]);
 
   // Format currency
   const formatCurrency = (value: number) => {
@@ -503,8 +513,7 @@ export default function InvoicesPage() {
               )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <ResponsiveTable>
                 <thead>
                   <tr className="border-b border-nexabook-200">
                     <th className="text-left py-3 px-4 text-sm font-semibold text-nexabook-700">
@@ -645,8 +654,7 @@ export default function InvoicesPage() {
                     );
                   })}
                 </tbody>
-              </table>
-            </div>
+            </ResponsiveTable>
           )}
         </CardContent>
       </Card>
@@ -729,6 +737,8 @@ export default function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Pagination page={page} totalPages={totalPages} total={totalItems} onPageChange={setPage} />
     </div>
   );
 }

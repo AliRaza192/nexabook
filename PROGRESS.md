@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
-## Status: 🔜 In Progress — Sprint I (Cost Center / Profit Center Accounting)
-## Current Sprint: 11
-## Last Completed: Sprint G — Sales Tax Returns, Sprint H — Webhooks
+## Status: ✅ Completed — Sprint M (Multi-Company Consolidation)
+## Current Sprint: 16 complete
+## Last Completed: Sprint M — Multi-Company Consolidation
 
 ---
 
@@ -113,9 +113,39 @@
 - [ ] 10.2 Islamic terminology mapping (UI)
 - [ ] 10.3 Zakat calculator (UI)
 
----
+### Sprint K — Two-Factor Authentication
+- [x] K1: Clerk 2FA configuration — security settings page at `/settings/security`
+- [x] K2: Force 2FA for admin role — warning banner in dashboard if 2FA disabled
 
-**Jab session restart karein:**
+### Sprint N — Project Management + Timesheets
+- [x] N1: `projects` + `tasks` + `timesheets` schema in `src/db/schema.ts`
+- [x] N2: Server actions in `src/lib/actions/projects.ts` (full CRUD + profitability)
+- [x] N3: Project list UI at `/projects` — card grid with create/edit dialog
+- [x] N4: Project detail at `/projects/[id]` — inline task board with status management
+- [x] N5: Timesheet UI at `/timesheets` — log time, submit/approve/reject workflow
+- [x] N6: Project profitability report at `/reports/project-profitability`
+- [x] N7: Navigation — sidebar items for Projects, Timesheets, report
+
+### Sprint L — Bank Feeds (Auto-Sync)
+- [x] L1: `bankConnections` schema + provider interface + MockBank provider + service layer
+- [x] L2: Auto-import daily cron at `/api/cron/bank-feeds` + settings UI at `/settings/bank-feeds`
+- [x] L3: Server actions — CRUD connections, manual sync, bulk sync
+
+### Sprint O — WHT Certificates & Statements
+- [x] O1: WHT Certificate PDF generation — formal certificate with org/vendor details, transaction table, declaration
+- [x] O2: Vendor-wise WHT statement via `getWHTVendorStatement` action + PDF download API
+- [x] O3: Annual WHT return summary at `/reports/wht-return` — quarterly breakdown per vendor
+
+### Sprint M — Multi-Company Consolidation
+- [x] M1: `parentOrgId` + `consolidationEnabled` columns in `organizations` table + relations
+- [x] M2: Org hierarchy server actions — `getOrgHierarchy`, `linkChildOrg`, `unlinkChildOrg`, `getAvailableOrgsForConsolidation`
+- [x] M3: Consolidation settings UI at `/settings/consolidation` — link/unlink child companies
+- [x] M4: Consolidated P&L report at `/reports/consolidated-pl` — per-org breakdown with totals
+- [x] M5: Consolidated Balance Sheet at `/reports/consolidated-balance-sheet` — per-org breakdown with totals
+- [x] M6: Navigation — sidebar items under Reports + Settings
+- [x] M7: Migration SQL at `drizzle/0004_consolidation.sql`
+
+---
 1. `cat ROADMAP.md` — poori planning dekhein
 2. `cat PROGRESS.md` — kahan tak hua hai dekhein
 3. Mujhe bata dein: "Phase G Sprint X task Y se shuru karo"

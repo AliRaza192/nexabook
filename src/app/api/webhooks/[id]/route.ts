@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/db";
 import { webhookEndpoints, webhookDeliveries, profiles } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import { validateCsrf } from "@/lib/csrf";
 
 async function getCurrentOrgId(userId: string): Promise<string | null> {
   const profile = await db
@@ -13,15 +14,16 @@ async function getCurrentOrgId(userId: string): Promise<string | null> {
   return profile.length > 0 && profile[0].orgId ? profile[0].orgId : null;
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await validateCsrf();
     const { userId } = await auth();
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const orgId = await getCurrentOrgId(userId);
     if (!orgId) return NextResponse.json({ error: "No organization found" }, { status: 404 });
 
-    const { id } = params;
+    const { id } = await params;
     const body = await request.json();
 
     const [existing] = await db
@@ -52,15 +54,16 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await validateCsrf();
     const { userId } = await auth();
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const orgId = await getCurrentOrgId(userId);
     if (!orgId) return NextResponse.json({ error: "No organization found" }, { status: 404 });
 
-    const { id } = params;
+    const { id } = await params;
 
     const [existing] = await db
       .select()

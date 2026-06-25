@@ -61,7 +61,7 @@ export default function DeliveryPage() {
   useEffect(() => { loadData(); }, [searchQuery, statusFilter]);
 
   const handleStatusChange = async (id: string, status: string) => {
-    const res = await updateDeliveryStatus(id, status);
+    const res = await updateDeliveryStatus(id, status as Parameters<typeof updateDeliveryStatus>[1]);
     if (res.success) { alert("Status updated"); loadData(); } else alert(res.error || "Failed");
   };
 

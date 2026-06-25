@@ -111,6 +111,7 @@ export async function exportProductsToExcel() {
 
     return { success: true, data: base64, fileName: `products_${new Date().toISOString().split("T")[0]}.xlsx` };
   } catch (error) {
+    console.error("Error in inventory-export.ts:", error);
     return { success: false, error: "Failed to export products" };
   }
 }
@@ -171,6 +172,7 @@ export async function exportProductsToCSV() {
 
     return { success: true, data: csvRows.join("\n"), fileName: `products_${new Date().toISOString().split("T")[0]}.csv` };
   } catch (error) {
+    console.error("Error in inventory-export.ts:", error);
     return { success: false, error: "Failed to export products" };
   }
 }
@@ -213,6 +215,7 @@ export async function getImportTemplate(): Promise<{ success: boolean; data?: st
 
     return { success: true, data: csvRows.join("\n") };
   } catch (error) {
+    console.error("Error in inventory-export.ts:", error);
     return { success: false, error: "Failed to generate template" };
   }
 }
@@ -264,7 +267,7 @@ export async function importProductsFromCSV(
       if (!line) continue;
 
       const values = parseCSVLine(line);
-      const row: ImportRow & Record<string, any> = { _rowNumber: i + 2 };
+      const row: ImportRow & Record<string, unknown> = { _rowNumber: i + 2 };
       const rowErrors: string[] = [];
 
       headers.forEach((header, idx) => {
@@ -337,6 +340,7 @@ export async function importProductsFromCSV(
       data: { imported, errors },
     };
   } catch (error) {
+    console.error("Error in inventory-export.ts:", error);
     return { success: false, error: "Failed to import products" };
   }
 }

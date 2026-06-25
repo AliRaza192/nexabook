@@ -24,6 +24,7 @@ export async function getSerialNumbers(productId?: string, status?: string, sear
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in serial-numbers.ts:", error);
     return { success: false, error: "Failed to fetch serial numbers" };
   }
 }
@@ -42,6 +43,7 @@ export async function getSerialNumberById(id: string) {
     if (!sn) return { success: false, error: "Serial number not found" };
     return { success: true, data: sn };
   } catch (error) {
+    console.error("Error in serial-numbers.ts:", error);
     return { success: false, error: "Failed to fetch serial number" };
   }
 }
@@ -89,6 +91,7 @@ export async function registerSerialNumbers(data: {
     revalidatePath("/inventory/serial-numbers");
     return { success: true, data: inserted, message: `${inserted.length} serial numbers registered` };
   } catch (error) {
+    console.error("Error in serial-numbers.ts:", error);
     return { success: false, error: "Failed to register serial numbers" };
   }
 }
@@ -127,6 +130,7 @@ export async function markSerialSold(
     revalidatePath("/inventory/serial-numbers");
     return { success: true, message: "Serial number marked as sold" };
   } catch (error) {
+    console.error("Error in serial-numbers.ts:", error);
     return { success: false, error: "Failed to mark serial as sold" };
   }
 }
@@ -144,6 +148,7 @@ export async function markSerialReturned(serialNumberId: string, notes?: string)
     revalidatePath("/inventory/serial-numbers");
     return { success: true, message: "Serial number marked as returned" };
   } catch (error) {
+    console.error("Error in serial-numbers.ts:", error);
     return { success: false, error: "Failed to mark serial as returned" };
   }
 }
@@ -160,6 +165,7 @@ export async function deleteSerialNumber(id: string) {
     revalidatePath("/inventory/serial-numbers");
     return { success: true, message: "Serial number deleted" };
   } catch (error) {
+    console.error("Error in serial-numbers.ts:", error);
     return { success: false, error: "Failed to delete serial number" };
   }
 }

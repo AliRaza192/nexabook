@@ -83,7 +83,7 @@ export async function getTrialBalance(orgId: string) {
       const credit = Number(ledger?.totalCredit ?? 0);
       if (debit === 0 && credit === 0) return null;
       // Compute net balance based on account type
-      const normalDebit = ["asset", "expense", "cost_of_goods_sold"].includes(account.type || "");
+      const normalDebit = ["asset", "expense"].includes(account.type || "");
       const netBalance = normalDebit ? debit - credit : credit - debit;
       if (Math.abs(netBalance) < 0.01) return null;
       grandTotalDebit += netBalance > 0 ? netBalance : 0;
@@ -180,7 +180,11 @@ export async function getProfitAndLoss(
 // BALANCE SHEET
 // ─────────────────────────────────────────
 
-export async function getBalanceSheet(orgId: string) {
+export async function getBalanceSheet(orgId: string, asOfDate?: Date) {
+  const dateFilter = asOfDate
+    ? sql`${journalEntries.entryDate} <= ${asOfDate}`
+    : sql`1=1`;
+
   const lines = await db
     .select({
       accountId: journalEntryLines.accountId,
@@ -192,7 +196,11 @@ export async function getBalanceSheet(orgId: string) {
       journalEntries,
       eq(journalEntryLines.journalEntryId, journalEntries.id)
     )
-    .where(eq(journalEntryLines.orgId, orgId))
+    .where(and(
+      eq(journalEntryLines.orgId, orgId),
+      sql`${journalEntries.status} != 'draft'`,
+      dateFilter,
+    ))
     .groupBy(journalEntryLines.accountId);
 
   const accounts = await db.query.chartOfAccounts.findMany({

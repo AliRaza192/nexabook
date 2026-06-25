@@ -28,11 +28,15 @@ import {
   settlementLines,
   organizations,
   profiles,
+  uoms,
+  uomConversions,
 } from "@/db/schema";
-import { eq, and, or, ilike, desc, gte, lte, count, sum } from "drizzle-orm";
+import { eq, and, or, ilike, desc, gte, lte, count, sum, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, requireRole } from "./shared";
+import { checkPeriodLocked } from "./fiscal-periods";
+import { getOffset, buildPaginationResult, type PaginationParams } from "@/lib/pagination";
 import { validateJournalBalance } from "../accounting";
 import { submitInvoiceToFBR } from "../fbr-api";
 import {
@@ -77,7 +81,7 @@ export interface CustomerWithStats {
 }
 
 // Get all customers
-export async function getCustomers(searchQuery?: string) {
+export async function getCustomers(searchQuery?: string, pagination?: PaginationParams) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) {
@@ -102,14 +106,27 @@ export async function getCustomers(searchQuery?: string) {
       );
     }
 
+    const countResult = await db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(customers)
+      .where(whereClause);
+    const total = countResult[0]?.total || 0;
+
     const result = await db
       .select()
       .from(customers)
       .where(whereClause)
-      .orderBy(desc(customers.createdAt));
+      .orderBy(desc(customers.createdAt))
+      .limit(pagination?.pageSize ?? 99999)
+      .offset(pagination ? getOffset(pagination) : 0);
+
+    if (pagination) {
+      return { success: true, data: result, pagination: buildPaginationResult(total, pagination) };
+    }
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch customers" };
   }
 }
@@ -134,6 +151,7 @@ export async function getCustomerById(customerId: string) {
 
     return { success: true, data: customer };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch customer" };
   }
 }
@@ -177,6 +195,7 @@ export async function createCustomer(data: CustomerFormData) {
       message: "Customer created successfully",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: `Failed to create customer: ${error instanceof Error ? error.message : "Unknown error"}` };
   }
 }
@@ -192,7 +211,7 @@ export async function updateCustomer(
       return { success: false, error: "No organization found" };
     }
 
-    const updateData: any = {};
+    const updateData: Partial<typeof customers.$inferInsert> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.email !== undefined) updateData.email = data.email;
     if (data.phone !== undefined) updateData.phone = data.phone;
@@ -223,6 +242,7 @@ export async function updateCustomer(
       message: "Customer updated successfully",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to update customer" };
   }
 }
@@ -244,6 +264,7 @@ export async function deleteCustomer(customerId: string) {
 
     return { success: true, message: "Customer deleted successfully" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to delete customer" };
   }
 }
@@ -275,6 +296,7 @@ export async function getSalesTeam() {
 
     return { success: true, data: team };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to load sales team" };
   }
 }
@@ -295,6 +317,7 @@ export async function updateSalesTeamMember(
     revalidatePath("/sales/team");
     return { success: true, message: "Team member updated" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to update team member" };
   }
 }
@@ -358,6 +381,7 @@ export async function getGeographySalesReport(filters: {
 
     return { success: true, data: grouped };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to load geography report" };
   }
 }
@@ -403,7 +427,11 @@ export interface InvoiceFormData {
 }
 
 // Get all invoices
-export async function getInvoices(searchQuery?: string, statusFilter?: string) {
+export async function getInvoices(
+  searchQuery?: string,
+  statusFilter?: string,
+  pagination?: PaginationParams,
+) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) {
@@ -413,10 +441,10 @@ export async function getInvoices(searchQuery?: string, statusFilter?: string) {
     const conditions = [eq(invoices.orgId, orgId)];
 
     if (statusFilter && statusFilter !== "all") {
-      conditions.push(eq(invoices.status, statusFilter as any));
+      conditions.push(eq(invoices.status, statusFilter as typeof invoices.status._.data));
     }
 
-    let result = await db
+    const baseQuery = db
       .select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -440,17 +468,39 @@ export async function getInvoices(searchQuery?: string, statusFilter?: string) {
       .where(conditions.length > 1 ? and(...conditions) : conditions[0])
       .orderBy(desc(invoices.createdAt));
 
-    // Apply search filter if provided
+    // Get total count
+    const countResult = await db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(invoices)
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
+      .where(conditions.length > 1 ? and(...conditions) : conditions[0]);
+    const total = countResult[0]?.total || 0;
+
+    let result: typeof baseQuery extends Promise<infer R> ? R : never = await baseQuery;
+
+    // Apply search filter if provided (in-memory — for small datasets this is fine)
     if (searchQuery) {
       result = result.filter(
-        (inv) =>
+        (inv: any) =>
           inv.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
           inv.customer?.name.toLowerCase().includes(searchQuery.toLowerCase()),
       );
     }
 
+    // Apply pagination
+    if (pagination) {
+      const offset = getOffset(pagination);
+      result = result.slice(offset, offset + pagination.pageSize);
+      return {
+        success: true,
+        data: result,
+        pagination: buildPaginationResult(total, pagination),
+      };
+    }
+
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch invoices" };
   }
 }
@@ -480,6 +530,7 @@ export async function getInvoiceById(invoiceId: string) {
 
     return { success: true, data: { ...invoice, items } };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch invoice" };
   }
 }
@@ -657,6 +708,7 @@ export async function getInvoiceWithDetails(
       },
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch invoice details" };
   }
 }
@@ -713,64 +765,69 @@ export async function createInvoice(data: InvoiceFormData) {
       parseFloat(netAmount) - parseFloat(receivedAmount)
     ).toFixed(2);
 
-    // Create invoice
-    const [newInvoice] = await db
-      .insert(invoices)
-      .values({
-        orgId,
-        invoiceNumber,
-        customerId: data.customerId,
-        warehouseId: data.warehouseId || null,
-        orderBooker: data.orderBooker || null,
-        subject: data.subject || null,
-        reference: data.reference || null,
-        issueDate: data.issueDate,
-        dueDate: data.dueDate || null,
-        status: "draft",
-        grossAmount: data.grossAmount,
-        discountPercentage: data.discountPercentage || "0",
-        discountAmount: data.discountAmount || "0",
-        taxAmount: data.taxAmount,
-        shippingCharges: data.shippingCharges || "0",
-        roundOff: data.roundOff || "0",
-        netAmount: data.netAmount,
-        receivedAmount: receivedAmount,
-        balanceAmount: balanceAmount,
-        cashBankAccountId: data.cashBankAccountId || null,
-        notes: data.notes,
-        terms: data.terms,
-      })
-      .returning();
+    // Create invoice with items and audit log in a transaction
+    let newInvoice: typeof invoices.$inferSelect | undefined;
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(invoices)
+        .values({
+          orgId,
+          invoiceNumber,
+          customerId: data.customerId,
+          warehouseId: data.warehouseId || null,
+          orderBooker: data.orderBooker || null,
+          subject: data.subject || null,
+          reference: data.reference || null,
+          issueDate: data.issueDate,
+          dueDate: data.dueDate || null,
+          status: "draft",
+          grossAmount: data.grossAmount,
+          discountPercentage: data.discountPercentage || "0",
+          discountAmount: data.discountAmount || "0",
+          taxAmount: data.taxAmount,
+          shippingCharges: data.shippingCharges || "0",
+          roundOff: data.roundOff || "0",
+          netAmount: data.netAmount,
+          receivedAmount: receivedAmount,
+          balanceAmount: balanceAmount,
+          cashBankAccountId: data.cashBankAccountId || null,
+          notes: data.notes,
+          terms: data.terms,
+        })
+        .returning();
 
-    // Create invoice items
-    for (const item of data.items) {
-      await db.insert(invoiceItems).values({
+      if (data.items.length > 0) {
+        await tx.insert(invoiceItems).values(
+          data.items.map((item) => ({
+            orgId,
+            invoiceId: created.id,
+            productId: item.productId || null,
+            uomId: item.uomId || null,
+            batchId: item.batchId || null,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discountPercentage: item.discountPercentage || "0",
+            taxRate: item.taxRate,
+            lineTotal: item.lineTotal,
+          }))
+        );
+      }
+
+      await tx.insert(auditLogs).values({
         orgId,
-        invoiceId: newInvoice.id,
-        productId: item.productId || null,
-        uomId: item.uomId || null,
-        batchId: item.batchId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercentage: item.discountPercentage || "0",
-        taxRate: item.taxRate,
-        lineTotal: item.lineTotal,
+        userId: (await auth()).userId || "system",
+        action: "INVOICE_CREATED",
+        entityType: "invoice",
+        entityId: created.id,
+        changes: JSON.stringify({
+          invoiceNumber: created.invoiceNumber,
+          netAmount: created.netAmount,
+          status: created.status,
+        }),
       });
-    }
 
-    // Create audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || "system",
-      action: "INVOICE_CREATED",
-      entityType: "invoice",
-      entityId: newInvoice.id,
-      changes: JSON.stringify({
-        invoiceNumber: newInvoice.invoiceNumber,
-        netAmount: newInvoice.netAmount,
-        status: newInvoice.status,
-      }),
+      newInvoice = created;
     });
 
     revalidatePath("/sales/invoices");
@@ -783,6 +840,7 @@ export async function createInvoice(data: InvoiceFormData) {
       invoiceNumber,
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to create invoice" };
   }
 }
@@ -807,6 +865,9 @@ export async function approveInvoice(invoiceId: string) {
     if (invoice.status === "approved")
       return { success: false, error: "Invoice is already approved" };
 
+    const locked = await checkPeriodLocked(new Date(invoice.issueDate));
+    if (locked) return { success: false, error: "Cannot approve invoice in a locked fiscal period" };
+
     const items = await db
       .select()
       .from(invoiceItems)
@@ -821,87 +882,121 @@ export async function approveInvoice(invoiceId: string) {
 
       let totalCOGS = 0;
 
-      // 2. Inventory & COGS Calculation
-      for (const item of items) {
-        if (item.productId) {
-          const [product] = await tx
-            .select({
-              currentStock: products.currentStock,
-              costPrice: products.costPrice,
-              name: products.name,
-            })
-            .from(products)
-            .where(
-              and(eq(products.id, item.productId), eq(products.orgId, orgId)),
-            )
-            .limit(1);
+      // 2. Batch-fetch all products and batches (fix N+1)
+      const productIds = items.filter(i => i.productId).map(i => i.productId as string);
+      const batchIds = items.filter(i => i.batchId).map(i => i.batchId as string);
 
-          if (product) {
-            const quantity = parseFloat(item.quantity);
-            let unitCost = parseFloat(product.costPrice || "0");
+      const productMap = new Map<string, { currentStock: string | null; costPrice: string | null; name: string }>();
+      const batchCostMap = new Map<string, string>();
 
-            // Use batch-specific cost if batchId is provided
-            if (item.batchId) {
-              const [batch] = await tx
-                .select({ costPrice: productBatches.costPrice })
-                .from(productBatches)
-                .where(eq(productBatches.id, item.batchId))
-                .limit(1);
-              if (batch && batch.costPrice)
-                unitCost = parseFloat(batch.costPrice);
-            }
-
-            // Calculate COGS for this item
-            totalCOGS += quantity * unitCost;
-
-            // Handle Stock
-            let baseQuantity = quantity;
-            if (item.uomId)
-              baseQuantity = await convertToBaseUnit(
-                item.productId,
-                quantity,
-                item.uomId,
-              );
-
-            if (baseQuantity > parseFloat(product.currentStock || "0"))
-              throw new Error(`Insufficient stock for ${product.name}`);
-
-            if (invoice.warehouseId)
-              await updateWarehouseStock(
-                tx,
-                invoice.warehouseId,
-                item.productId,
-                -baseQuantity,
-              );
-            if (item.batchId)
-              await updateBatchStock(tx, item.batchId, -baseQuantity);
-
-            await tx
-              .update(products)
-              .set({
-                currentStock: (
-                  parseFloat(product.currentStock || "0") - baseQuantity
-                ).toFixed(2),
-              })
-              .where(eq(products.id, item.productId));
-
-            await tx.insert(stockMovements).values({
-              orgId,
-              productId: item.productId,
-              movementType: "out",
-              reason: "sale",
-              quantity: String(baseQuantity),
-              unitCost: String(unitCost),
-              totalValue: (baseQuantity * unitCost).toFixed(2),
-              referenceType: "invoice",
-              referenceId: invoiceId,
-              referenceNumber: invoice.invoiceNumber,
-              runningBalance: (
-                parseFloat(product.currentStock || "0") - baseQuantity
-              ).toFixed(2),
-            });
-          }
+      if (productIds.length > 0) {
+        const productsData = await tx
+          .select({
+            id: products.id,
+            currentStock: products.currentStock,
+            costPrice: products.costPrice,
+            name: products.name,
+          })
+          .from(products)
+          .where(and(
+            inArray(products.id, productIds),
+            eq(products.orgId, orgId),
+          ));
+        for (const p of productsData) {
+          productMap.set(p.id, { currentStock: p.currentStock, costPrice: p.costPrice, name: p.name });
         }
+      }
+
+      if (batchIds.length > 0) {
+        const batchData = await tx
+          .select({ id: productBatches.id, costPrice: productBatches.costPrice })
+          .from(productBatches)
+          .where(inArray(productBatches.id, batchIds));
+        for (const b of batchData) {
+          if (b.costPrice) batchCostMap.set(b.id, b.costPrice);
+        }
+      }
+
+      // 2b. Batch-fetch UoM data for in-memory conversion
+      const itemUomPairs = items.filter(i => i.productId && i.uomId).map(i => ({ productId: i.productId!, uomId: i.uomId! }));
+      const baseUomMap = new Map<string, string>();
+      const conversionMap = new Map<string, number>();
+      if (itemUomPairs.length > 0) {
+        const productIds = [...new Set(itemUomPairs.map(p => p.productId))];
+        const productsData = await tx
+          .select({ id: products.id, baseUomId: products.baseUomId })
+          .from(products)
+          .where(inArray(products.id, productIds));
+        for (const p of productsData) {
+          if (p.baseUomId) baseUomMap.set(p.id, p.baseUomId);
+        }
+        const conversions = await tx
+          .select()
+          .from(uomConversions)
+          .where(inArray(uomConversions.productId, productIds));
+        for (const c of conversions) {
+          conversionMap.set(`${c.productId}:${c.fromUomId}:${c.toUomId}`, parseFloat(c.conversionFactor));
+        }
+      }
+      const convertInMemory = (productId: string, quantity: number, currentUomId: string) => {
+        const baseUomId = baseUomMap.get(productId);
+        if (!baseUomId || baseUomId === currentUomId) return quantity;
+        const factor = conversionMap.get(`${productId}:${currentUomId}:${baseUomId}`);
+        return factor ? quantity * factor : quantity;
+      };
+
+      const stockMovementsData: (typeof stockMovements.$inferInsert)[] = [];
+
+      for (const item of items) {
+        if (!item.productId) continue;
+
+        const product = productMap.get(item.productId);
+        if (!product) continue;
+
+        const quantity = parseFloat(item.quantity);
+        let unitCost = parseFloat(product.costPrice || "0");
+
+        if (item.batchId && batchCostMap.has(item.batchId)) {
+          unitCost = parseFloat(batchCostMap.get(item.batchId)!);
+        }
+
+        totalCOGS += quantity * unitCost;
+
+        let baseQuantity = quantity;
+        if (item.uomId)
+          baseQuantity = convertInMemory(item.productId, quantity, item.uomId);
+
+        if (baseQuantity > parseFloat(product.currentStock || "0"))
+          throw new Error(`Insufficient stock for ${product.name}`);
+
+        const newStock = (parseFloat(product.currentStock || "0") - baseQuantity).toFixed(2);
+
+        await tx.update(products)
+          .set({ currentStock: newStock })
+          .where(eq(products.id, item.productId));
+
+        if (invoice.warehouseId)
+          await updateWarehouseStock(tx, invoice.warehouseId, item.productId, -baseQuantity);
+        if (item.batchId)
+          await updateBatchStock(tx, item.batchId, -baseQuantity);
+
+        stockMovementsData.push({
+          orgId,
+          productId: item.productId,
+          movementType: "out",
+          reason: "sale",
+          quantity: String(baseQuantity),
+          unitCost: String(unitCost),
+          totalValue: (baseQuantity * unitCost).toFixed(2),
+          referenceType: "invoice",
+          referenceId: invoiceId,
+          referenceNumber: invoice.invoiceNumber,
+          runningBalance: newStock,
+        });
+      }
+
+      if (stockMovementsData.length > 0) {
+        await tx.insert(stockMovements).values(stockMovementsData);
       }
 
       // 3. Journal Entry Setup
@@ -1164,6 +1259,7 @@ export async function approveInvoice(invoiceId: string) {
     revalidatePath("/sales/invoices");
     return { success: true, message: "Invoice approved successfully" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to approve",
@@ -1208,6 +1304,7 @@ export async function updateInvoiceStatus(
       message: "Invoice status updated",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to update invoice status" };
   }
 }
@@ -1284,6 +1381,7 @@ export async function deleteInvoice(invoiceId: string) {
 
     return { success: true, message: "Invoice deleted successfully" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to delete invoice" };
   }
 }
@@ -1333,6 +1431,7 @@ export async function getInvoiceStats() {
       },
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch invoice stats" };
   }
 }
@@ -1358,14 +1457,14 @@ export async function createInvoiceJournalEntry(invoiceId: string) {
       return { success: false, error: "Invoice not found" };
     }
 
-    // Find accounts
+    // Find accounts by subType (not name — names may vary by org)
     const accountsReceivable = await db
       .select()
       .from(chartOfAccounts)
       .where(
         and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, "Accounts Receivable"),
+          eq(chartOfAccounts.subType, "accounts_receivable"),
         ),
       )
       .limit(1);
@@ -1376,7 +1475,7 @@ export async function createInvoiceJournalEntry(invoiceId: string) {
       .where(
         and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, "Sales Revenue"),
+          eq(chartOfAccounts.subType, "sales_revenue"),
         ),
       )
       .limit(1);
@@ -1387,7 +1486,7 @@ export async function createInvoiceJournalEntry(invoiceId: string) {
       .where(
         and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, "Sales Tax Payable"),
+          eq(chartOfAccounts.subType, "tax_payable"),
         ),
       )
       .limit(1);
@@ -1411,6 +1510,7 @@ export async function createInvoiceJournalEntry(invoiceId: string) {
 
     return { success: true, message: "Journal entry created for invoice" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to create journal entry" };
   }
 }
@@ -1450,6 +1550,7 @@ export async function getCashBankAccounts() {
 
     return { success: true, data: cashBankAccounts };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch cash/bank accounts" };
   }
 }
@@ -1468,6 +1569,7 @@ export async function getNextInvoiceNumber() {
     }
     return { success: true, data: invoiceNumber };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to generate invoice number" };
   }
 }
@@ -1509,6 +1611,7 @@ export async function getNextSaleOrderNumber() {
     }
     return { success: true, data: orderNumber };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to generate sale order number" };
   }
 }
@@ -1598,6 +1701,7 @@ export async function createSaleOrder(data: SaleOrderFormData) {
       orderNumber,
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to create sale order" };
   }
 }
@@ -1653,6 +1757,7 @@ export async function approveSaleOrder(orderId: string) {
       message: "Sale order approved",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to approve sale order" };
   }
 }
@@ -1671,7 +1776,7 @@ export async function getSaleOrders(
     const conditions = [eq(saleOrders.orgId, orgId)];
 
     if (statusFilter && statusFilter !== "all") {
-      conditions.push(eq(saleOrders.status, statusFilter as any));
+      conditions.push(eq(saleOrders.status, statusFilter as typeof saleOrders.status._.data));
     }
 
     let result = await db
@@ -1706,6 +1811,7 @@ export async function getSaleOrders(
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch sale orders" };
   }
 }
@@ -1735,6 +1841,7 @@ export async function getSaleOrderById(orderId: string) {
 
     return { success: true, data: { ...order, items } };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch sale order" };
   }
 }
@@ -1877,6 +1984,7 @@ export async function getNextQuotationNumber() {
     }
     return { success: true, data: number };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to generate quotation number" };
   }
 }
@@ -1890,7 +1998,7 @@ export async function getQuotations(
     if (!orgId) return { success: false, error: "No organization found" };
     const conditions = [eq(quotations.orgId, orgId)];
     if (statusFilter && statusFilter !== "all")
-      conditions.push(eq(quotations.status, statusFilter as any));
+      conditions.push(eq(quotations.status, statusFilter as typeof quotations.status._.data));
     let result = await db
       .select({
         id: quotations.id,
@@ -1917,6 +2025,7 @@ export async function getQuotations(
     }
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch quotations" };
   }
 }
@@ -1937,6 +2046,7 @@ export async function getQuotationById(quotationId: string) {
       .where(eq(quotationItems.quotationId, quotationId));
     return { success: true, data: { ...quotation, items } };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch quotation" };
   }
 }
@@ -2023,6 +2133,7 @@ export async function createQuotation(data: QuotationFormData) {
       quotationNumber,
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to create quotation" };
   }
 }
@@ -2034,7 +2145,7 @@ export async function updateQuotation(
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    const updateData: any = {};
+    const updateData: Partial<typeof quotations.$inferInsert> = {};
     if (data.customerId !== undefined) updateData.customerId = data.customerId;
     if (data.subject !== undefined) updateData.subject = data.subject;
     if (data.reference !== undefined) updateData.reference = data.reference;
@@ -2101,6 +2212,7 @@ export async function updateQuotation(
       message: "Quotation updated successfully",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to update quotation" };
   }
 }
@@ -2118,6 +2230,7 @@ export async function deleteQuotation(quotationId: string) {
     revalidatePath("/sales/quotations");
     return { success: true, message: "Quotation deleted successfully" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to delete quotation" };
   }
 }
@@ -2189,6 +2302,7 @@ export async function convertQuotationToOrder(quotationId: string) {
       message: "Quotation converted to sale order",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to convert quotation to order" };
   }
 }
@@ -2217,6 +2331,7 @@ export async function getNextDeliveryNumber() {
     const number = await generateDeliveryNumber(orgId);
     return { success: true, data: number };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to generate delivery number" };
   }
 }
@@ -2230,7 +2345,7 @@ export async function getDeliveryNotes(
     if (!orgId) return { success: false, error: "No organization found" };
     const conditions = [eq(deliveryNotes.orgId, orgId)];
     if (statusFilter && statusFilter !== "all")
-      conditions.push(eq(deliveryNotes.status, statusFilter as any));
+      conditions.push(eq(deliveryNotes.status, statusFilter as typeof deliveryNotes.status._.data));
     let result = await db
       .select({
         id: deliveryNotes.id,
@@ -2255,6 +2370,7 @@ export async function getDeliveryNotes(
     }
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch delivery notes" };
   }
 }
@@ -2312,19 +2428,20 @@ export async function createDeliveryNote(data: DeliveryNoteFormData) {
       message: "Delivery note created successfully",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to create delivery note" };
   }
 }
 
 export async function updateDeliveryStatus(
   deliveryId: string,
-  status: string,
+  status: typeof deliveryNotes.status._.data,
   deliveredBy?: string,
 ) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    const updateData: any = { status };
+    const updateData: Partial<typeof deliveryNotes.$inferInsert> = { status };
     if (deliveredBy) updateData.deliveredBy = deliveredBy;
     const [updated] = await db
       .update(deliveryNotes)
@@ -2337,6 +2454,7 @@ export async function updateDeliveryStatus(
     revalidatePath("/sales/delivery");
     return { success: true, data: updated, message: "Delivery status updated" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to update delivery status" };
   }
 }
@@ -2364,6 +2482,7 @@ export async function getNextRecurringInvoiceNumber() {
     if (!orgId) return { success: false, error: "No organization found" };
     return { success: true, data: await generateRecurringInvoiceNumber(orgId) };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to generate number" };
   }
 }
@@ -2392,6 +2511,7 @@ export async function getRecurringInvoices(statusFilter?: string) {
       .orderBy(desc(recurringInvoices.createdAt));
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch recurring invoices" };
   }
 }
@@ -2449,6 +2569,7 @@ export async function createRecurringInvoice(data: RecurringInvoiceFormData) {
       message: "Recurring invoice created",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to create recurring invoice" };
   }
 }
@@ -2460,7 +2581,7 @@ export async function updateRecurringInvoice(
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    const updateData: any = {};
+    const updateData: Partial<typeof recurringInvoices.$inferInsert> = {};
     if (data.customerId !== undefined) updateData.customerId = data.customerId;
     if (data.templateName !== undefined)
       updateData.templateName = data.templateName;
@@ -2515,6 +2636,7 @@ export async function updateRecurringInvoice(
       message: "Recurring invoice updated",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to update recurring invoice" };
   }
 }
@@ -2534,6 +2656,7 @@ export async function deleteRecurringInvoice(id: string) {
     revalidatePath("/sales/recurring");
     return { success: true, message: "Recurring invoice deleted" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to delete recurring invoice" };
   }
 }
@@ -2643,6 +2766,7 @@ export async function generateRecurringInvoices() {
       message: `Generated ${generated} invoices`,
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to generate recurring invoices" };
   }
 }
@@ -2670,6 +2794,7 @@ export async function getNextSalesReturnNumber() {
     if (!orgId) return { success: false, error: "No organization found" };
     return { success: true, data: await generateSalesReturnNumber(orgId) };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to generate return number" };
   }
 }
@@ -2708,6 +2833,7 @@ export async function getSalesReturns(
     }
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch sales returns" };
   }
 }
@@ -2762,6 +2888,7 @@ export async function createSalesReturn(data: SalesReturnFormData) {
       message: "Sales return created (pending approval)",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to create sales return" };
   }
 }
@@ -2915,6 +3042,7 @@ export async function approveSalesReturn(returnId: string) {
       message: "Sales return approved - stock reversed and refund recorded",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to approve sales return" };
   }
 }
@@ -2964,6 +3092,7 @@ export async function getCustomerPayments(searchQuery?: string) {
     }
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch payments" };
   }
 }
@@ -3104,6 +3233,7 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
       message: "Payment recorded successfully",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to record payment" };
   }
 }
@@ -3159,6 +3289,7 @@ export async function allocatePayment(
     revalidatePath("/sales/invoices");
     return { success: true, message: "Payment allocated successfully" };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to allocate payment" };
   }
 }
@@ -3186,6 +3317,7 @@ export async function getCustomerOutstandingInvoices(customerId: string) {
       data: result.filter((inv) => parseFloat(inv.balanceAmount || "0") > 0),
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch outstanding invoices" };
   }
 }
@@ -3217,7 +3349,7 @@ export async function getSettlements(
     const conditions = [eq(settlements.orgId, orgId)];
     if (entityType) conditions.push(eq(settlements.entityType, entityType));
     if (statusFilter && statusFilter !== "all")
-      conditions.push(eq(settlements.status, statusFilter as any));
+      conditions.push(eq(settlements.status, statusFilter as typeof settlements.status._.data));
     const result = await db
       .select()
       .from(settlements)
@@ -3225,6 +3357,7 @@ export async function getSettlements(
       .orderBy(desc(settlements.createdAt));
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to fetch settlements" };
   }
 }
@@ -3299,6 +3432,7 @@ export async function createCustomerSettlement(data: SettlementFormData) {
       message: "Settlement recorded successfully",
     };
   } catch (error) {
+    console.error("Error in sales.ts:", error);
     return { success: false, error: "Failed to create settlement" };
   }
 }

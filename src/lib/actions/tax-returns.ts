@@ -123,6 +123,7 @@ export async function generateTaxReturn(
     revalidatePath("/reports/tax-returns");
     return { success: true, data: taxReturn };
   } catch (error) {
+    console.error("Error in tax-returns.ts:", error);
     return { success: false, error: "Failed to generate tax return" };
   }
 }
@@ -188,6 +189,7 @@ export async function submitTaxReturn(returnId: string) {
     revalidatePath("/reports/tax-returns");
     return result;
   } catch (error) {
+    console.error("Error in tax-returns.ts:", error);
     return { success: false, error: "Failed to submit tax return to FBR" };
   }
 }
@@ -205,6 +207,7 @@ export async function getTaxReturns() {
 
     return { success: true, data: returns };
   } catch (error) {
+    console.error("Error in tax-returns.ts:", error);
     return { success: false, error: "Failed to fetch tax returns" };
   }
 }
@@ -224,6 +227,7 @@ export async function deleteTaxReturn(returnId: string) {
     revalidatePath("/reports/tax-returns");
     return { success: true, message: "Tax return deleted" };
   } catch (error) {
+    console.error("Error in tax-returns.ts:", error);
     return { success: false, error: "Failed to delete tax return" };
   }
 }

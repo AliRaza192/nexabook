@@ -194,3 +194,104 @@ describe("convertToPKR", () => {
     expect(convertToPKR(50, 279.5)).toBe(13975);
   });
 });
+
+// ─── pagination.ts ────────────────────────────────────────
+
+import { getPaginationParams, buildPaginationResult, getOffset } from "./pagination";
+
+describe("getPaginationParams", () => {
+  it("returns defaults when no params provided", () => {
+    const result = getPaginationParams({});
+    expect(result.page).toBe(1);
+    expect(result.pageSize).toBe(25);
+  });
+
+  it("parses page and pageSize from searchParams", () => {
+    const result = getPaginationParams({ page: "3", pageSize: "50" });
+    expect(result.page).toBe(3);
+    expect(result.pageSize).toBe(50);
+  });
+
+  it("clamps page to minimum 1", () => {
+    const result = getPaginationParams({ page: "0" });
+    expect(result.page).toBe(1);
+  });
+
+  it("clamps pageSize to maximum 100", () => {
+    const result = getPaginationParams({ pageSize: "500" });
+    expect(result.pageSize).toBe(100);
+  });
+
+  it("uses custom default pageSize", () => {
+    const result = getPaginationParams({}, 50);
+    expect(result.pageSize).toBe(50);
+  });
+});
+
+describe("buildPaginationResult", () => {
+  it("computes totalPages correctly", () => {
+    const result = buildPaginationResult(100, { page: 1, pageSize: 25 });
+    expect(result.totalPages).toBe(4);
+    expect(result.total).toBe(100);
+  });
+
+  it("handles zero total", () => {
+    const result = buildPaginationResult(0, { page: 1, pageSize: 25 });
+    expect(result.totalPages).toBe(0);
+  });
+
+  it("rounds up partial pages", () => {
+    const result = buildPaginationResult(101, { page: 1, pageSize: 25 });
+    expect(result.totalPages).toBe(5);
+  });
+});
+
+describe("getOffset", () => {
+  it("returns 0 for page 1", () => {
+    expect(getOffset({ page: 1, pageSize: 25 })).toBe(0);
+  });
+
+  it("returns correct offset for page 3", () => {
+    expect(getOffset({ page: 3, pageSize: 25 })).toBe(50);
+  });
+});
+
+// ─── accounting.ts edge cases ─────────────────────────────
+
+describe("calculateLineTotal edge cases", () => {
+  it("handles negative prices", () => {
+    const result = calculateLineTotal(1, -100, 0, 0);
+    expect(result.lineTotal).toBe(-100);
+  });
+
+  it("handles 100% discount", () => {
+    const result = calculateLineTotal(1, 100, 100, 0);
+    expect(result.lineTotal).toBe(0);
+  });
+
+  it("handles very large quantities", () => {
+    const result = calculateLineTotal(999999, 999999, 0, 0);
+    expect(result.lineTotal).toBe(999998000001);
+  });
+});
+
+describe("validateJournalBalance edge cases", () => {
+  it("handles empty array", () => {
+    expect(validateJournalBalance([])).toBe(true);
+  });
+
+  it("handles single line with both debit and credit", () => {
+    const lines = [
+      { debitAmount: "100", creditAmount: "100" },
+    ];
+    expect(validateJournalBalance(lines)).toBe(true);
+  });
+
+  it("handles zero amounts", () => {
+    const lines = [
+      { debitAmount: "0", creditAmount: "0" },
+      { debitAmount: "0", creditAmount: "0" },
+    ];
+    expect(validateJournalBalance(lines)).toBe(true);
+  });
+});

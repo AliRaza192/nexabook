@@ -52,6 +52,14 @@ export const webhookEventEnum = pgEnum('webhook_event', [
   'purchase.created', 'purchase.updated',
 ]);
 export const webhookDeliveryStatusEnum = pgEnum('webhook_delivery_status', ['pending', 'success', 'failed']);
+// Bank Feeds Enums
+export const bankFeedProviderEnum = pgEnum('bank_feed_provider', ['plaid', 'saltedge', 'finverse', 'mock', 'manual']);
+export const bankConnectionStatusEnum = pgEnum('bank_connection_status', ['active', 'error', 'disconnected', 'pending']);
+// Project Management Enums
+export const projectStatusEnum = pgEnum('project_status', ['active', 'completed', 'on_hold', 'cancelled']);
+export const taskStatusEnum = pgEnum('task_status', ['todo', 'in_progress', 'done', 'cancelled']);
+export const taskPriorityEnum = pgEnum('task_priority', ['low', 'medium', 'high', 'urgent']);
+export const timesheetStatusEnum = pgEnum('timesheet_status', ['draft', 'submitted', 'approved', 'rejected']);
 
 // Organizations Table (Multi-Tenant Root)
 export const organizations = pgTable('organizations', {
@@ -91,7 +99,26 @@ export const organizations = pgTable('organizations', {
   interestFreeTerms: text('interest_free_terms').default('No interest (riba) is charged as per Islamic finance principles.'),
   latePaymentCharity: boolean('late_payment_charity').default(true).notNull(),
   charityAccountId: uuid('charity_account_id'),
+
+  // Multi-Company Consolidation
+  parentOrgId: uuid('parent_org_id'),
+  consolidationEnabled: boolean('consolidation_enabled').notNull().default(false),
+
+  // Stripe Billing
+  stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
+  stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
+  subscriptionStatus: varchar('subscription_status', { length: 50 }).default('inactive'),
+  subscriptionEndsAt: timestamp('subscription_ends_at'),
 });
+
+export const organizationsRelations = relations(organizations, ({ one, many }) => ({
+  parent: one(organizations, {
+    fields: [organizations.parentOrgId],
+    references: [organizations.id],
+    relationName: 'parentOrg',
+  }),
+  children: many(organizations, { relationName: 'childOrgs' }),
+}));
 
 // Dashboard Widget Settings
 export const dashboardWidgets = pgTable("dashboard_widgets", {
@@ -1022,6 +1049,107 @@ export const costCentersRelations = relations(costCenters, ({ one }) => ({
 export type CostCenter = typeof costCenters.$inferSelect;
 export type NewCostCenter = typeof costCenters.$inferInsert;
 
+// ==========================================
+// PROJECT MANAGEMENT
+// ==========================================
+export const projects = pgTable('projects', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  code: varchar('code', { length: 50 }),
+  description: text('description'),
+  status: projectStatusEnum('status').notNull().default('active'),
+  startDate: timestamp('start_date'),
+  endDate: timestamp('end_date'),
+  budgetAmount: decimal('budget_amount', { precision: 12, scale: 2 }).default('0'),
+  hourlyRate: decimal('hourly_rate', { precision: 10, scale: 2 }).default('0'),
+  clientId: uuid('client_id').references(() => customers.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [projects.orgId],
+    references: [organizations.id],
+  }),
+  client: one(customers, {
+    fields: [projects.clientId],
+    references: [customers.id],
+  }),
+  tasks: many(tasks),
+  timesheets: many(timesheets),
+}));
+
+export const tasks = pgTable('tasks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  projectId: uuid('project_id').references(() => projects.id).notNull(),
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  assigneeId: uuid('assignee_id').references(() => profiles.id),
+  status: taskStatusEnum('status').notNull().default('todo'),
+  priority: taskPriorityEnum('priority').notNull().default('medium'),
+  dueDate: timestamp('due_date'),
+  estimatedHours: decimal('estimated_hours', { precision: 8, scale: 2 }).default('0'),
+  actualHours: decimal('actual_hours', { precision: 8, scale: 2 }).default('0'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const tasksRelations = relations(tasks, ({ one }) => ({
+  project: one(projects, {
+    fields: [tasks.projectId],
+    references: [projects.id],
+  }),
+  assignee: one(profiles, {
+    fields: [tasks.assigneeId],
+    references: [profiles.id],
+  }),
+}));
+
+export const timesheets = pgTable('timesheets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  profileId: uuid('profile_id').references(() => profiles.id).notNull(),
+  projectId: uuid('project_id').references(() => projects.id).notNull(),
+  taskId: uuid('task_id').references(() => tasks.id),
+  date: timestamp('date').notNull(),
+  hours: decimal('hours', { precision: 5, scale: 2 }).notNull(),
+  description: text('description'),
+  billable: boolean('billable').notNull().default(true),
+  status: timesheetStatusEnum('status').notNull().default('draft'),
+  approvedById: uuid('approved_by_id').references(() => profiles.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const timesheetsRelations = relations(timesheets, ({ one }) => ({
+  profile: one(profiles, {
+    fields: [timesheets.profileId],
+    references: [profiles.id],
+  }),
+  project: one(projects, {
+    fields: [timesheets.projectId],
+    references: [projects.id],
+  }),
+  task: one(tasks, {
+    fields: [timesheets.taskId],
+    references: [tasks.id],
+  }),
+  approver: one(profiles, {
+    fields: [timesheets.approvedById],
+    references: [profiles.id],
+  }),
+}));
+
+export type Project = typeof projects.$inferSelect;
+export type NewProject = typeof projects.$inferInsert;
+export type Task = typeof tasks.$inferSelect;
+export type NewTask = typeof tasks.$inferInsert;
+export type Timesheet = typeof timesheets.$inferSelect;
+export type NewTimesheet = typeof timesheets.$inferInsert;
+
 // Exchange Rates
 export const exchangeRates = pgTable('exchange_rates', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -1685,6 +1813,38 @@ export const bankStatements = pgTable('bank_statements', {
 
 export type BankStatement = typeof bankStatements.$inferSelect;
 export type NewBankStatement = typeof bankStatements.$inferInsert;
+
+// Bank Feeds (Auto-Sync Connections)
+export const bankConnections = pgTable('bank_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id).notNull(),
+  provider: bankFeedProviderEnum('provider').notNull().default('manual'),
+  providerAccountId: varchar('provider_account_id', { length: 255 }),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  status: bankConnectionStatusEnum('status').notNull().default('pending'),
+  lastSyncAt: timestamp('last_sync_at'),
+  lastSyncStatus: varchar('last_sync_status', { length: 50 }), // success, failed, partial
+  errorMessage: text('error_message'),
+  config: jsonb('config').$type<Record<string, string>>().default({}),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const bankConnectionsRelations = relations(bankConnections, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [bankConnections.orgId],
+    references: [organizations.id],
+  }),
+  bankAccount: one(bankAccounts, {
+    fields: [bankConnections.bankAccountId],
+    references: [bankAccounts.id],
+  }),
+}));
+
+export type BankConnection = typeof bankConnections.$inferSelect;
+export type NewBankConnection = typeof bankConnections.$inferInsert;
 
 // Bank Deposits
 export const bankDeposits = pgTable('bank_deposits', {
@@ -2681,9 +2841,28 @@ export type NewStockCountItem = typeof stockCountItems.$inferInsert;
 export type ProductAttribute = typeof productAttributes.$inferSelect;
 export type NewProductAttribute = typeof productAttributes.$inferInsert;
 
+// ─────────────────────────────────────────
+// FISCAL PERIODS (Prior-Period Locking)
+// ─────────────────────────────────────────
+
+export const fiscalPeriods = pgTable('fiscal_periods', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  startDate: timestamp('start_date').notNull(),
+  endDate: timestamp('end_date').notNull(),
+  isLocked: boolean('is_locked').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const fiscalPeriodEnum = pgEnum('fiscal_period_status', ['open', 'locked']);
+
 // Export complete schema
 export const schema = {
   organizations,
+  organizationsRelations,
   profiles,
   chartOfAccounts,
   productCategories,
@@ -2738,6 +2917,9 @@ export const schema = {
   settlementLines,
   // Banking & Advanced Accounts
   bankAccounts,
+  bankStatements,
+  bankConnections,
+  bankConnectionsRelations,
   bankDeposits,
   fundsTransfers,
   miscContacts,
@@ -2779,6 +2961,14 @@ export const schema = {
   webhookDeliveries,
   webhookEndpointsRelations,
   webhookDeliveriesRelations,
+  // Project Management
+  projects,
+  projectsRelations,
+  tasks,
+  tasksRelations,
+  timesheets,
+  timesheetsRelations,
+  fiscalPeriods,
 };
 
 

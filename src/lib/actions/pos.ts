@@ -91,6 +91,7 @@ export async function getCurrentPosShift() {
 
     return { success: true, data: shift[0] };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to fetch shift" };
   }
 }
@@ -150,7 +151,7 @@ export async function startShift(openingAmount: number) {
       .from(chartOfAccounts)
       .where(and(
         eq(chartOfAccounts.orgId, orgId),
-        eq(chartOfAccounts.name, 'Cash')
+        eq(chartOfAccounts.subType, 'cash')
       ))
       .limit(1);
 
@@ -188,7 +189,7 @@ export async function startShift(openingAmount: number) {
         .from(chartOfAccounts)
         .where(and(
           eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, "Owner's Equity")
+          eq(chartOfAccounts.subType, 'capital')
         ))
         .limit(1);
 
@@ -217,6 +218,7 @@ export async function startShift(openingAmount: number) {
     revalidatePath('/pos');
     return { success: true, data: shift, message: "Shift started successfully" };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to start shift" };
   }
 }
@@ -274,7 +276,7 @@ export async function endShift(actualCash: number, expectedCash: number) {
       .from(chartOfAccounts)
       .where(and(
         eq(chartOfAccounts.orgId, orgId),
-        eq(chartOfAccounts.name, 'Cash')
+        eq(chartOfAccounts.subType, 'cash')
       ))
       .limit(1);
 
@@ -309,6 +311,7 @@ export async function endShift(actualCash: number, expectedCash: number) {
       data: { expectedCash, actualCash, variance }
     };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to end shift" };
   }
 }
@@ -448,19 +451,19 @@ export async function processPosSale(saleData: PosSaleData) {
     const [posCashAccount] = await db
       .select()
       .from(chartOfAccounts)
-      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.name, 'Cash')))
+      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cash')))
       .limit(1);
 
     const [salesRevenue] = await db
       .select()
       .from(chartOfAccounts)
-      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.name, 'Sales Revenue')))
+      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'sales_revenue')))
       .limit(1);
 
     const [salesTaxPayable] = await db
       .select()
       .from(chartOfAccounts)
-      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.name, 'Sales Tax Payable')))
+      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'tax_payable')))
       .limit(1);
 
     if (posCashAccount && salesRevenue) {
@@ -539,6 +542,7 @@ export async function processPosSale(saleData: PosSaleData) {
       netAmount
     };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to process sale" };
   }
 }
@@ -598,6 +602,7 @@ export async function getPosCustomers(searchQuery?: string) {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to fetch customers" };
   }
 }
@@ -640,6 +645,7 @@ export async function getPosProducts(searchQuery?: string, categoryId?: string) 
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to fetch products" };
   }
 }
@@ -661,6 +667,7 @@ export async function getPosCategories() {
 
     return { success: true, data: categories };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to fetch categories" };
   }
 }
@@ -895,16 +902,16 @@ export async function generatePOSReport(
         .where(eq(journalEntries.id, shiftId));
 
       // Create closing journal entry
-      const [posCashAccount] = await db
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.name, 'Cash')
-        ))
-        .limit(1);
+    const [posCashAccount] = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(
+        eq(chartOfAccounts.orgId, orgId),
+        eq(chartOfAccounts.subType, 'cash')
+      ))
+      .limit(1);
 
-      if (posCashAccount) {
+    if (posCashAccount) {
         const [journalEntry] = await db
           .insert(journalEntries)
           .values({
@@ -971,6 +978,7 @@ export async function getPosShiftHistory() {
 
     return { success: true, data: shifts };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to fetch shift history" };
   }
 }
@@ -1061,6 +1069,7 @@ export async function getCurrentShiftDetails() {
       },
     };
   } catch (error) {
+    console.error("Error in pos.ts:", error);
     return { success: false, error: "Failed to fetch shift details" };
   }
 }

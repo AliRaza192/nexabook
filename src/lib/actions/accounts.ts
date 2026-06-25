@@ -8,6 +8,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
 import { requireRole } from "./shared";
 import { validateJournalBalance } from "../accounting";
+import { checkPeriodLocked } from "./fiscal-periods";
 
 export interface JournalEntryLine {
   accountId: string;
@@ -40,6 +41,7 @@ export async function getAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to fetch accounts" };
   }
 }
@@ -138,7 +140,7 @@ export async function seedInitialCOA() {
       { code: "4300", name: "Other Income", type: "income", description: "Miscellaneous income" },
       { code: "4400", name: "Discount Received", type: "income", description: "Discounts from suppliers" },
       { code: "4500", name: "Exchange Gain", type: "income", description: "Gain from currency exchange rate fluctuations" },
-      { code: "4500", name: "Commission Income", type: "income", description: "Commission earned" },
+      { code: "4550", name: "Commission Income", type: "income", description: "Commission earned" },
       { code: "4600", name: "Rental Income", type: "income", description: "Income from property rental" },
       { code: "4700", name: "Gain on Asset Sale", type: "income", description: "Profit from selling assets" },
       { code: "4800", name: "Export Revenue", type: "income", description: "Revenue from export sales" },
@@ -220,6 +222,7 @@ export async function seedInitialCOA() {
       count: accountsToInsert.length
     };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to seed chart of accounts" };
   }
 }
@@ -230,6 +233,13 @@ export async function createJournalEntry(data: JournalEntryData) {
 
   if (!orgId) {
     return { success: false, error: "No organization found" };
+  }
+
+  if (data.date) {
+    const locked = await checkPeriodLocked(new Date(data.date));
+    if (locked) {
+      return { success: false, error: "Cannot post to a locked fiscal period" };
+    }
   }
 
   try {
@@ -315,6 +325,7 @@ export async function createJournalEntry(data: JournalEntryData) {
       entryNumber
     };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to create journal entry" };
   }
 }
@@ -322,18 +333,22 @@ export async function createJournalEntry(data: JournalEntryData) {
 // Get account by ID
 export async function getAccountById(accountId: string) {
   try {
-    const account = await db
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [account] = await db
       .select()
       .from(chartOfAccounts)
-      .where(eq(chartOfAccounts.id, accountId))
+      .where(and(eq(chartOfAccounts.id, accountId), eq(chartOfAccounts.orgId, orgId)))
       .limit(1);
 
-    if (account.length === 0) {
+    if (!account) {
       return { success: false, error: "Account not found" };
     }
 
-    return { success: true, data: account[0] };
+    return { success: true, data: account };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to fetch account" };
   }
 }
@@ -460,6 +475,7 @@ export async function postOpeningBalance(data: {
       entryNumber,
     };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to post opening balance" };
   }
 }
@@ -579,6 +595,7 @@ export async function bulkImportOpeningBalances(
       entryNumber,
     };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to import opening balances" };
   }
 }
@@ -604,6 +621,7 @@ export async function getCompanySettings() {
 
     return { success: true, data: org };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to fetch company settings" };
   }
 }
@@ -638,7 +656,7 @@ export async function updateCompanySettings(data: {
       return { success: false, error: "Company name is required" };
     }
 
-    const updateData: any = { name: data.name.trim() };
+    const updateData: Partial<typeof organizations.$inferInsert> = { name: data.name.trim() };
     if (data.ntn !== undefined) updateData.ntn = data.ntn;
     if (data.strn !== undefined) updateData.strn = data.strn;
     if (data.address !== undefined) updateData.address = data.address;
@@ -697,6 +715,7 @@ export async function getAllAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to fetch accounts" };
   }
 }
@@ -810,6 +829,7 @@ export async function getLedgerReport(
       },
     };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to generate ledger report" };
   }
 }
@@ -994,6 +1014,7 @@ export async function getTaxSummary(
       },
     };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to generate tax summary" };
   }
 }
@@ -1279,6 +1300,7 @@ export async function getVouchersByType(voucherType: VoucherType, limit: number 
 
     return { success: true, data: vouchers };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to fetch vouchers" };
   }
 }
@@ -1323,6 +1345,7 @@ export async function getVoucherWithLines(entryId: string) {
 
     return { success: true, data: { entry, lines } };
   } catch (error) {
+    console.error("Error in accounts.ts:", error);
     return { success: false, error: "Failed to fetch voucher" };
   }
 }

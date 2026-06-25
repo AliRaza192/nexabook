@@ -5,6 +5,7 @@ import { costCenters, journalEntryLines, journalEntries, chartOfAccounts } from 
 import { eq, and, sql, gte, lte } from "drizzle-orm";
 import { getCurrentOrgId } from "./shared";
 import { revalidatePath } from "next/cache";
+import { createAuditLog } from "./audit";
 
 export async function getCostCenters() {
   try {
@@ -19,6 +20,7 @@ export async function getCostCenters() {
 
     return { success: true, data: rows };
   } catch (error) {
+    console.error("Error in cost-centers.ts:", error);
     return { success: false, error: "Failed to load cost centers" };
   }
 }
@@ -38,6 +40,7 @@ export async function getCostCenter(id: string) {
 
     return { success: true, data: row };
   } catch (error) {
+    console.error("Error in cost-centers.ts:", error);
     return { success: false, error: "Failed to load cost center" };
   }
 }
@@ -57,8 +60,10 @@ export async function createCostCenter(data: {
       .returning();
 
     revalidatePath("/settings/cost-centers");
+    await createAuditLog({ action: "COST_CENTER_CREATED", entityType: "costCenter", entityId: row[0].id });
     return { success: true, data: row[0] };
   } catch (error) {
+    console.error("Error in cost-centers.ts:", error);
     return { success: false, error: "Failed to create cost center" };
   }
 }
@@ -80,8 +85,10 @@ export async function updateCostCenter(id: string, data: {
       .returning();
 
     revalidatePath("/settings/cost-centers");
+    await createAuditLog({ action: "COST_CENTER_UPDATED", entityType: "costCenter", entityId: id });
     return { success: true, data: row[0] };
   } catch (error) {
+    console.error("Error in cost-centers.ts:", error);
     return { success: false, error: "Failed to update cost center" };
   }
 }
@@ -96,8 +103,10 @@ export async function deleteCostCenter(id: string) {
       .where(and(eq(costCenters.id, id), eq(costCenters.orgId, orgId)));
 
     revalidatePath("/settings/cost-centers");
+    await createAuditLog({ action: "COST_CENTER_DELETED", entityType: "costCenter", entityId: id });
     return { success: true };
   } catch (error) {
+    console.error("Error in cost-centers.ts:", error);
     return { success: false, error: "Failed to delete cost center" };
   }
 }
@@ -155,6 +164,7 @@ export async function getCostCenterPLReport(costCenterId: string, fiscalYear?: s
       },
     };
   } catch (error) {
+    console.error("Error in cost-centers.ts:", error);
     return { success: false, error: "Failed to load cost center P&L" };
   }
 }

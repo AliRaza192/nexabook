@@ -36,8 +36,10 @@ import {
   salesReturnItems,
   customerPayments,
   vendorPayments,
+  organizations,
+  profiles,
 } from "@/db/schema";
-import { eq, and, gte, lte, desc, sql, inArray, or, ilike, sum, count } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, inArray, or, ilike, sum, count } from "drizzle-orm";
 import { getCurrentOrgId } from "./shared";
 
 // ============= Profit & Loss Report =============
@@ -50,107 +52,65 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
     const fromDate = new Date(dateFrom);
     const toDate = new Date(dateTo);
 
-    // Get all income accounts
-    const incomeAccounts = await db
-      .select({ id: chartOfAccounts.id, name: chartOfAccounts.name, code: chartOfAccounts.code })
+    const allAccounts = await db
+      .select({ id: chartOfAccounts.id, name: chartOfAccounts.name, code: chartOfAccounts.code, type: chartOfAccounts.type })
       .from(chartOfAccounts)
-      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.type, 'income')));
+      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.isActive, true)));
 
-    // Get all expense accounts
-    const expenseAccounts = await db
-      .select({ id: chartOfAccounts.id, name: chartOfAccounts.name, code: chartOfAccounts.code })
-      .from(chartOfAccounts)
-      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.type, 'expense')));
+    const incomeAccounts = allAccounts.filter(a => a.type === 'income');
+    const expenseAccounts = allAccounts.filter(a => a.type === 'expense');
 
-    // Calculate total sales (from invoices)
-    const salesResult = await db
-      .select({
-        totalSales: sql<string>`SUM(${invoices.netAmount})`,
-      })
-      .from(invoices)
-      .where(and(
-        eq(invoices.orgId, orgId),
-        gte(invoices.issueDate, fromDate),
-        lte(invoices.issueDate, toDate),
-        sql`${invoices.status} NOT IN ('draft', 'cancelled')`
-      ));
+    const allRelevantIds = [...incomeAccounts.map(a => a.id), ...expenseAccounts.map(a => a.id)];
 
-    const totalSales = salesResult[0]?.totalSales ? parseFloat(salesResult[0].totalSales) : 0;
-
-    // Calculate COGS: actual cost of goods SOLD (invoice items × product costPrice)
-    const cogsResult = await db
-      .select({
-        totalCOGS: sql<string>`SUM(CAST(${invoiceItems.quantity} AS DECIMAL) * CAST(COALESCE(${products.costPrice}, 0) AS DECIMAL))`,
-      })
-      .from(invoiceItems)
-      .innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id))
-      .leftJoin(products, eq(invoiceItems.productId, products.id))
-      .where(and(
-        eq(invoices.orgId, orgId),
-        gte(invoices.issueDate, fromDate),
-        lte(invoices.issueDate, toDate),
-        sql`${invoices.status} NOT IN ('draft', 'cancelled')`
-      ));
-
-    const totalCOGS = cogsResult[0]?.totalCOGS ? parseFloat(cogsResult[0].totalCOGS) : 0;
-
-    // Calculate operating expenses (from expenses table and journal entries)
-    const expensesResult = await db
-      .select({
-        totalExpenses: sql<string>`SUM(${expenses.amount})`,
-      })
-      .from(expenses)
-      .where(and(
-        eq(expenses.orgId, orgId),
-        gte(expenses.date, fromDate),
-        lte(expenses.date, toDate)
-      ));
-
-    const totalExpenses = expensesResult[0]?.totalExpenses ? parseFloat(expensesResult[0].totalExpenses) : 0;
-
-    // Get expense breakdown by account
-    const expenseBreakdown = expenseAccounts.length > 0 ? await db
+    const journalData = allRelevantIds.length > 0 ? await db
       .select({
         accountId: journalEntryLines.accountId,
-        totalDebit: sql<string>`SUM(${journalEntryLines.debitAmount})`,
+        totalDebit: sql<string>`COALESCE(SUM(${journalEntryLines.debitAmount}), 0)`,
+        totalCredit: sql<string>`COALESCE(SUM(${journalEntryLines.creditAmount}), 0)`,
       })
       .from(journalEntryLines)
       .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
       .where(and(
         eq(journalEntryLines.orgId, orgId),
+        inArray(journalEntryLines.accountId, allRelevantIds),
         gte(journalEntries.entryDate, fromDate),
         lte(journalEntries.entryDate, toDate),
-        inArray(journalEntryLines.accountId, expenseAccounts.map(a => a.id))
+        sql`${journalEntries.status} != 'draft'`,
       ))
       .groupBy(journalEntryLines.accountId) : [];
 
-    const incomeBreakdown = incomeAccounts.length > 0 ? await db
-      .select({
-        accountId: journalEntryLines.accountId,
-        totalCredit: sql<string>`SUM(${journalEntryLines.creditAmount})`,
-      })
-      .from(journalEntryLines)
-      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
-      .where(and(
-        eq(journalEntryLines.orgId, orgId),
-        gte(journalEntries.entryDate, fromDate),
-        lte(journalEntries.entryDate, toDate),
-        inArray(journalEntryLines.accountId, incomeAccounts.map(a => a.id))
-      ))
-      .groupBy(journalEntryLines.accountId) : [];
+    const accountMap = new Map(journalData.map(d => [d.accountId, d]));
 
-    const grossProfit = totalSales - totalCOGS;
-    const totalOperatingExpenses = totalExpenses;
-    const netProfit = grossProfit - totalOperatingExpenses;
+    let totalRevenue = 0;
+    let totalExpenses = 0;
+    const incomeBreakdown: { accountId: string; name: string; amount: number }[] = [];
+    const expenseBreakdown: { accountId: string; name: string; amount: number }[] = [];
+
+    for (const acc of incomeAccounts) {
+      const d = accountMap.get(acc.id);
+      const net = d ? (parseFloat(d.totalCredit) - parseFloat(d.totalDebit)) : 0;
+      if (Math.abs(net) > 0.01) {
+        incomeBreakdown.push({ accountId: acc.id, name: acc.name, amount: net });
+        totalRevenue += net;
+      }
+    }
+
+    for (const acc of expenseAccounts) {
+      const d = accountMap.get(acc.id);
+      const net = d ? (parseFloat(d.totalDebit) - parseFloat(d.totalCredit)) : 0;
+      if (Math.abs(net) > 0.01) {
+        expenseBreakdown.push({ accountId: acc.id, name: acc.name, amount: net });
+        totalExpenses += net;
+      }
+    }
 
     return {
       success: true,
       data: {
-        totalSales,
-        totalCOGS,
-        grossProfit,
-        totalOperatingExpenses,
-        netProfit,
+        totalRevenue,
+        totalExpenses,
+        grossProfit: totalRevenue - totalExpenses,
+        netProfit: totalRevenue - totalExpenses,
         expenseBreakdown,
         incomeBreakdown,
         incomeAccounts,
@@ -158,6 +118,7 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
       }
     };
   } catch (error) {
+    console.error("[getProfitAndLossReport]", error);
     return { success: false, error: "Failed to generate Profit & Loss report" };
   }
 }
@@ -338,7 +299,8 @@ export async function getBalanceSheetReport(asOfDate: string) {
       .where(and(
         inArray(journalEntryLines.accountId, allAccountIds),
         eq(journalEntryLines.orgId, orgId),
-        lte(journalEntries.entryDate, reportDate)
+        lte(journalEntries.entryDate, reportDate),
+        sql`${journalEntries.status} != 'draft'`,
       ))
       .groupBy(journalEntryLines.accountId) : [];
 
@@ -393,6 +355,7 @@ export async function getBalanceSheetReport(asOfDate: string) {
       }
     };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Balance Sheet" };
   }
 }
@@ -511,6 +474,7 @@ export async function getCustomerLedgerReport(
       }
     };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Customer Ledger" };
   }
 }
@@ -547,6 +511,7 @@ export async function getAuditTrail(
 
     return { success: true, data: logs };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to fetch audit trail" };
   }
 }
@@ -585,7 +550,8 @@ export async function getTrialBalanceReport(asOfDate: string) {
       .where(and(
         eq(journalEntryLines.orgId, orgId),
         inArray(journalEntryLines.accountId, accountIds),
-        lte(journalEntries.entryDate, reportDate)
+        lte(journalEntries.entryDate, reportDate),
+        sql`${journalEntries.status} != 'draft'`,
       ))
       .groupBy(journalEntryLines.accountId);
 
@@ -625,6 +591,7 @@ export async function getTrialBalanceReport(asOfDate: string) {
       }
     };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Trial Balance" };
   }
 }
@@ -663,6 +630,7 @@ const itemsWithValue = stockItems.map(item => {
 
     return { success: true, data: { items: itemsWithValue, totalValue } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Stock on Hand report" };
   }
 }
@@ -686,6 +654,7 @@ const lowStockItems = products_list.filter(p => {
     });
     return { success: true, data: lowStockItems };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Low Stock report" };
   }
 }
@@ -722,6 +691,7 @@ export async function getSalesByProductReport(dateFrom: string, dateTo: string) 
 
     return { success: true, data: salesData };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Sales by Product report" };
   }
 }
@@ -803,6 +773,7 @@ export async function getAgedReceivablesReport() {
 
     return { success: true, data: { customers: agedReceivables, totals } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Aged Receivables report" };
   }
 }
@@ -818,6 +789,7 @@ export async function getPayrollSummaryReport(month: number, year: number) {
     // Placeholder implementation
     return { success: true, data: { month, year, summary: "Payroll summary report" } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Payroll Summary" };
   }
 }
@@ -899,6 +871,7 @@ export async function getSalesTaxReport(dateFrom: string, dateTo: string) {
       }
     };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Sales Tax report" };
   }
 }
@@ -918,6 +891,7 @@ export async function getCustomers() {
 
     return { success: true, data: customersList };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to fetch customers" };
   }
 }
@@ -988,6 +962,7 @@ export async function getAgedPayablesReport() {
     const agedPayables = Array.from(vendorMap.values());
     return { success: true, data: agedPayables };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Aged Payables report" };
   }
 }
@@ -1017,6 +992,7 @@ export async function getVendorLedgerReport(vendorId: string, dateFrom: string, 
 
     return { success: true, data: { vendor, ledger, dateFrom, dateTo } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Vendor Ledger" };
   }
 }
@@ -1047,6 +1023,7 @@ export async function getPurchaseDetailsReport(dateFrom: string, dateTo: string)
 
     return { success: true, data: purchases };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Purchase Details report" };
   }
 }
@@ -1070,6 +1047,7 @@ export async function getPurchaseTaxReport(dateFrom: string, dateTo: string) {
 
     return { success: true, data: taxPaid };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Purchase Tax report" };
   }
 }
@@ -1109,6 +1087,7 @@ export async function getStockMovementReport(productId?: string, dateFrom?: stri
 
     return { success: true, data: movements };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Stock Movement report" };
   }
 }
@@ -1129,6 +1108,7 @@ export async function getProductLedgerReport(productId: string, dateFrom: string
 
     return { success: true, data: { product, movements } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Product Ledger" };
   }
 }
@@ -1151,6 +1131,7 @@ export async function getEmployeeLedgerReport(employeeId: string, month: number,
 
     return { success: true, data: { employee, payslips: employeePayslips } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Employee Ledger" };
   }
 }
@@ -1186,6 +1167,7 @@ export async function getAttendanceReport(month?: number, year?: number, employe
 
     return { success: true, data: records };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Attendance report" };
   }
 }
@@ -1224,6 +1206,7 @@ export async function getPayrollSummaryReportFull(month: number, year: number) {
 
     return { success: true, data: { payrollRun, payslips: payrollPayslips } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Payroll Summary" };
   }
 }
@@ -1265,6 +1248,7 @@ export async function getCallEngagementReport(dateFrom: string, dateTo: string) 
 
     return { success: true, data: { calls, stats } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Call Engagement report" };
   }
 }
@@ -1286,6 +1270,7 @@ export async function getLeadStatusSummaryReport() {
 
     return { success: true, data: { summary, totalLeads: allLeads.length } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Lead Status Summary" };
   }
 }
@@ -1308,6 +1293,7 @@ export async function getMonthCallInsightReport(month: number, year: number) {
 
     return { success: true, data: { calls, dailyBreakdown, totalCalls: calls.length } };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Month Call Insight" };
   }
 }
@@ -1341,6 +1327,7 @@ export async function getJobOrderProductionReport(status?: string) {
 
     return { success: true, data: jobOrdersData };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Job Order Production report" };
   }
 }
@@ -1371,6 +1358,7 @@ export async function getMaterialIssuanceReport(jobOrderId?: string) {
 
     return { success: true, data: materials };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Material Issuance report" };
   }
 }
@@ -1430,6 +1418,7 @@ export async function getBomCostReport() {
 
     return { success: true, data: bomCosts };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate BOM Cost report" };
   }
 }
@@ -1468,6 +1457,7 @@ export async function getCashFlowReport(dateFrom: string, dateTo: string) {
       }
     };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Cash Flow report" };
   }
 }
@@ -1501,6 +1491,7 @@ export async function getProductAgingReport() {
 
     return { success: true, data: aged };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate Product Aging report" };
   }
 }
@@ -1563,6 +1554,7 @@ export async function getWithholdingTaxReport(dateFrom: string, dateTo: string) 
       },
     };
   } catch (error) {
+    console.error("Error in reports.ts:", error);
     return { success: false, error: "Failed to generate WHT report" };
   }
 }
@@ -2635,4 +2627,357 @@ export async function getProductsList() {
   } catch {
     return { success: false, error: "Failed" };
   }
+}
+
+// ============= WHT Certificate & Statement =============
+
+export async function getWHTVendorStatement(vendorId: string, dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [org] = await db
+      .select({ name: organizations.name, ntn: organizations.ntn, strn: organizations.strn, address: organizations.address })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+
+    const [vendor] = await db
+      .select()
+      .from(vendors)
+      .where(and(eq(vendors.id, vendorId), eq(vendors.orgId, orgId)))
+      .limit(1);
+    if (!vendor) return { success: false, error: "Vendor not found" };
+
+    const fromDate = new Date(dateFrom);
+    const toDate = new Date(dateTo);
+    toDate.setHours(23, 59, 59, 999);
+
+    const payments = await db
+      .select()
+      .from(vendorPayments)
+      .where(
+        and(
+          eq(vendorPayments.orgId, orgId),
+          eq(vendorPayments.vendorId, vendorId),
+          gte(vendorPayments.paymentDate, fromDate),
+          lte(vendorPayments.paymentDate, toDate),
+          sql`COALESCE(${vendorPayments.whtAmount}, '0')::numeric > 0`,
+        ),
+      )
+      .orderBy(asc(vendorPayments.paymentDate));
+
+    const transactions = payments.map((p) => ({
+      id: p.id,
+      paymentNumber: p.paymentNumber,
+      paymentDate: p.paymentDate,
+      amount: parseFloat(p.amount || "0"),
+      whtAmount: parseFloat(p.whtAmount || "0"),
+      whtRate: parseFloat(p.whtRate || "0"),
+      reference: p.reference || "",
+    }));
+
+    const totalAmount = transactions.reduce((s, t) => s + t.amount, 0);
+    const totalWHT = transactions.reduce((s, t) => s + t.whtAmount, 0);
+
+    return {
+      success: true,
+      data: {
+        org: org ? { name: org.name, ntn: org.ntn, strn: org.strn, address: org.address } : null,
+        vendor: { id: vendor.id, name: vendor.name, ntn: vendor.ntn, strn: vendor.strn, address: vendor.address },
+        dateFrom, dateTo,
+        totalAmount, totalWHT,
+        transactions,
+      },
+    };
+  } catch (error) {
+    console.error("Error in reports.ts:", error);
+    return { success: false, error: "Failed to generate WHT statement" };
+  }
+}
+
+export async function getWHTAnnualReturn(year: number) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [org] = await db
+      .select({ name: organizations.name, ntn: organizations.ntn })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+
+    const fromDate = new Date(`${year}-01-01`);
+    const toDate = new Date(`${year}-12-31`);
+    toDate.setHours(23, 59, 59, 999);
+
+    const payments = await db
+      .select({
+        vendorId: vendorPayments.vendorId,
+        vendorName: vendors.name,
+        vendorNtn: vendors.ntn,
+        vendorStrn: vendors.strn,
+        paymentId: vendorPayments.id,
+        paymentNumber: vendorPayments.paymentNumber,
+        paymentDate: vendorPayments.paymentDate,
+        amount: vendorPayments.amount,
+        whtAmount: vendorPayments.whtAmount,
+        whtRate: vendorPayments.whtRate,
+      })
+      .from(vendorPayments)
+      .leftJoin(vendors, eq(vendorPayments.vendorId, vendors.id))
+      .where(
+        and(
+          eq(vendorPayments.orgId, orgId),
+          gte(vendorPayments.paymentDate, fromDate),
+          lte(vendorPayments.paymentDate, toDate),
+          sql`COALESCE(${vendorPayments.whtAmount}, '0')::numeric > 0`,
+        ),
+      )
+      .orderBy(asc(vendors.name), asc(vendorPayments.paymentDate));
+
+    const vendorMap = new Map<string, any>();
+    for (const p of payments) {
+      const vid = p.vendorId;
+      if (!vendorMap.has(vid)) {
+        vendorMap.set(vid, {
+          vendorName: p.vendorName,
+          vendorNtn: p.vendorNtn,
+          vendorStrn: p.vendorStrn,
+          q1: { amount: 0, wht: 0 },
+          q2: { amount: 0, wht: 0 },
+          q3: { amount: 0, wht: 0 },
+          q4: { amount: 0, wht: 0 },
+          totalAmount: 0,
+          totalWHT: 0,
+        });
+      }
+      const v = vendorMap.get(vid)!;
+      const month = new Date(p.paymentDate).getMonth();
+      const quarter = month < 3 ? "q1" : month < 6 ? "q2" : month < 9 ? "q3" : "q4";
+      const amt = parseFloat(p.amount || "0");
+      const wht = parseFloat(p.whtAmount || "0");
+      v[quarter].amount += amt;
+      v[quarter].wht += wht;
+      v.totalAmount += amt;
+      v.totalWHT += wht;
+    }
+
+    const vendorsList = Array.from(vendorMap.entries()).map(([id, data]) => ({ vendorId: id, ...data }));
+    const grandTotal = vendorsList.reduce((s, v) => s + v.totalWHT, 0);
+
+    return {
+      success: true,
+      data: {
+        org: org || null,
+        year,
+        vendors: vendorsList,
+        totalVendors: vendorsList.length,
+        grandTotalWHT: grandTotal,
+      },
+    };
+  } catch (error) {
+    console.error("Error in reports.ts:", error);
+    return { success: false, error: "Failed to generate annual WHT return" };
+  }
+}
+
+// ============= Cash Flow Statement =============
+
+const operatingSubTypes = new Set([
+  'accounts_receivable', 'inventory', 'tax_receivable', 'tax_receivable_srb',
+  'tax_receivable_pra', 'tax_receivable_kpra', 'tax_receivable_bra',
+  'accounts_payable', 'tax_payable', 'tax_payable_srb', 'tax_payable_pra',
+  'tax_payable_kpra', 'tax_payable_bra', 'wht_payable', 'income_tax_payable',
+  'salary_expense', 'salaries_payable', 'eobi_payable', 'prepaid_expenses',
+  'accrued_liabilities', 'accrued_expenses', 'deferred_revenue',
+  'other_current_asset', 'other_current_liability',
+]);
+
+const investingSubTypes = new Set([
+  'fixed_assets', 'accumulated_depreciation', 'intangible_assets',
+  'investments', 'capital_work_in_progress', 'other_non_current_asset',
+]);
+
+const financingSubTypes = new Set([
+  'capital', 'retained_earnings', 'long_term_loan', 'short_term_loan',
+  'dividends_payable', 'drawings', 'other_non_current_liability',
+  'partner_capital', 'partner_drawings',
+]);
+
+function classifyCashFlow(accountType: string, subType: string | null): 'operating' | 'investing' | 'financing' {
+  if (!subType) {
+    if (accountType === 'income' || accountType === 'expense') return 'operating';
+    return 'operating';
+  }
+  if (operatingSubTypes.has(subType)) return 'operating';
+  if (investingSubTypes.has(subType)) return 'investing';
+  if (financingSubTypes.has(subType)) return 'financing';
+  return 'operating';
+}
+
+export async function getCashFlowStatement(dateFrom: string, dateTo: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const fromDate = new Date(dateFrom);
+    const toDate = new Date(dateTo);
+
+    // Get net income for the period
+    const netIncome = await getNetIncomeForPeriod(orgId, fromDate, toDate);
+
+    // Get balance sheet changes
+    const prevBalances = await getAccountBalancesAsOf(orgId, new Date(fromDate.getTime() - 1));
+    const currBalances = await getAccountBalancesAsOf(orgId, toDate);
+
+    // Get all accounts
+    const accounts = await db
+      .select({ id: chartOfAccounts.id, name: chartOfAccounts.name, type: chartOfAccounts.type, subType: chartOfAccounts.subType })
+      .from(chartOfAccounts)
+      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.isActive, true)));
+
+    const accountMap = new Map(accounts.map(a => [a.id, a]));
+
+    // Calculate changes and classify
+    const changes: { accountName: string; amount: number; section: 'operating' | 'investing' | 'financing' }[] = [];
+    let operatingTotal = 0;
+    let investingTotal = 0;
+    let financingTotal = 0;
+
+    for (const account of accounts) {
+      const prev = prevBalances.get(account.id) || 0;
+      const curr = currBalances.get(account.id) || 0;
+      const change = curr - prev;
+      if (Math.abs(change) < 0.01) continue;
+
+      const section = classifyCashFlow(account.type, account.subType);
+      let signedChange = change;
+
+      // For asset accounts, an increase is a cash OUTFLOW (negative)
+      if (account.type === 'asset') signedChange = -change;
+
+      // For liability/equity, an increase is a cash INFLOW (positive)
+      // already handled by the sign convention
+
+      changes.push({ accountName: account.name, amount: signedChange, section });
+      if (section === 'operating') operatingTotal += signedChange;
+      else if (section === 'investing') investingTotal += signedChange;
+      else if (section === 'financing') financingTotal += signedChange;
+    }
+
+    // Add net income as operating activity starting point
+    const netCashOperating = operatingTotal + (netIncome || 0);
+
+    // Get cash balance change
+    const cashAccountIds = accounts
+      .filter(a => a.subType === 'cash' || a.subType === 'bank')
+      .map(a => a.id);
+    let cashChange = 0;
+    for (const id of cashAccountIds) {
+      const prev = prevBalances.get(id) || 0;
+      const curr = currBalances.get(id) || 0;
+      cashChange += curr - prev;
+    }
+
+    return {
+      success: true,
+      data: {
+        dateFrom,
+        dateTo,
+        netIncome: netIncome || 0,
+        operating: {
+          netIncome: netIncome || 0,
+          adjustments: changes.filter(c => c.section === 'operating'),
+          total: netCashOperating,
+        },
+        investing: {
+          items: changes.filter(c => c.section === 'investing'),
+          total: investingTotal,
+        },
+        financing: {
+          items: changes.filter(c => c.section === 'financing'),
+          total: financingTotal,
+        },
+        netCashChange: netCashOperating + investingTotal + financingTotal,
+        cashChange,
+      },
+    };
+  } catch (error) {
+    console.error("Error in reports.ts:", error);
+    return { success: false, error: "Failed to generate Cash Flow Statement" };
+  }
+}
+
+async function getNetIncomeForPeriod(orgId: string, fromDate: Date, toDate: Date): Promise<number | null> {
+  const incomeAccounts = await db
+    .select({ id: chartOfAccounts.id })
+    .from(chartOfAccounts)
+    .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.type, 'income')));
+
+  const expenseAccounts = await db
+    .select({ id: chartOfAccounts.id })
+    .from(chartOfAccounts)
+    .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.type, 'expense')));
+
+  const allIds = [...incomeAccounts.map(a => a.id), ...expenseAccounts.map(a => a.id)];
+  if (allIds.length === 0) return null;
+
+  const rows = await db
+    .select({
+      accountId: journalEntryLines.accountId,
+      totalDebit: sql<string>`coalesce(SUM(${journalEntryLines.debitAmount}), 0)`,
+      totalCredit: sql<string>`coalesce(SUM(${journalEntryLines.creditAmount}), 0)`,
+    })
+    .from(journalEntryLines)
+    .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+    .where(and(
+      inArray(journalEntryLines.accountId, allIds),
+      eq(journalEntryLines.orgId, orgId),
+      gte(journalEntries.entryDate, fromDate),
+      lte(journalEntries.entryDate, toDate),
+      sql`${journalEntries.status} != 'draft'`,
+    ))
+    .groupBy(journalEntryLines.accountId);
+
+  let totalIncome = 0;
+  let totalExpense = 0;
+  const incomeIdSet = new Set(incomeAccounts.map(a => a.id));
+
+  for (const row of rows) {
+    const credit = parseFloat(row.totalCredit);
+    const debit = parseFloat(row.totalDebit);
+    if (incomeIdSet.has(row.accountId)) {
+      totalIncome += credit - debit;
+    } else {
+      totalExpense += debit - credit;
+    }
+  }
+
+  return totalIncome - totalExpense;
+}
+
+async function getAccountBalancesAsOf(orgId: string, asOfDate: Date): Promise<Map<string, number>> {
+  const rows = await db
+    .select({
+      accountId: journalEntryLines.accountId,
+      totalDebit: sql<string>`coalesce(SUM(${journalEntryLines.debitAmount}), 0)`,
+      totalCredit: sql<string>`coalesce(SUM(${journalEntryLines.creditAmount}), 0)`,
+    })
+    .from(journalEntryLines)
+    .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+    .where(and(
+      eq(journalEntryLines.orgId, orgId),
+      lte(journalEntries.entryDate, asOfDate),
+      sql`${journalEntries.status} != 'draft'`,
+    ))
+    .groupBy(journalEntryLines.accountId);
+
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const debit = parseFloat(row.totalDebit);
+    const credit = parseFloat(row.totalCredit);
+    map.set(row.accountId, debit - credit);
+  }
+  return map;
 }

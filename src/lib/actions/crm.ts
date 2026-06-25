@@ -8,6 +8,7 @@ import {
   crmCalls,
   customers,
 } from "@/db/schema";
+import { createAuditLog } from "./audit";
 import { eq, and, or, ilike, desc, gte, lte, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
@@ -104,6 +105,7 @@ export async function getLeads(searchQuery?: string, statusFilter?: string) {
 
     return { success: true, data: leadsWithCustomer };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch leads" };
   }
 }
@@ -134,6 +136,7 @@ export async function getLeadById(leadId: string) {
 
     return { success: true, data: { ...lead, convertedCustomer } };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch lead" };
   }
 }
@@ -166,8 +169,10 @@ export async function createLead(data: LeadFormData) {
     revalidatePath('/crm/leads');
     revalidatePath('/crm');
 
+    await createAuditLog({ action: "LEAD_CREATED", entityType: "lead", entityId: newLead.id });
     return { success: true, data: newLead, message: "Lead created successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to create lead" };
   }
 }
@@ -178,7 +183,7 @@ export async function updateLead(leadId: string, data: Partial<LeadFormData>) {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.email !== undefined) updateData.email = data.email;
     if (data.phone !== undefined) updateData.phone = data.phone;
@@ -201,8 +206,10 @@ export async function updateLead(leadId: string, data: Partial<LeadFormData>) {
     revalidatePath('/crm/leads');
     revalidatePath('/crm');
 
+    await createAuditLog({ action: "LEAD_UPDATED", entityType: "lead", entityId: leadId });
     return { success: true, data: updatedLead, message: "Lead updated successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to update lead" };
   }
 }
@@ -219,8 +226,10 @@ export async function deleteLead(leadId: string) {
 
     revalidatePath('/crm/leads');
 
+    await createAuditLog({ action: "LEAD_DELETED", entityType: "lead", entityId: leadId });
     return { success: true, message: "Lead deleted successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to delete lead" };
   }
 }
@@ -269,8 +278,10 @@ export async function convertLeadToCustomer(leadId: string, customerData?: { add
     revalidatePath('/crm/leads');
     revalidatePath('/sales/customers');
 
+    await createAuditLog({ action: "LEAD_CONVERTED", entityType: "lead", entityId: leadId });
     return { success: true, data: { lead: updatedLead, customer: newCustomer }, message: "Lead converted to customer successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to convert lead to customer" };
   }
 }
@@ -292,8 +303,10 @@ export async function updateLeadStatus(leadId: string, status: 'new' | 'contacte
     revalidatePath('/crm/leads');
     revalidatePath('/crm');
 
+    await createAuditLog({ action: "LEAD_STATUS_UPDATED", entityType: "lead", entityId: leadId });
     return { success: true, data: updatedLead, message: "Lead status updated" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to update lead status" };
   }
 }
@@ -332,6 +345,7 @@ export async function getLeadStats() {
       data: { totalLeads, wonLeads, pipelineValue, wonThisMonth },
     };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch lead stats" };
   }
 }
@@ -414,6 +428,7 @@ export async function getTickets(searchQuery?: string, statusFilter?: string, pr
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch tickets" };
   }
 }
@@ -434,6 +449,7 @@ export async function getTicketById(ticketId: string) {
 
     return { success: true, data: ticket };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch ticket" };
   }
 }
@@ -467,8 +483,10 @@ export async function createTicket(data: TicketFormData) {
     revalidatePath('/crm/tickets');
     revalidatePath('/crm');
 
+    await createAuditLog({ action: "TICKET_CREATED", entityType: "ticket", entityId: newTicket.id });
     return { success: true, data: newTicket, message: "Ticket created successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to create ticket" };
   }
 }
@@ -479,7 +497,7 @@ export async function updateTicket(ticketId: string, data: Partial<TicketFormDat
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, unknown> = {};
     if (data.subject !== undefined) updateData.subject = data.subject;
     if (data.description !== undefined) updateData.description = data.description;
     if (data.priority !== undefined) updateData.priority = data.priority;
@@ -498,8 +516,10 @@ export async function updateTicket(ticketId: string, data: Partial<TicketFormDat
 
     revalidatePath('/crm/tickets');
 
+    await createAuditLog({ action: "TICKET_UPDATED", entityType: "ticket", entityId: ticketId });
     return { success: true, data: updatedTicket, message: "Ticket updated successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to update ticket" };
   }
 }
@@ -516,8 +536,10 @@ export async function deleteTicket(ticketId: string) {
 
     revalidatePath('/crm/tickets');
 
+    await createAuditLog({ action: "TICKET_DELETED", entityType: "ticket", entityId: ticketId });
     return { success: true, message: "Ticket deleted successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to delete ticket" };
   }
 }
@@ -544,8 +566,10 @@ export async function resolveTicket(ticketId: string) {
 
     revalidatePath('/crm/tickets');
 
+    await createAuditLog({ action: "TICKET_RESOLVED", entityType: "ticket", entityId: ticketId });
     return { success: true, data: updatedTicket, message: "Ticket resolved successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to resolve ticket" };
   }
 }
@@ -589,6 +613,7 @@ export async function getTicketStats() {
       data: { openTickets, resolvedToday, avgResolutionHours, totalTickets: allTickets.length },
     };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch ticket stats" };
   }
 }
@@ -676,6 +701,7 @@ export async function getCrmEvents(searchQuery?: string, typeFilter?: string, st
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch events" };
   }
 }
@@ -696,6 +722,7 @@ export async function getCrmEventById(eventId: string) {
 
     return { success: true, data: event };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch event" };
   }
 }
@@ -731,8 +758,10 @@ export async function createCrmEvent(data: CrmEventFormData) {
     revalidatePath('/crm/events');
     revalidatePath('/crm');
 
+    await createAuditLog({ action: "EVENT_CREATED", entityType: "event", entityId: newEvent.id });
     return { success: true, data: newEvent, message: "Event created successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to create event" };
   }
 }
@@ -743,7 +772,7 @@ export async function updateCrmEvent(eventId: string, data: Partial<CrmEventForm
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, unknown> = {};
     if (data.title !== undefined) updateData.title = data.title;
     if (data.eventType !== undefined) updateData.eventType = data.eventType;
     if (data.customerId !== undefined) updateData.customerId = data.customerId;
@@ -765,8 +794,10 @@ export async function updateCrmEvent(eventId: string, data: Partial<CrmEventForm
 
     revalidatePath('/crm/events');
 
+    await createAuditLog({ action: "EVENT_UPDATED", entityType: "event", entityId: eventId });
     return { success: true, data: updatedEvent, message: "Event updated successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to update event" };
   }
 }
@@ -783,8 +814,10 @@ export async function deleteCrmEvent(eventId: string) {
 
     revalidatePath('/crm/events');
 
+    await createAuditLog({ action: "EVENT_DELETED", entityType: "event", entityId: eventId });
     return { success: true, message: "Event deleted successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to delete event" };
   }
 }
@@ -868,6 +901,7 @@ export async function getCrmCalls(searchQuery?: string, typeFilter?: string, out
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch calls" };
   }
 }
@@ -888,6 +922,7 @@ export async function getCrmCallById(callId: string) {
 
     return { success: true, data: call };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch call" };
   }
 }
@@ -921,8 +956,10 @@ export async function createCrmCall(data: CrmCallFormData) {
     revalidatePath('/crm/calls');
     revalidatePath('/crm');
 
+    await createAuditLog({ action: "CALL_CREATED", entityType: "call", entityId: newCall.id });
     return { success: true, data: newCall, message: "Call logged successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to log call" };
   }
 }
@@ -933,7 +970,7 @@ export async function updateCrmCall(callId: string, data: Partial<CrmCallFormDat
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, unknown> = {};
     if (data.customerId !== undefined) updateData.customerId = data.customerId;
     if (data.leadId !== undefined) updateData.leadId = data.leadId;
     if (data.callType !== undefined) updateData.callType = data.callType;
@@ -953,8 +990,10 @@ export async function updateCrmCall(callId: string, data: Partial<CrmCallFormDat
 
     revalidatePath('/crm/calls');
 
+    await createAuditLog({ action: "CALL_UPDATED", entityType: "call", entityId: callId });
     return { success: true, data: updatedCall, message: "Call updated successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to update call" };
   }
 }
@@ -971,8 +1010,10 @@ export async function deleteCrmCall(callId: string) {
 
     revalidatePath('/crm/calls');
 
+    await createAuditLog({ action: "CALL_DELETED", entityType: "call", entityId: callId });
     return { success: true, message: "Call deleted successfully" };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to delete call" };
   }
 }
@@ -1012,6 +1053,7 @@ export async function getCallStats() {
       data: { totalCallsToday, avgDuration, connectedRate },
     };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch call stats" };
   }
 }
@@ -1032,6 +1074,7 @@ export async function getCustomersForDropdown() {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch customers" };
   }
 }
@@ -1050,6 +1093,7 @@ export async function getLeadsForDropdown() {
 
     return { success: true, data: result };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch leads" };
   }
 }
@@ -1178,6 +1222,7 @@ export async function getCrmDashboardData(): Promise<{ success: boolean; data?: 
       },
     };
   } catch (error) {
+    console.error("Error in crm.ts:", error);
     return { success: false, error: "Failed to fetch CRM dashboard data" };
   }
 }

@@ -51,6 +51,7 @@ export async function getBankStatements(bankAccountId: string) {
 
     return { success: true, data: statements };
   } catch (error) {
+    console.error("Error in bank-reconciliation.ts:", error);
     return { success: false, error: "Failed to fetch bank statements" };
   }
 }
@@ -93,6 +94,7 @@ export async function createBankStatement(data: {
     revalidatePath("/accounts/reconciliation");
     return { success: true, data: statement, message: "Bank statement saved" };
   } catch (error) {
+    console.error("Error in bank-reconciliation.ts:", error);
     return { success: false, error: "Failed to create bank statement" };
   }
 }
@@ -166,6 +168,7 @@ export async function parseBankStatementCSV(csvContent: string, bankAccountId: s
 
     return { success: true, data: parsed };
   } catch (error) {
+    console.error("Error in bank-reconciliation.ts:", error);
     return { success: false, error: "Failed to parse CSV" };
   }
 }
@@ -259,6 +262,7 @@ export async function autoMatchTransactions(
 
     return { success: true, data: matched, systemTransactions };
   } catch (error) {
+    console.error("Error in bank-reconciliation.ts:", error);
     return { success: false, error: "Failed to auto-match transactions" };
   }
 }
@@ -281,6 +285,7 @@ export async function saveMatchResult(
     revalidatePath("/accounts/reconciliation");
     return { success: true, data: statement, message: "Match results saved" };
   } catch (error) {
+    console.error("Error in bank-reconciliation.ts:", error);
     return { success: false, error: "Failed to save match results" };
   }
 }
@@ -297,6 +302,7 @@ export async function deleteBankStatement(id: string) {
     revalidatePath("/accounts/reconciliation");
     return { success: true, message: "Bank statement deleted" };
   } catch (error) {
+    console.error("Error in bank-reconciliation.ts:", error);
     return { success: false, error: "Failed to delete bank statement" };
   }
 }

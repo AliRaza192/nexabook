@@ -25,6 +25,7 @@ export async function getPriceLists() {
 
     return { success: true, data: lists };
   } catch (error) {
+    console.error("Error in price-lists.ts:", error);
     return { success: false, error: "Failed to load price lists" };
   }
 }
@@ -38,6 +39,7 @@ export async function createPriceList(data: { name: string; type: string }) {
     revalidatePath("/inventory/price-lists");
     return { success: true };
   } catch (error) {
+    console.error("Error in price-lists.ts:", error);
     return { success: false, error: "Failed to create price list" };
   }
 }
@@ -68,6 +70,7 @@ export async function getPriceListItems(priceListId: string) {
 
     return { success: true, data: items };
   } catch (error) {
+    console.error("Error in price-lists.ts:", error);
     return { success: false, error: "Failed to load price list items" };
   }
 }
@@ -109,6 +112,7 @@ export async function setPriceListItem(data: {
     revalidatePath("/inventory/price-lists");
     return { success: true };
   } catch (error) {
+    console.error("Error in price-lists.ts:", error);
     return { success: false, error: "Failed to set price" };
   }
 }
@@ -126,6 +130,7 @@ export async function assignPriceList(customerId: string, priceListId: string | 
     revalidatePath("/sales/customers");
     return { success: true };
   } catch (error) {
+    console.error("Error in price-lists.ts:", error);
     return { success: false, error: "Failed to assign price list" };
   }
 }

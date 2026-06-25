@@ -36,6 +36,45 @@
   }
 }
 
+/* Mobile Responsive Utilities */
+@layer utilities {
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+
+  .text-responsive {
+    @apply text-sm sm:text-base;
+  }
+
+  .stack-on-mobile {
+    @apply flex-col sm:flex-row;
+  }
+
+  .hidden-on-mobile {
+    @apply hidden sm:inline;
+  }
+
+  .show-on-mobile {
+    @apply inline sm:hidden;
+  }
+
+  .responsive-grid {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4;
+  }
+
+  .responsive-gap {
+    @apply gap-2 sm:gap-3 lg:gap-4;
+  }
+
+  .card-stack {
+    @apply sm:hidden space-y-3;
+  }
+
+  .table-desktop {
+    @apply hidden sm:table;
+  }
+}
+
 /* Global Enterprise Theme Utilities */
 @layer components {
   /* Cards */
@@ -82,22 +121,22 @@
 }
 
 /* RTL Support */
-[dir="rtl"] .lg\\:ml-72 {
+[dir="rtl"] .lg\:ml-72 {
   margin-left: 0;
   margin-right: 18rem;
 }
 
-[dir="rtl"] .lg\\:ml-20 {
+[dir="rtl"] .lg\:ml-20 {
   margin-left: 0;
   margin-right: 5rem;
 }
 
-[dir="rtl"] .lg\\:mr-72 {
+[dir="rtl"] .lg\:mr-72 {
   margin-right: 0;
   margin-left: 18rem;
 }
 
-[dir="rtl"] .lg\\:mr-20 {
+[dir="rtl"] .lg\:mr-20 {
   margin-right: 0;
   margin-left: 5rem;
 }

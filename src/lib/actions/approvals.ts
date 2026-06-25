@@ -5,6 +5,7 @@ import { approvalWorkflows, approvalRequests, profiles } from "@/db/schema";
 import { eq, and, sql, or } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
+import { createAuditLog } from "./audit";
 import { revalidatePath } from "next/cache";
 
 export async function getWorkflows() {
@@ -18,6 +19,7 @@ export async function getWorkflows() {
       .orderBy(approvalWorkflows.entityType, approvalWorkflows.orderIndex);
     return { success: true, data: rows };
   } catch (error) {
+    console.error("Error in approvals.ts:", error);
     return { success: false, error: "Failed to load workflows" };
   }
 }
@@ -29,10 +31,12 @@ export async function createWorkflow(data: {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    await db.insert(approvalWorkflows).values({ orgId, ...data, maxAmount: data.maxAmount || undefined });
+    const [workflow] = await db.insert(approvalWorkflows).values({ orgId, ...data, maxAmount: data.maxAmount || undefined }).returning();
     revalidatePath("/settings/approvals");
+    await createAuditLog({ action: "WORKFLOW_CREATED", entityType: "workflow", entityId: workflow.id });
     return { success: true };
   } catch (error) {
+    console.error("Error in approvals.ts:", error);
     return { success: false, error: "Failed to create workflow" };
   }
 }
@@ -42,8 +46,10 @@ export async function deleteWorkflow(id: string) {
     await requireRole(["admin"]);
     await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, id));
     revalidatePath("/settings/approvals");
+    await createAuditLog({ action: "WORKFLOW_DELETED", entityType: "workflow", entityId: id });
     return { success: true };
   } catch (error) {
+    console.error("Error in approvals.ts:", error);
     return { success: false, error: "Failed to delete workflow" };
   }
 }
@@ -87,8 +93,10 @@ export async function submitForApproval(data: {
     });
 
     revalidatePath("/approvals");
+    await createAuditLog({ action: "APPROVAL_SUBMITTED", entityType: data.entityType, entityId: data.entityId });
     return { success: true };
   } catch (error) {
+    console.error("Error in approvals.ts:", error);
     return { success: false, error: "Failed to submit for approval" };
   }
 }
@@ -139,6 +147,7 @@ export async function getPendingApprovals() {
 
     return { success: true, data: requests };
   } catch (error) {
+    console.error("Error in approvals.ts:", error);
     return { success: false, error: "Failed to load approvals" };
   }
 }
@@ -153,8 +162,10 @@ export async function approveRequest(id: string, comment?: string) {
       .where(eq(approvalRequests.id, id));
 
     revalidatePath("/approvals");
+    await createAuditLog({ action: "APPROVAL_APPROVED", entityType: "approval", entityId: id });
     return { success: true };
   } catch (error) {
+    console.error("Error in approvals.ts:", error);
     return { success: false, error: "Failed to approve" };
   }
 }
@@ -169,8 +180,10 @@ export async function rejectRequest(id: string, comment?: string) {
       .where(eq(approvalRequests.id, id));
 
     revalidatePath("/approvals");
+    await createAuditLog({ action: "APPROVAL_REJECTED", entityType: "approval", entityId: id });
     return { success: true };
   } catch (error) {
+    console.error("Error in approvals.ts:", error);
     return { success: false, error: "Failed to reject" };
   }
 }

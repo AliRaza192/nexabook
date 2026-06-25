@@ -376,6 +376,7 @@ const cashAccounts = await db
       }
     };
   } catch (error) {
+    console.error("Error in dashboard.ts:", error);
     return { success: false, error: "Failed to fetch dashboard data" };
   }
 }
