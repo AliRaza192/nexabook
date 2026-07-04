@@ -1,0 +1,761 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import {
+  FileText,
+  Plus,
+  Trash2,
+  Loader2,
+  ArrowLeft,
+  Calculator,
+  Save,
+  Check,
+  X,
+  Printer,
+  ChevronDown,
+  Paperclip,
+  RefreshCw,
+  Calendar,
+  Search,
+  ArrowUpDown,
+  Download,
+  MessageCircle,
+} from "lucide-react";
+import Link from "next/link";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  getCustomers,
+  createInvoice,
+  approveInvoice,
+  getNextInvoiceNumber,
+  getCashBankAccounts,
+  type InvoiceFormData,
+  type InvoiceLineItem,
+} from "@/lib/actions/sales";
+import {
+  getProducts,
+  getUoms,
+  getWarehouses,
+  getAvailableBatches,
+} from "@/lib/actions/inventory";
+import { downloadInvoicePDF, InvoicePDFData } from "@/lib/utils/invoice-pdf";
+import { getInvoiceWithDetails } from "@/lib/actions/sales";
+import { getCompanySettings } from "@/lib/actions/accounts";
+import { generateFBRQRCode, isFBREligible } from "@/lib/utils/fbr-qr";
+import { Shield, ShieldCheck, QrCode, Box, Warehouse } from "lucide-react";
+import { formatPKR } from "@/lib/utils/number-format";
+import SmartSuggestions from "@/components/smart-invoicing/smart-suggestions";
+import type { SmartDefaults } from "@/lib/actions/smart-invoice";
+
+interface Customer {
+  id: string;
+  name: string;
+  phone?: string | null;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  salePrice: string | null;
+  currentStock: number | null;
+  taxRate: string | null;
+  unit: string | null;
+  baseUomId: string | null;
+  saleUomId: string | null;
+  description: string | null;
+  isBatchTracked: boolean;
+}
+
+interface Uom {
+  id: string;
+  name: string;
+}
+
+interface Warehouse {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+interface CashBankAccount {
+  id: string;
+  code: string;
+  name: string;
+}
+
+// Line Item Row
+function LineItemRow({
+  index,
+  item,
+  products,
+  uoms,
+  warehouseId,
+  onUpdate,
+  onRemove,
+  onCheck,
+  isChecked,
+  canRemove,
+  onKeyDown,
+  lineAmount,
+}: {
+  index: number;
+  item: InvoiceLineItem;
+  products: Product[];
+  uoms: Uom[];
+  warehouseId: string;
+  onUpdate: (index: number, field: keyof InvoiceLineItem, value: string) => void;
+  onRemove: (index: number) => void;
+  onCheck: (index: number) => void;
+  isChecked: boolean;
+  canRemove: boolean;
+  onKeyDown: (e: React.KeyboardEvent, index: number) => void;
+  lineAmount: number;
+}) {
+  const [availableBatches, setAvailableBatches] = useState<any[]>([]);
+  const [fetchingBatches, setFetchingBatches] = useState(false);
+
+  const handleProductSelect = (productId: string) => {
+    const product = products.find((p) => p.id === productId);
+    if (product) {
+      onUpdate(index, "productId", productId);
+      onUpdate(index, "description", product.description || product.name);
+      onUpdate(index, "unitPrice", product.salePrice || "0");
+      onUpdate(index, "quantity", "1"); // Default quantity = 1
+      if (product.taxRate) {
+        onUpdate(index, "taxRate", product.taxRate);
+      }
+      // Set default UOM (saleUomId if exists, otherwise baseUomId)
+      const defaultUomId = product.saleUomId || product.baseUomId || "";
+      onUpdate(index, "uomId", defaultUomId);
+      onUpdate(index, "batchId", ""); // Reset batch
+    }
+  };
+
+  useEffect(() => {
+    if (item.productId && warehouseId && products.find(p => p.id === item.productId)?.isBatchTracked) {
+      setFetchingBatches(true);
+      getAvailableBatches(item.productId, warehouseId)
+        .then(res => {
+          if (res.success && res.data) {
+            setAvailableBatches(res.data);
+          }
+        })
+        .finally(() => setFetchingBatches(false));
+    } else {
+      setAvailableBatches([]);
+    }
+  }, [item.productId, warehouseId, products]);
+
+  return (
+    <div className="grid grid-cols-12 gap-2 py-2 px-2 border-b border-gray-200 hover:bg-blue-50/30 transition-colors group">
+      {/* Product - 3 cols */}
+      <div className="col-span-3">
+        <Select value={item.productId || ""} onValueChange={handleProductSelect} disabled={isChecked}>
+          <SelectTrigger className="h-8 text-xs border-gray-300">
+            <SelectValue placeholder="Select product" />
+          </SelectTrigger>
+          <SelectContent>
+            {products.filter((p) => (p.currentStock || 0) > 0).map((product) => (
+              <SelectItem key={product.id} value={product.id} className="text-xs">
+                <div>
+                  <div className="font-medium">{product.name}</div>
+                  <div className="text-xs text-gray-500">{product.sku} • Stock: {product.currentStock}</div>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        
+        {item.productId && (
+          <div className="mt-1 space-y-1">
+            <Textarea
+              value={item.description}
+              onChange={(e) => onUpdate(index, "description", e.target.value)}
+              placeholder="Item description..."
+              disabled={isChecked}
+              className="h-10 text-[11px] resize-none border-gray-300 py-1"
+              onKeyDown={(e) => onKeyDown(e, index)}
+            />
+            
+            {products.find(p => p.id === item.productId)?.isBatchTracked && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] font-bold text-blue-700 uppercase px-1">Select Batch *</span>
+                <Select 
+                  value={item.batchId || ""} 
+                  onValueChange={(val) => onUpdate(index, "batchId", val)}
+                  disabled={isChecked || !warehouseId}
+                >
+                  <SelectTrigger className="h-7 text-[10px] border-blue-200 bg-blue-50/30">
+                    <SelectValue placeholder={fetchingBatches ? "Loading..." : "Select batch"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableBatches.length === 0 ? (
+                      <div className="p-2 text-[10px] text-gray-500 italic">No batches available in this warehouse</div>
+                    ) : (
+                      availableBatches.map((batch) => (
+                        <SelectItem key={batch.id} value={batch.id} className="text-[10px]">
+                          <div className="flex justify-between w-full gap-4">
+                            <span className="font-medium">{batch.batchNo}</span>
+                            <span className="text-gray-500">
+                              Exp: {batch.expiryDate ? new Date(batch.expiryDate).toLocaleDateString() : 'N/A'} • Qty: {batch.currentQty}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* UOM - 1 col */}
+      <div className="col-span-1 flex items-center">
+        <Select
+          value={item.uomId || ""}
+          onValueChange={(val) => onUpdate(index, "uomId", val)}
+          disabled={isChecked || !item.productId}
+        >
+          <SelectTrigger className="h-8 text-xs border-gray-300 px-1">
+            <SelectValue placeholder="Unit" />
+          </SelectTrigger>
+          <SelectContent>
+            {uoms.map((uom) => (
+              <SelectItem key={uom.id} value={uom.id} className="text-xs px-1">
+                {uom.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Quantity - 1 col */}
+      <div className="col-span-1 flex items-center">
+        <Input type="number" min="0" step="1" value={item.quantity} onChange={(e) => onUpdate(index, "quantity", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs" placeholder="0" />
+      </div>
+
+      {/* Price - 2 cols */}
+      <div className="col-span-2 flex items-center">
+        <Input type="number" min="0" step="0.01" value={item.unitPrice} onChange={(e) => onUpdate(index, "unitPrice", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs" placeholder="0" />
+      </div>
+
+      {/* Discount - 1 col */}
+      <div className="col-span-1 flex items-center gap-1">
+        <Input type="number" min="0" max="100" step="0.1" value={item.discountPercentage || "0"} onChange={(e) => onUpdate(index, "discountPercentage", e.target.value)} onKeyDown={(ev) => onKeyDown(ev, index)} disabled={isChecked} className="h-8 text-xs flex-1" placeholder="%" />
+      </div>
+
+      {/* Amount - 2 cols */}
+      <div className="col-span-2 flex items-center">
+        <div className="h-8 px-2 flex items-center bg-gray-50 rounded border border-gray-200 w-full">
+          <span className="text-xs font-semibold text-gray-900">Rs. {lineAmount.toFixed(2)}</span>
+        </div>
+      </div>
+
+      {/* Actions - 2 cols */}
+      <div className="col-span-2 flex items-center justify-center gap-1">
+        {!isChecked ? (
+          <Button variant="ghost" size="sm" onClick={() => onCheck(index)} className="h-7 w-7 p-0 text-green-600 hover:bg-green-50 opacity-0 group-hover:opacity-100 transition-opacity" title="Lock"><Check className="h-3.5 w-3.5" /></Button>
+        ) : (
+          <Badge className="h-7 text-xs bg-green-100 text-green-700 border-green-200"><Check className="h-3 w-3 mr-1" />Locked</Badge>
+        )}
+        {canRemove && (
+          <Button variant="ghost" size="sm" onClick={() => onRemove(index)} className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity" title="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Main Invoice Page
+export default function NewInvoicePage() {
+  const router = useRouter();
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [uoms, setUoms] = useState<Uom[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [cashBankAccounts, setCashBankAccounts] = useState<CashBankAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Form state
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [customerId, setCustomerId] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
+  const [issueDate, setIssueDate] = useState(new Date().toISOString().split("T")[0]);
+  const [dueDate, setDueDate] = useState(new Date().toISOString().split("T")[0]);
+  const [reference, setReference] = useState("");
+  const [orderBooker, setOrderBooker] = useState("");
+  const [subject, setSubject] = useState("");
+  const [comments, setComments] = useState("");
+  const [shippingCharges, setShippingCharges] = useState("0");
+  const [roundOff, setRoundOff] = useState("0");
+  const [cashBankAccountId, setCashBankAccountId] = useState("");
+  const [receivedAmount, setReceivedAmount] = useState("0");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [globalDiscountPct, setGlobalDiscountPct] = useState("0");
+  const [globalDiscountAmt, setGlobalDiscountAmt] = useState("0");
+
+  // Organization & QR code state
+  const [orgData, setOrgData] = useState<{ ntn: string | null; strn: string | null }>({ ntn: null, strn: null });
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+  const [qrLoading, setQrLoading] = useState(false);
+
+  // Line items
+  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
+    { productId: "", uomId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" },
+  ]);
+  const [checkedRows, setCheckedRows] = useState<Set<number>>(new Set());
+
+  // Load data
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [customersRes, productsRes, invoiceNumRes, cashBankRes, orgRes, uomsRes, warehousesRes] = await Promise.all([
+          getCustomers(), getProducts(), getNextInvoiceNumber(), getCashBankAccounts(), getCompanySettings(), getUoms(), getWarehouses(),
+        ]);
+        if (customersRes.success && customersRes.data) setCustomers(customersRes.data as Customer[]);
+        if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
+        if (uomsRes.success && uomsRes.data) setUoms(uomsRes.data as Uom[]);
+        if (warehousesRes.success && warehousesRes.data) {
+          const whs = warehousesRes.data as Warehouse[];
+          setWarehouses(whs);
+          const defaultWh = whs.find(w => w.isDefault);
+          if (defaultWh) setWarehouseId(defaultWh.id);
+          else if (whs.length > 0) setWarehouseId(whs[0].id);
+        }
+        if (invoiceNumRes.success && invoiceNumRes.data) setInvoiceNumber(invoiceNumRes.data as string);
+        if (cashBankRes.success && cashBankRes.data) setCashBankAccounts(cashBankRes.data as CashBankAccount[]);
+        if (orgRes.success && orgRes.data) {
+          const org = orgRes.data as any;
+          setOrgData({ ntn: org.ntn || null, strn: org.strn || null });
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  const updateLineItem = useCallback((index: number, field: keyof InvoiceLineItem, value: string) => {
+    const updated = [...lineItems];
+    updated[index] = { ...updated[index], [field]: value };
+    setLineItems(updated);
+  }, [lineItems]);
+
+  const removeLineItem = (index: number) => {
+    setLineItems(lineItems.filter((_, i) => i !== index));
+    const nc = new Set(checkedRows); nc.delete(index); setCheckedRows(nc);
+  };
+
+  const addLineItem = () => {
+    setLineItems([...lineItems, { productId: "", uomId: "", description: "", quantity: "0", unitPrice: "0", discountPercentage: "0", taxRate: "0", lineTotal: "0" }]);
+  };
+
+  const checkRow = (index: number) => {
+    const nc = new Set(checkedRows); nc.add(index); setCheckedRows(nc);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (index === lineItems.length - 1) addLineItem();
+    }
+  };
+
+  // Line calculations
+  const lineAmounts = lineItems.map((item) => {
+    const qty = parseFloat(item.quantity || "0");
+    const price = parseFloat(item.unitPrice || "0");
+    const discPct = parseFloat(item.discountPercentage || "0");
+    const subtotal = qty * price;
+    return subtotal - (subtotal * discPct / 100);
+  });
+
+  const grossAmount = lineAmounts.reduce((sum, amt) => sum + amt, 0);
+
+  const taxAmounts = lineItems.map((item, idx) => {
+    const afterDisc = lineAmounts[idx];
+    const taxRate = parseFloat(item.taxRate || "0");
+    return afterDisc * (taxRate / 100);
+  });
+
+  const totalTax = taxAmounts.reduce((sum, amt) => sum + amt, 0);
+
+  // Global discount
+  const globalDiscPct = parseFloat(globalDiscountPct || "0");
+  const globalDiscAmt = parseFloat(globalDiscountAmt || "0");
+  const effectiveGlobalDisc = globalDiscAmt > 0 ? globalDiscAmt : (grossAmount * globalDiscPct / 100);
+
+  const shipping = parseFloat(shippingCharges || "0");
+  const roundOffVal = parseFloat(roundOff || "0");
+  const netBeforeRound = grossAmount - effectiveGlobalDisc + totalTax + shipping;
+  const netAmount = Math.round(netBeforeRound + roundOffVal);
+  const received = parseFloat(receivedAmount || "0");
+  const balance = netAmount - received;
+
+  // Smart Invoice callbacks
+  const handleApplyDefaults = useCallback((defaults: SmartDefaults) => {
+    if (defaults.suggestedDueDate) setDueDate(defaults.suggestedDueDate);
+    if (defaults.suggestedOrderBooker) setOrderBooker(defaults.suggestedOrderBooker);
+    if (defaults.suggestedWarehouseId) setWarehouseId(defaults.suggestedWarehouseId);
+  }, []);
+
+  const handleApplyPrice = useCallback((lineIndex: number, price: string) => {
+    setLineItems((prev) =>
+      prev.map((item, i) =>
+        i === lineIndex ? { ...item, unitPrice: price } : item
+      )
+    );
+  }, []);
+
+  const formatCurrency = (value: number) => {
+    return formatPKR(value, 'south-asian');
+  };
+
+  // Generate QR code when org data or invoice details change
+  useEffect(() => {
+    if (isFBREligible(orgData) && netAmount > 0) {
+      setQrLoading(true);
+      generateFBRQRCode({
+        ntn: orgData.ntn!,
+        strn: orgData.strn!,
+        invoiceNumber: invoiceNumber || "PENDING",
+        invoiceDate: new Date(issueDate),
+        totalAmount: netAmount,
+        taxAmount: totalTax,
+      }, { size: 120 })
+        .then((dataUrl) => {
+          setQrCodeDataUrl(dataUrl);
+          setQrLoading(false);
+        })
+        .catch((error) => {
+          console.error("Failed to generate QR code:", error);
+          setQrLoading(false);
+        });
+    } else {
+      setQrCodeDataUrl("");
+    }
+  }, [orgData, invoiceNumber, issueDate, netAmount, totalTax]);
+
+  const handleSave = async (action: "continue" | "close" | "approve" | "approve-print" | "approve-download") => {
+    if (!customerId) { alert("Please select a customer"); return; }
+    if (lineItems.some((item) => !item.productId || parseFloat(item.unitPrice) <= 0)) { alert("Please select products and enter valid prices"); return; }
+    setSubmitting(true);
+    try {
+      const data: InvoiceFormData = {
+        customerId, warehouseId: warehouseId || undefined, invoiceNumber, orderBooker, subject, reference,
+        issueDate: new Date(issueDate), dueDate: dueDate ? new Date(dueDate) : undefined,
+        grossAmount: grossAmount.toFixed(2), discountPercentage: globalDiscPct.toFixed(2),
+        discountAmount: effectiveGlobalDisc.toFixed(2), taxAmount: totalTax.toFixed(2),
+        shippingCharges: shipping.toFixed(2), roundOff: roundOffVal.toFixed(2),
+        netAmount: netAmount.toFixed(2), receivedAmount: received.toFixed(2),
+        balanceAmount: balance.toFixed(2), cashBankAccountId: cashBankAccountId || undefined,
+        notes: comments || undefined, terms: "", items: lineItems,
+      };
+      const result = await createInvoice(data);
+      if (result.success && result.data) {
+        const id = (result.data as any).id;
+        if (action === "approve" || action === "approve-print" || action === "approve-download") {
+          const ar = await approveInvoice(id);
+          if (!ar.success) { alert(`Created but approval failed: ${(ar as any).error}`); router.push("/sales/invoices"); return; }
+        }
+        if (action === "approve-print") {
+          window.print();
+          router.push("/sales/invoices");
+        } else if (action === "approve-download") {
+          // Download PDF with full details
+          const invoiceResult = await getInvoiceWithDetails(id);
+          if (invoiceResult.success && invoiceResult.data) {
+            const invData = invoiceResult.data;
+            const pdfData: InvoicePDFData = {
+              orgName: invData.orgName,
+              orgNtn: invData.orgNtn,
+              orgStrn: invData.orgStrn,
+              orgAddress: invData.orgAddress,
+              orgCity: invData.orgCity,
+              orgCountry: invData.orgCountry,
+              orgPhone: invData.orgPhone,
+              orgEmail: invData.orgEmail,
+              orgLogo: invData.orgLogo,
+              invoiceNumber: invData.invoiceNumber,
+              invoiceSubject: invData.subject,
+              invoiceReference: invData.reference,
+              issueDate: invData.issueDate,
+              dueDate: invData.dueDate,
+              status: invData.status,
+              customerName: invData.customerName,
+              customerNtn: invData.customerNtn,
+              customerAddress: invData.customerAddress,
+              customerCity: invData.customerCity,
+              customerPhone: invData.customerPhone,
+              items: invData.items.map(item => ({
+                ...item,
+                productName: item.productName || undefined,
+              })),
+              grossAmount: invData.grossAmount,
+              discountAmount: invData.discountAmount,
+              discountPercentage: invData.discountPercentage,
+              taxAmount: invData.taxAmount,
+              shippingCharges: invData.shippingCharges,
+              roundOff: invData.roundOff,
+              netAmount: invData.netAmount,
+              receivedAmount: invData.receivedAmount,
+              balanceAmount: invData.balanceAmount,
+              notes: invData.notes,
+              orderBooker: invData.orderBooker,
+            };
+            await downloadInvoicePDF(pdfData);
+          }
+          router.push("/sales/invoices");
+        } else if (action === "close" || action === "approve") {
+          router.push("/sales/invoices");
+        } else {
+          alert(`Invoice ${result.invoiceNumber} saved!`);
+          router.refresh();
+        }
+      } else { alert(result.error || "Failed"); }
+    } catch (error) { alert("Failed"); } finally { setSubmitting(false); }
+  };
+
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" /><p className="text-gray-600">Loading...</p></div>;
+  }
+
+  return (
+    <div className="space-y-3 bg-gray-50 min-h-screen pb-6">
+      {/* Header */}
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-white border border-gray-200 rounded-lg px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/sales/invoices"><Button variant="outline" size="sm" className="h-8"><ArrowLeft className="h-4 w-4 mr-1" />Back</Button></Link>
+            <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2"><FileText className="h-5 w-5 text-blue-600" />Sale Invoices</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <Badge variant="outline" className="text-sm font-mono bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">{invoiceNumber || "Loading..."}</Badge>
+            <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 px-3 py-1">DRAFT</Badge>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Main Grid */}
+      <div className="grid grid-cols-12 gap-3">
+        {/* Left - 8 cols */}
+        <div className="col-span-8 space-y-3">
+          {/* Top Form */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardContent className="p-4 space-y-3">
+              {/* 5-col grid */}
+              <div className="grid grid-cols-5 gap-3">
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Customer</Label>
+                  <Select value={customerId} onValueChange={setCustomerId}><SelectTrigger className="h-9 text-xs border-gray-300"><SelectValue placeholder="Type to search customer" /></SelectTrigger><SelectContent>{customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Warehouse</Label>
+                  <Select value={warehouseId} onValueChange={setWarehouseId}>
+                    <SelectTrigger className="h-9 text-xs border-gray-300">
+                      <SelectValue placeholder="Select warehouse" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {warehouses.map((w) => (
+                        <SelectItem key={w.id} value={w.id}>
+                          {w.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Number</Label>
+                  <div className="flex items-center gap-2"><Input value={invoiceNumber} readOnly className="h-9 text-xs font-mono bg-green-50 border-green-300 text-green-700" /><Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => router.refresh()}><RefreshCw className="h-4 w-4 text-green-600" /></Button></div></div>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Date</Label>
+                  <div className="relative"><Input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} className="h-9 text-xs border-gray-300" /><Calendar className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" /></div></div>
+                <div className="col-span-1"><Label className="text-xs font-medium text-gray-700 mb-1 block">Due Date</Label>
+                  <div className="relative"><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-9 text-xs border-gray-300" /><Calendar className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" /></div></div>
+              </div>
+              {/* Secondary row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Order Booker</Label><Input value={orderBooker} onChange={(e) => setOrderBooker(e.target.value)} placeholder="Select order booker" className="h-9 text-xs border-gray-300" /></div>
+                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Subject</Label><Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Invoice subject" className="h-9 text-xs border-gray-300" /></div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Quick Add Button */}
+          <div className="flex justify-end">
+            <Button className="h-9 bg-green-600 hover:bg-green-700 text-white text-xs"><Search className="h-3.5 w-3.5 mr-2" />QUICKLY ADD PRODUCTS / SCAN</Button>
+          </div>
+
+          {/* Product Grid */}
+          <Card className="border-gray-200 shadow-sm">
+            <div className="grid grid-cols-12 gap-2 py-2 px-2 bg-gray-100 border-b border-gray-200 text-xs font-semibold text-gray-700 uppercase">
+              <div className="col-span-3 flex items-center gap-1"><Search className="h-3 w-3" />Product</div>
+              <div className="col-span-1 flex items-center">Unit</div>
+              <div className="col-span-1 flex items-center">Qty</div>
+              <div className="col-span-2 flex items-center">Price</div>
+              <div className="col-span-1 flex items-center">Disc.</div>
+              <div className="col-span-2 flex items-center">Amount</div>
+              <div className="col-span-2 text-center">Action</div>
+            </div>
+            <div className="max-h-[350px] overflow-y-auto">
+              {lineItems.map((item, i) => (
+                <LineItemRow key={i} index={i} item={item} products={products} uoms={uoms} warehouseId={warehouseId} onUpdate={updateLineItem} onRemove={removeLineItem} onCheck={checkRow} isChecked={checkedRows.has(i)} canRemove={lineItems.length > 1} onKeyDown={handleKeyDown} lineAmount={lineAmounts[i]} />
+              ))}
+            </div>
+            <div className="p-2 border-t border-gray-200">
+              <Button onClick={addLineItem} variant="outline" size="sm" className="h-8 text-xs w-full border-dashed border-2 border-gray-300 hover:border-blue-500 hover:text-blue-600"><Plus className="h-3.5 w-3.5 mr-1" />Add Line (Enter)</Button>
+            </div>
+          </Card>
+
+          {/* Comments & Attachments */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardContent className="p-4 space-y-3">
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Comments</Label><Textarea value={comments} onChange={(e) => setComments(e.target.value)} placeholder="Additional comments..." className="min-h-[80px] text-xs border-gray-300" /></div>
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Attachments</Label>
+                <div className="flex items-center gap-3 p-4 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50"><Paperclip className="h-5 w-5 text-gray-400" /><span className="text-xs text-gray-500 flex-1">Drag & drop files here</span><Button variant="outline" size="sm" className="h-8 text-xs">BROWSE FILES</Button></div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right - 4 cols */}
+        <div className="col-span-4 space-y-3">
+          {/* Summary */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardContent className="p-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2"><Calculator className="h-4 w-4" />Financial Summary</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Gross</span><span className="text-sm font-semibold">{formatCurrency(grossAmount)}</span></div>
+                <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Discount</span>
+                  <div className="flex items-center gap-1"><Input type="number" min="0" max="100" step="0.1" value={globalDiscountPct} onChange={(e) => { setGlobalDiscountPct(e.target.value); setGlobalDiscountAmt("0"); }} className="h-7 w-16 text-xs text-right" placeholder="%" /><span className="text-sm font-semibold text-red-600 min-w-[80px] text-right">- {formatCurrency(effectiveGlobalDisc)}</span></div></div>
+                <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Tax (GST)</span><span className="text-sm font-semibold">{formatCurrency(totalTax)}</span></div>
+                <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Shipping</span><Input type="number" min="0" step="0.01" value={shippingCharges} onChange={(e) => setShippingCharges(e.target.value)} className="h-7 w-24 text-xs text-right" /></div>
+                <div className="flex justify-between py-1.5 border-b border-gray-200"><span className="text-xs text-gray-600">Round Off</span><Input type="number" step="0.01" value={roundOff} onChange={(e) => setRoundOff(e.target.value)} className="h-7 w-24 text-xs text-right" /></div>
+                <div className="flex justify-between py-3 bg-blue-50 px-3 rounded-lg border border-blue-200 mt-3"><span className="text-sm font-bold text-blue-900">Net (PKR)</span><span className="text-xl font-bold text-blue-900">{formatCurrency(netAmount)}</span></div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Smart Suggestions */}
+          {customerId && (
+            <SmartSuggestions
+              customerId={customerId}
+              lineItems={lineItems}
+              netAmount={netAmount.toString()}
+              onApplyPrice={handleApplyPrice}
+              onApplyDefaults={handleApplyDefaults}
+            />
+          )}
+
+          {/* Payment */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardContent className="p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-gray-900">Payment</h3>
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Cash/Bank Account</Label>
+                <Select value={cashBankAccountId} onValueChange={setCashBankAccountId}><SelectTrigger className="h-9 text-xs border-gray-300"><SelectValue placeholder="Select account" /></SelectTrigger><SelectContent>{cashBankAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.code} - {a.name}</SelectItem>)}</SelectContent></Select></div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Received (PKR)</Label><Input type="number" min="0" step="0.01" value={receivedAmount} onChange={(e) => setReceivedAmount(e.target.value)} className="h-9 text-xs" /></div>
+                <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reference</Label><Input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} placeholder="Pay Ref" className="h-9 text-xs" /></div>
+              </div>
+              <div className="flex justify-between py-2 px-3 bg-gray-50 rounded-lg border border-gray-200"><span className="text-xs font-semibold text-gray-700">Balance (PKR)</span><span className={`text-lg font-bold ${balance === 0 ? "text-green-600" : balance > 0 ? "text-orange-600" : "text-blue-600"}`}>{formatCurrency(balance)}</span></div>
+            </CardContent>
+          </Card>
+
+          {/* Actions */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardContent className="p-4 space-y-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild><Button className="w-full bg-blue-600 hover:bg-blue-700 text-white h-10" disabled={submitting}>{submitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : <><Save className="mr-2 h-4 w-4" />SAVE AND NEW<ChevronDown className="ml-2 h-4 w-4" /></>}</Button></DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={() => handleSave("continue")}>Save & Continue</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSave("close")}>Save & Close</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSave("approve")}>Save & Approve</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSave("approve-print")}>Approve & Print</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSave("approve-download")} className="text-blue-600 font-medium">
+                    <Download className="h-4 w-4 mr-2" />
+                    Approve & Download PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { if (customerId && customers.find(c => c.id === customerId)?.phone) { handleSave("close"); } else { alert("Customer has no phone number"); } }} className="text-green-600 font-medium">
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                    Save & Share WhatsApp
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button variant="outline" className="w-full h-10 border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400 font-semibold" onClick={() => router.push("/sales/invoices")}><X className="mr-2 h-4 w-4" />CLOSE</Button>
+            </CardContent>
+          </Card>
+
+          {/* FBR QR Code Preview */}
+          {isFBREligible(orgData) && (
+            <Card className="border-green-200 shadow-sm bg-green-50/30">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-green-600" />
+                    FBR QR Code
+                  </h3>
+                  <Badge className="bg-green-100 text-green-800 border-green-200 text-xs">
+                    Compliant
+                  </Badge>
+                </div>
+                
+                {qrLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-green-600" />
+                  </div>
+                ) : qrCodeDataUrl ? (
+                  <div className="bg-white p-3 rounded-lg border border-green-200">
+                    <img src={qrCodeDataUrl} alt="FBR QR Code" className="w-full h-auto" />
+                    <p className="text-xs text-center text-gray-500 mt-2">Verify at FBR Portal</p>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center py-8 bg-white rounded-lg border border-gray-200">
+                    <div className="text-center">
+                      <QrCode className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                      <p className="text-xs text-gray-500">QR code will appear here</p>
+                      <p className="text-xs text-gray-400 mt-1">when invoice is complete</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-xs text-gray-600 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-600" />
+                    <span>NTN: {orgData.ntn}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-600" />
+                    <span>STRN: {orgData.strn}</span>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 italic">
+                  This QR code will appear on the final PDF invoice
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
