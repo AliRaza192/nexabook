@@ -58,9 +58,9 @@ export async function initiatePayment(
     });
 
     const rawText = await response.text();
-    let data: any;
+    let data: Record<string, unknown>;
     try {
-      data = JSON.parse(rawText);
+      data = JSON.parse(rawText) as Record<string, unknown>;
     } catch {
       data = { raw: rawText };
     }
@@ -78,29 +78,30 @@ export async function initiatePayment(
     }
 
     const redirectUrl =
-      data.redirectUrl ||
-      data.paymentUrl ||
-      data.url ||
+      (data.redirectUrl as string) ||
+      (data.paymentUrl as string) ||
+      (data.url as string) ||
       "";
 
     return {
       success: true,
       transactionRef,
-      gatewayRef: data.transactionRef || data.transactionId || transactionRef,
+      gatewayRef: (data.transactionRef as string) || (data.transactionId as string) || transactionRef,
       amount,
       status: "pending",
       redirectUrl,
       message: "Payment initiated. Redirecting to Easypaisa.",
       rawResponse: rawText,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     return {
       success: false,
       transactionRef,
       gatewayRef: "",
       amount,
       status: "error",
-      message: `Easypaisa connection failed: ${error.message}`,
+      message: `Easypaisa connection failed: ${message}`,
     };
   }
 }
@@ -127,9 +128,9 @@ export async function verifyPayment(transactionRef: string): Promise<Transaction
     });
 
     const rawText = await response.text();
-    let data: any;
+    let data: Record<string, unknown>;
     try {
-      data = JSON.parse(rawText);
+      data = JSON.parse(rawText) as Record<string, unknown>;
     } catch {
       data = { raw: rawText };
     }
@@ -146,26 +147,27 @@ export async function verifyPayment(transactionRef: string): Promise<Transaction
       };
     }
 
-    const statusStr = (data.status || "").toLowerCase();
+    const statusStr = ((data.status as string) || "").toLowerCase();
     const succeeded = statusStr === "completed" || statusStr === "success";
 
     return {
       success: succeeded,
       transactionRef,
-      gatewayRef: data.gatewayRef || data.transactionId || "",
+      gatewayRef: (data.gatewayRef as string) || (data.transactionId as string) || "",
       amount: Number(data.amount || 0),
       status: statusStr || "unknown",
-      message: data.message || data.responseMessage,
+      message: (data.message as string) || (data.responseMessage as string),
       rawResponse: rawText,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     return {
       success: false,
       transactionRef,
       gatewayRef: "",
       amount: 0,
       status: "error",
-      message: `Easypaisa verification failed: ${error.message}`,
+      message: `Easypaisa verification failed: ${message}`,
     };
   }
 }

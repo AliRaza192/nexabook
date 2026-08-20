@@ -229,6 +229,7 @@ export async function seedInitialCOA() {
 
 // Create a journal entry for current user's organization
 export async function createJournalEntry(data: JournalEntryData) {
+  await requireRole(["admin", "accountant"]);
   const orgId = await getCurrentOrgId();
 
   if (!orgId) {
@@ -1071,11 +1072,15 @@ async function getNextVoucherNumber(orgId: string, voucherType: VoucherType): Pr
 
 // Create voucher with auto Dr/Cr logic
 export async function createVoucher(data: VoucherData) {
+  await requireRole(["admin", "accountant"]);
   const orgId = await getCurrentOrgId();
 
   if (!orgId) {
     return { success: false, error: "No organization found" };
   }
+
+  const locked = await checkPeriodLocked(new Date(data.date));
+  if (locked) return { success: false, error: "Cannot create voucher in a locked fiscal period" };
 
   try {
     const voucherNumber = await getNextVoucherNumber(orgId, data.voucherType);

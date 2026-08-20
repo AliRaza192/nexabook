@@ -28,7 +28,8 @@ import { eq, and, or, ilike, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { validateJournalBalance } from "../accounting";
-import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, requireRole } from "./shared";
+import { checkPeriodLocked } from "./fiscal-periods";
 import { convertToBaseUnit, updateWarehouseStock, updateBatchStock } from "./inventory";
 
 
@@ -111,7 +112,7 @@ export async function updateVendor(vendorId: string, data: Partial<VendorFormDat
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.email !== undefined) updateData.email = data.email;
@@ -330,6 +331,7 @@ export async function createPurchaseInvoice(data: PurchaseInvoiceFormData) {
 
 export async function approvePurchaseInvoice(invoiceId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -341,6 +343,9 @@ export async function approvePurchaseInvoice(invoiceId: string) {
 
     if (!invoice) return { success: false, error: "Invoice not found" };
     if (invoice.status === 'Approved') return { success: false, error: "Invoice is already approved" };
+
+    const locked = await checkPeriodLocked(new Date(invoice.date));
+    if (locked) return { success: false, error: "Cannot approve invoice in a locked fiscal period" };
 
     const items = await db
       .select()
@@ -586,6 +591,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
 
 export async function revisePurchaseInvoice(invoiceId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -597,6 +603,9 @@ export async function revisePurchaseInvoice(invoiceId: string) {
 
     if (!invoice) return { success: false, error: "Invoice not found" };
     if (invoice.status !== 'Approved') return { success: false, error: "Only approved invoices can be revised" };
+
+    const locked = await checkPeriodLocked(new Date(invoice.date));
+    if (locked) return { success: false, error: "Cannot revise invoice in a locked fiscal period" };
 
     const result = await db.transaction(async (tx) => {
       // 1. Update status to Revised
@@ -777,8 +786,12 @@ export interface ExpenseFormData {
 
 export async function recordExpense(data: ExpenseFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
+
+    const locked = await checkPeriodLocked(data.date);
+    if (locked) return { success: false, error: "Cannot record expense in a locked fiscal period" };
 
     const [newExpense] = await db
       .insert(expenses)
@@ -983,7 +996,7 @@ export async function getPurchaseOrders(searchQuery?: string, statusFilter?: str
     if (!orgId) return { success: false, error: "No organization found" };
 
     const conditions = [eq(purchaseOrders.orgId, orgId)];
-    if (statusFilter && statusFilter !== 'all') conditions.push(eq(purchaseOrders.status, statusFilter as any));
+    if (statusFilter && statusFilter !== 'all') conditions.push(eq(purchaseOrders.status, statusFilter as "draft" | "pending" | "approved" | "cancelled" | "confirmed" | "delivered"));
 
     let result = await db.select({
       id: purchaseOrders.id,
@@ -1117,7 +1130,7 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     if (data.vendorId !== undefined) updateData.vendorId = data.vendorId;
     if (data.orderDate !== undefined) updateData.orderDate = new Date(data.orderDate);
     if (data.expectedDeliveryDate !== undefined) updateData.expectedDeliveryDate = data.expectedDeliveryDate ? new Date(data.expectedDeliveryDate) : null;
@@ -1368,7 +1381,7 @@ export async function updateGRN(id: string, data: Partial<GRNFormData>) {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     if (data.vendorId !== undefined) updateData.vendorId = data.vendorId;
     if (data.receivingDate !== undefined) updateData.receivingDate = new Date(data.receivingDate);
     if (data.reference !== undefined) updateData.reference = data.reference;
@@ -1580,12 +1593,16 @@ export async function createPurchaseReturn(data: PurchaseReturnFormData) {
 
 export async function approvePurchaseReturn(id: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
     const [purchaseReturn] = await db.select().from(purchaseReturns).where(and(eq(purchaseReturns.id, id), eq(purchaseReturns.orgId, orgId))).limit(1);
     if (!purchaseReturn) return { success: false, error: "Purchase return not found" };
     if (purchaseReturn.status === 'approved' || purchaseReturn.status === 'refunded') return { success: false, error: "Return already approved" };
+
+    const locked = await checkPeriodLocked(new Date(purchaseReturn.returnDate));
+    if (locked) return { success: false, error: "Cannot approve return in a locked fiscal period" };
 
     const items = await db.select().from(purchaseReturnItems).where(eq(purchaseReturnItems.purchaseReturnId, id));
 
@@ -1746,9 +1763,13 @@ export async function getVendorPayments(searchQuery?: string) {
 
 export async function createVendorPayment(data: VendorPaymentFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.vendorId || !data.amount) return { success: false, error: "Vendor and amount are required" };
+
+    const locked = await checkPeriodLocked(new Date(data.paymentDate));
+    if (locked) return { success: false, error: "Cannot record payment in a locked fiscal period" };
 
     const paymentAmount = parseFloat(data.amount);
     const whtAmount = data.whtAmount ? parseFloat(data.whtAmount) : 0;
@@ -1952,9 +1973,13 @@ export async function createVendorSettlement(data: {
   notes?: string;
 }) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.vendorId || !data.documents.length) return { success: false, error: "Vendor and documents are required" };
+
+    const locked = await checkPeriodLocked(new Date(data.settlementDate));
+    if (locked) return { success: false, error: "Cannot create settlement in a locked fiscal period" };
 
     const settlementNumber = await (async () => {
       const res = await db.select({ settlementNumber: settlements.settlementNumber }).from(settlements).where(eq(settlements.orgId, orgId)).orderBy(desc(settlements.createdAt)).limit(1);

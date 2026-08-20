@@ -6,23 +6,9 @@ import {
   expenses,
   purchaseInvoices,
   products,
-  profiles,
 } from "@/db/schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
-
-async function getCurrentOrgId(userId: string): Promise<string | null> {
-  const userProfile = await db
-    .select({ orgId: profiles.orgId })
-    .from(profiles)
-    .where(eq(profiles.userId, userId))
-    .limit(1);
-
-  if (userProfile.length > 0 && userProfile[0].orgId) {
-    return userProfile[0].orgId;
-  }
-
-  return null;
-}
+import { getCurrentOrgId } from "@/lib/actions/shared";
 
 function getDateRange(period: "current" | "previous") {
   const now = new Date();
@@ -54,7 +40,7 @@ export async function GET() {
       );
     }
 
-    const orgId = await getCurrentOrgId(userId);
+    const orgId = await getCurrentOrgId();
 
     if (!orgId) {
       return NextResponse.json(

@@ -4,9 +4,13 @@ import { organizations, orgFteSubscriptions, digitalFteProducts } from "@/db/sch
 import { eq, and } from "drizzle-orm";
 import { stripe } from "@/lib/stripe";
 
-function safePeriodEnd(sub: any): Date | null {
-  // Try items.data[0] first (newer API versions), then top-level
-  const ts = sub?.items?.data?.[0]?.current_period_end ?? sub?.current_period_end;
+type PlanType = "free" | "professional" | "enterprise";
+
+function safePeriodEnd(sub: Record<string, unknown>): Date | null {
+  const items = sub.items as Record<string, unknown> | undefined;
+  const data = items?.data as unknown[] | undefined;
+  const firstItem = data?.[0] as Record<string, unknown> | undefined;
+  const ts = (firstItem?.current_period_end as number) ?? (sub.current_period_end as number);
   if (typeof ts === "number" && !isNaN(ts)) return new Date(ts * 1000);
   return null;
 }
@@ -25,16 +29,16 @@ export async function POST(request: Request) {
 
     switch (event.type) {
       case "checkout.session.completed": {
-        const session = event.data.object as any;
-        const orgId = session.metadata?.orgId;
+        const session = event.data.object as unknown as Record<string, unknown>;
+        const metadata = session.metadata as Record<string, unknown> | undefined;
+        const orgId = metadata?.orgId as string | undefined;
         const subscriptionId = session.subscription as string;
-        const planType = session.metadata?.planType || "professional";
-        const productSlug = session.metadata?.productSlug;
+        const planType = (metadata?.planType as PlanType) || "professional";
+        const productSlug = metadata?.productSlug as string | undefined;
 
         if (orgId && subscriptionId) {
           const sub = await stripe.subscriptions.retrieve(subscriptionId);
 
-          // Handle FTE product subscription
           if (productSlug) {
             const [fteProduct] = await db
               .select()
@@ -43,7 +47,7 @@ export async function POST(request: Request) {
               .limit(1);
 
             if (fteProduct) {
-              const periodEnd = safePeriodEnd(sub);
+              const periodEnd = safePeriodEnd(sub as unknown as Record<string, unknown>);
               await db.insert(orgFteSubscriptions).values({
                 orgId,
                 fteProductId: fteProduct.id,
@@ -54,11 +58,10 @@ export async function POST(request: Request) {
               });
             }
           } else {
-            // Handle main platform subscription
-            const periodEnd = safePeriodEnd(sub);
+            const periodEnd = safePeriodEnd(sub as unknown as Record<string, unknown>);
             await db.update(organizations).set({
               stripeSubscriptionId: subscriptionId,
-              planType: planType as any,
+              planType,
               subscriptionStatus: sub.status,
               subscriptionEndsAt: periodEnd ?? undefined,
             }).where(eq(organizations.id, orgId));
@@ -68,11 +71,11 @@ export async function POST(request: Request) {
       }
 
       case "invoice.paid": {
-        const invoice = event.data.object as any;
+        const invoice = event.data.object as unknown as Record<string, unknown>;
         const subscriptionId = invoice.subscription as string;
         if (subscriptionId) {
           const sub = await stripe.subscriptions.retrieve(subscriptionId);
-          const periodEnd = safePeriodEnd(sub);
+          const periodEnd = safePeriodEnd(sub as unknown as Record<string, unknown>);
           await db.update(organizations).set({
             subscriptionStatus: sub.status,
             subscriptionEndsAt: periodEnd ?? undefined,
@@ -83,37 +86,35 @@ export async function POST(request: Request) {
 
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
-        const sub = event.data.object as any;
+        const sub = event.data.object as unknown as Record<string, unknown>;
 
-        // Check if this is an FTE subscription
         const [existingFteSub] = await db
           .select()
           .from(orgFteSubscriptions)
-          .where(eq(orgFteSubscriptions.stripeSubscriptionId, sub.id))
+          .where(eq(orgFteSubscriptions.stripeSubscriptionId, sub.id as string))
           .limit(1);
 
         if (existingFteSub) {
-          // Update FTE subscription
           const periodEnd = safePeriodEnd(sub);
           await db
             .update(orgFteSubscriptions)
             .set({
               status: sub.status === "active" || sub.status === "trialing" ? "active" : "canceled",
               currentPeriodEnd: periodEnd ?? undefined,
-              cancelAtPeriodEnd: sub.cancel_at_period_end || false,
+              cancelAtPeriodEnd: (sub.cancel_at_period_end as boolean) || false,
               updatedAt: new Date(),
             })
-            .where(eq(orgFteSubscriptions.stripeSubscriptionId, sub.id));
+            .where(eq(orgFteSubscriptions.stripeSubscriptionId, sub.id as string));
         } else {
-          // Update main platform subscription
           const periodEnd = safePeriodEnd(sub);
+          const subMetadata = sub.metadata as Record<string, unknown> | undefined;
           await db.update(organizations).set({
-            subscriptionStatus: sub.status,
+            subscriptionStatus: sub.status as string,
             subscriptionEndsAt: periodEnd ?? undefined,
             planType: sub.status === "active" || sub.status === "trialing"
-              ? (sub.metadata?.planType as any) || "professional"
+              ? ((subMetadata?.planType as PlanType) || "professional")
               : "free",
-          }).where(eq(organizations.stripeSubscriptionId, sub.id));
+          }).where(eq(organizations.stripeSubscriptionId, sub.id as string));
         }
         break;
       }

@@ -2,18 +2,12 @@ import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { db } from "@/db";
-import { profiles, chatMessages } from "@/db/schema";
+import { chatMessages } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { retrievers } from "@/lib/ai/retriever";
-
-async function getCurrentOrgId(userId: string): Promise<string | null> {
-  const userProfile = await db
-    .select({ orgId: profiles.orgId })
-    .from(profiles)
-    .where(eq(profiles.userId, userId))
-    .limit(1);
-  return userProfile.length > 0 && userProfile[0].orgId ? userProfile[0].orgId : null;
-}
+import { executeMcpTool, getAvailableTools } from "@/mcp/client";
+import { mcpToolDefinitions } from "@/mcp/tools/tool-definitions";
+import { getCurrentOrgId } from "@/lib/actions/shared";
 
 const SYSTEM_PROMPT = `Tu NexaBot hai — NexaBook ka AI accounting assistant. Pakistani business owners ki help karta hai Roman Urdu + English mixed language mein.
 
@@ -25,7 +19,26 @@ Rules:
 - Friendly tone rakho — jaise ek helpful accountant dost ho
 - Numbers ke saath context bhi do — sirf figures mat do
 - Positive results pe "Mashallah!" ya "Bohot acha!" use kar
-- Max 2000 characters mein jawab de`;
+- Max 2000 characters mein jawab de
+
+Available MCP Tools (use these for calculations and lookups):
+- calculate_tax: Tax calculate kare (amount, tax_rate)
+- validate_ntn: NTN validate kare (8 digits)
+- validate_strn: STRN validate kare (7 digits + dash + 1 digit)
+- query_revenue: Revenue data le (months_back)
+- query_pending_invoices: Baki invoices dekhe
+- query_overdue_invoices: Der se overdue invoices
+- query_top_products: Sab se zayada bikne wale products
+- query_customer_balances: Customer balances
+- query_top_customers: Top customers
+- query_cash_position: Cash aur bank balance
+- query_profit_loss: Profit & Loss
+- query_low_stock: Kam stock wale products
+- query_inventory_value: Inventory ki total value
+- query_payroll_summary: Salary summary
+- query_tax_summary: Tax summary
+- query_recent_invoices: Recent invoices
+- query_purchases: Purchases summary`;
 
 // Save message to DB
 async function saveMessage(orgId: string, userId: string, role: string, content: string) {
@@ -110,7 +123,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const orgId = await getCurrentOrgId(userId);
+    const orgId = await getCurrentOrgId();
     if (!orgId) {
       return new Response(JSON.stringify({ success: false, error: "Organization not found" }), {
         status: 404,
@@ -133,6 +146,7 @@ export async function POST(request: NextRequest) {
     const needsData = detectIntents(message);
     const contextParts: string[] = [];
 
+    // Fetch data using existing retrievers
     for (const key of needsData) {
       const retriever = retrievers[key];
       if (retriever) {
@@ -143,6 +157,20 @@ export async function POST(request: NextRequest) {
         } catch {
           contextParts.push(`=== ${key} ===\nError fetching data`);
         }
+      }
+    }
+
+    // Also fetch via MCP tools for additional context
+    const mcpTools = getAvailableTools();
+    for (const tool of mcpTools.slice(0, 5)) { // Limit to top 5 MCP tools
+      try {
+        const mcpResult = await executeMcpTool(tool.name, {}, orgId);
+        if (mcpResult.content && !mcpResult.isError) {
+          contextParts.push(`=== MCP: ${tool.name} ===`);
+          contextParts.push(mcpResult.content);
+        }
+      } catch {
+        // MCP tools are optional, skip errors
       }
     }
 
@@ -174,6 +202,7 @@ export async function POST(request: NextRequest) {
           const chat = model.startChat({
             history: historyMessages,
             systemInstruction: { role: "system", parts: [{ text: SYSTEM_PROMPT }] },
+            tools: [{ functionDeclarations: mcpToolDefinitions as any }],
           });
 
           const result = await chat.sendMessage(`${message}\n\nRelevant accounting data:\n${context}`);
@@ -197,7 +226,12 @@ export async function POST(request: NextRequest) {
         const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-          body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4o-mini", messages: conversationMessages, max_tokens: 500 }),
+          body: JSON.stringify({
+            model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+            messages: conversationMessages,
+            max_tokens: 500,
+            tools: mcpToolDefinitions.map(t => ({ type: "function", function: t })),
+          }),
         });
         if (!openaiRes.ok) throw new Error(`OpenAI API error: ${openaiRes.status}`);
         const openaiData = await openaiRes.json();
@@ -244,6 +278,7 @@ export async function POST(request: NextRequest) {
             const chat = model.startChat({
               history: historyMessages,
               systemInstruction: { role: "system", parts: [{ text: SYSTEM_PROMPT }] },
+              tools: [{ functionDeclarations: mcpToolDefinitions as any }],
             });
 
             const result = await chat.sendMessageStream(`${message}\n\nRelevant accounting data:\n${context}`);
@@ -270,7 +305,13 @@ export async function POST(request: NextRequest) {
             const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-              body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4o-mini", messages: conversationMessages, max_tokens: 500, stream: true }),
+              body: JSON.stringify({
+                model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+                messages: conversationMessages,
+                max_tokens: 500,
+                stream: true,
+                tools: mcpToolDefinitions.map(t => ({ type: "function", function: t })),
+              }),
             });
 
             if (!openaiRes.ok) throw new Error(`OpenAI API error: ${openaiRes.status}`);

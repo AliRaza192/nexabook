@@ -97,9 +97,9 @@ export async function submitInvoiceToFBR(
     });
 
     const responseText = await response.text();
-    let data: any;
+    let data: Record<string, unknown>;
     try {
-      data = JSON.parse(responseText);
+      data = JSON.parse(responseText) as Record<string, unknown>;
     } catch {
       data = { raw: responseText };
     }
@@ -107,21 +107,22 @@ export async function submitInvoiceToFBR(
     if (!response.ok) {
       return {
         success: false,
-        error: data.message || data.error || `FBR API returned status ${response.status}`,
+        error: (data.message as string) || (data.error as string) || `FBR API returned status ${response.status}`,
         rawResponse: responseText,
       };
     }
 
     return {
       success: true,
-      fbrInvoiceNumber: data.InvoiceNumber || data.fbrInvoiceNumber,
-      submissionId: data.SubmissionId || data.submissionId,
+      fbrInvoiceNumber: (data.InvoiceNumber as string) || (data.fbrInvoiceNumber as string),
+      submissionId: (data.SubmissionId as string) || (data.submissionId as string),
       rawResponse: responseText,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     return {
       success: false,
-      error: `FBR API connection failed: ${error.message}`,
+      error: `FBR API connection failed: ${message}`,
     };
   }
 }
@@ -195,9 +196,9 @@ export async function submitSalesTaxReturnToFBR(
     });
 
     const responseText = await response.text();
-    let data: any;
+    let data: Record<string, unknown>;
     try {
-      data = JSON.parse(responseText);
+      data = JSON.parse(responseText) as Record<string, unknown>;
     } catch {
       data = { raw: responseText };
     }
@@ -205,20 +206,21 @@ export async function submitSalesTaxReturnToFBR(
     if (!response.ok) {
       return {
         success: false,
-        error: data.message || data.error || `FBR API returned status ${response.status}`,
+        error: (data.message as string) || (data.error as string) || `FBR API returned status ${response.status}`,
         rawResponse: responseText,
       };
     }
 
     return {
       success: true,
-      submissionId: data.SubmissionId || data.submissionId,
+      submissionId: (data.SubmissionId as string) || (data.submissionId as string),
       rawResponse: responseText,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     return {
       success: false,
-      error: `FBR API connection failed: ${error.message}`,
+      error: `FBR API connection failed: ${message}`,
     };
   }
 }

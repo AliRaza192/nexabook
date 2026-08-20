@@ -85,14 +85,15 @@ export async function initiatePayment(
       message: "Payment initiated. Redirecting to JazzCash.",
       rawResponse: rawText,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     return {
       success: false,
       transactionRef,
       gatewayRef: "",
       amount,
       status: "error",
-      message: `JazzCash connection failed: ${error.message}`,
+      message: `JazzCash connection failed: ${message}`,
     };
   }
 }
@@ -116,9 +117,9 @@ export async function verifyPayment(transactionRef: string): Promise<Transaction
     });
 
     const rawText = await response.text();
-    let data: any;
+    let data: Record<string, unknown>;
     try {
-      data = JSON.parse(rawText);
+      data = JSON.parse(rawText) as Record<string, unknown>;
     } catch {
       data = { raw: rawText };
     }
@@ -135,27 +136,28 @@ export async function verifyPayment(transactionRef: string): Promise<Transaction
       };
     }
 
-    const ppResponseCode = data.pp_ResponseCode || "";
+    const ppResponseCode = (data.pp_ResponseCode as string) || "";
     const succeeded = ppResponseCode === "000";
     const ppAmount = data.pp_Amount ? (Number(data.pp_Amount) / 100).toString() : "0";
 
     return {
       success: succeeded,
       transactionRef,
-      gatewayRef: data.pp_TxnRefNo || data.pp_RetreivalReferenceNo || "",
+      gatewayRef: (data.pp_TxnRefNo as string) || (data.pp_RetreivalReferenceNo as string) || "",
       amount: Number(ppAmount),
-      status: succeeded ? "completed" : data.pp_ResponseMessage || "failed",
-      message: data.pp_ResponseMessage,
+      status: succeeded ? "completed" : (data.pp_ResponseMessage as string) || "failed",
+      message: data.pp_ResponseMessage as string,
       rawResponse: rawText,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     return {
       success: false,
       transactionRef,
       gatewayRef: "",
       amount: 0,
       status: "error",
-      message: `JazzCash verification failed: ${error.message}`,
+      message: `JazzCash verification failed: ${message}`,
     };
   }
 }

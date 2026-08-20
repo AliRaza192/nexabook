@@ -3,7 +3,7 @@
 import { db } from "@/db";
 import { fiscalPeriods, journalEntries } from "@/db/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 
 export async function getFiscalPeriods() {
   try {
@@ -32,6 +32,7 @@ export async function createFiscalPeriod(data: {
   endDate: string;
 }) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -54,6 +55,7 @@ export async function createFiscalPeriod(data: {
 
 export async function togglePeriodLock(periodId: string, locked: boolean) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -73,6 +75,7 @@ export async function togglePeriodLock(periodId: string, locked: boolean) {
 
 export async function deleteFiscalPeriod(periodId: string) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 

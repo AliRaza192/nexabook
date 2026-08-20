@@ -292,7 +292,7 @@ export async function getDepreciationSchedule(
 ): Promise<{
   success: boolean;
   data?: {
-    asset: any;
+    asset: Record<string, unknown>;
     schedule: DepreciationScheduleRow[];
     totalDepreciation: number;
     openingBookValue: number;

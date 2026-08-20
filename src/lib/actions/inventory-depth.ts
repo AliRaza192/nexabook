@@ -48,7 +48,7 @@ export async function getStockMovements(productId?: string, movementType?: strin
 
     return { success: true, data: movements };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch stock movements" };
   }
 }
@@ -78,7 +78,7 @@ export async function getStockMovementsByProduct(productId: string) {
 
     return { success: true, data: movements };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch stock movements" };
   }
 }
@@ -150,7 +150,7 @@ export async function addStockMovement(data: StockMovementFormData) {
     revalidatePath("/inventory/stock");
     return { success: true, data: movement, message: "Stock movement recorded" };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to record stock movement" };
   }
 }
@@ -188,7 +188,7 @@ export async function getStockAdjustments(searchQuery?: string) {
 
     return { success: true, data: adjustments };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch stock adjustments" };
   }
 }
@@ -225,7 +225,7 @@ export async function getStockAdjustmentById(adjustmentId: string) {
 
     return { success: true, data: { ...adjustment, lines } };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch adjustment" };
   }
 }
@@ -310,7 +310,7 @@ export async function addStockAdjustment(data: StockAdjustmentFormData) {
     revalidatePath("/inventory/stock");
     return { success: true, data: adjustment, message: "Stock adjustment created" };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to create stock adjustment" };
   }
 }
@@ -423,7 +423,7 @@ export async function approveStockAdjustment(adjustmentId: string) {
     revalidatePath("/inventory/stock");
     return { success: true, message: "Stock adjustment approved and GL posted" };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to approve stock adjustment" };
   }
 }
@@ -446,11 +446,11 @@ export async function runStockValuation(method: "fifo" | "weighted_average", val
       .where(and(eq(products.orgId, orgId), eq(products.isActive, true)));
 
     let totalValue = 0;
-    const valuationDetails: any[] = [];
+    const valuationDetails: Array<Record<string, unknown>> = [];
 
     for (const product of allProducts) {
       if (method === "fifo") {
-        // FIFO: value stock using batch-level costs ordered by creation date
+        // FIFO: consume stock from oldest batches first, value remaining at newest batch cost
         const batches = await db
           .select({
             currentQty: productBatches.currentQty,
@@ -467,31 +467,42 @@ export async function runStockValuation(method: "fifo" | "weighted_average", val
           )
           .orderBy(asc(productBatches.createdAt));
 
+        const currentStock = parseFloat(product.currentStock || "0");
+        let remainingToValue = currentStock;
         let productTotalValue = 0;
         let totalStock = 0;
+        const valuedBatches: { batchNo: string; qty: number; cost: number; valuedQty: number }[] = [];
 
         for (const batch of batches) {
           const qty = parseFloat(batch.currentQty || "0");
           const cost = parseFloat(batch.costPrice || "0");
-          productTotalValue += qty * cost;
           totalStock += qty;
+
+          if (remainingToValue <= 0) break;
+
+          const valuedQty = Math.min(qty, remainingToValue);
+          productTotalValue += valuedQty * cost;
+          remainingToValue -= valuedQty;
+
+          valuedBatches.push({ batchNo: batch.batchNo, qty, cost, valuedQty });
         }
 
         totalValue += productTotalValue;
-        const unitCost = totalStock > 0 ? productTotalValue / totalStock : 0;
+        const unitCost = currentStock > 0 ? productTotalValue / currentStock : 0;
 
         valuationDetails.push({
           productId: product.id,
           productName: product.name,
           sku: product.sku,
-          stock: totalStock,
+          stock: currentStock,
           unitCost,
           totalValue: productTotalValue,
           batchCount: batches.length,
-          batches: batches.map(b => ({
+          batches: valuedBatches.map(b => ({
             batchNo: b.batchNo,
-            qty: parseFloat(b.currentQty || "0"),
-            cost: parseFloat(b.costPrice || "0"),
+            qty: b.qty,
+            cost: b.cost,
+            valuedQty: b.valuedQty,
           })),
         });
       } else {
@@ -531,7 +542,7 @@ export async function runStockValuation(method: "fifo" | "weighted_average", val
     revalidatePath("/inventory/valuation");
     return { success: true, data: log, message: "Stock valuation completed" };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to run stock valuation" };
   }
 }
@@ -549,7 +560,7 @@ export async function getStockValuations() {
 
     return { success: true, data: valuations };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch stock valuations" };
   }
 }
@@ -566,7 +577,7 @@ export async function getCurrentInventoryValue() {
 
     let totalValue = 0;
     let totalItems = 0;
-    const productDetails: any[] = [];
+    const productDetails: Array<Record<string, unknown>> = [];
 
     for (const product of allProducts) {
       const stock = parseFloat(product.currentStock || "0");
@@ -626,7 +637,7 @@ export async function getCurrentInventoryValue() {
       },
     };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to calculate inventory value" };
   }
 }
@@ -654,7 +665,7 @@ export async function getProductsForStockAdjustment() {
 
     return { success: true, data: prods };
   } catch (error) {
-    console.error("Error in inventory-depth.ts:", error);
+    console.error("Error in inventory-depth.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch products" };
   }
 }

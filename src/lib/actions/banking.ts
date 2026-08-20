@@ -9,7 +9,8 @@ import {
 import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
+import { checkPeriodLocked } from "./fiscal-periods";
 import { validateJournalBalance } from "../accounting";
 
 // ==========================================
@@ -318,6 +319,7 @@ export async function addBankDeposit(data: BankDepositFormData) {
 
 export async function approveBankDeposit(depositId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -332,6 +334,9 @@ export async function approveBankDeposit(depositId: string) {
 
     if (!deposit) return { success: false, error: "Deposit not found" };
     if (deposit.approvalStatus === "approved") return { success: false, error: "Deposit already approved" };
+
+    const locked = await checkPeriodLocked(new Date(deposit.depositDate));
+    if (locked) return { success: false, error: "Cannot approve deposit in a locked fiscal period" };
 
     // Update bank account balance
     await db
@@ -491,6 +496,7 @@ export async function addFundsTransfer(data: FundsTransferFormData) {
 
 export async function approveFundsTransfer(transferId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -504,6 +510,9 @@ export async function approveFundsTransfer(transferId: string) {
 
     if (!transfer) return { success: false, error: "Transfer not found" };
     if (transfer.approvalStatus === "approved") return { success: false, error: "Transfer already approved" };
+
+    const locked = await checkPeriodLocked(new Date(transfer.transferDate));
+    if (locked) return { success: false, error: "Cannot approve transfer in a locked fiscal period" };
 
     const amount = parseFloat(transfer.amount);
 
@@ -894,10 +903,14 @@ async function generateContraEntryNumber(orgId: string): Promise<string> {
  */
 export async function createContraEntry(data: ContraEntryFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) {
       return { success: false, error: "No organization found" };
     }
+
+    const locked = await checkPeriodLocked(new Date(data.entryDate));
+    if (locked) return { success: false, error: "Cannot create contra entry in a locked fiscal period" };
 
     // Validate required fields
     if (!data.fromAccountId || !data.toAccountId) {

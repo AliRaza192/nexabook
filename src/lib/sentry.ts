@@ -1,14 +1,18 @@
-let sentryClient: any = null;
+interface SentryClient {
+  captureException: (error: Error, context?: Record<string, unknown>) => void;
+  setUser: (user: Record<string, unknown>) => void;
+  setTag: (key: string, value: string) => void;
+}
 
-export function initSentry() {
+let sentryClient: SentryClient | null = null;
+
+export function initSentry(): SentryClient | null {
   if (sentryClient) return sentryClient;
   if (!process.env.SENTRY_DSN) return null;
 
   try {
-    // Dynamic import — Sentry is optional
-    // Install with: npm install @sentry/nextjs
     sentryClient = {
-      captureException: (error: Error, context?: any) => {
+      captureException: (error: Error, context?: Record<string, unknown>) => {
         if (process.env.NODE_ENV === "production") {
           console.error("[Sentry]", error.message, context);
         }

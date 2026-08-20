@@ -1314,6 +1314,7 @@ export async function updateInvoiceStatus(
 // Delete invoice
 export async function deleteInvoice(invoiceId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) {
       return { success: false, error: "No organization found" };
@@ -1326,6 +1327,9 @@ export async function deleteInvoice(invoiceId: string) {
       .limit(1);
 
     if (!invoice) return { success: false, error: "Invoice not found" };
+
+    const locked = await checkPeriodLocked(new Date(invoice.issueDate));
+    if (locked) return { success: false, error: "Cannot delete invoice in a locked fiscal period" };
 
     // If invoice was approved, reverse stock movements
     if (invoice.status === "approved") {
@@ -2979,6 +2983,7 @@ export async function createSalesReturn(data: SalesReturnFormData) {
 
 export async function approveSalesReturn(returnId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     const [salesReturn] = await db
@@ -2990,6 +2995,10 @@ export async function approveSalesReturn(returnId: string) {
       return { success: false, error: "Sales return not found" };
     if (salesReturn.status === "approved" || salesReturn.status === "refunded")
       return { success: false, error: "Return already approved" };
+
+    const locked = await checkPeriodLocked(new Date(salesReturn.returnDate));
+    if (locked) return { success: false, error: "Cannot approve return in a locked fiscal period" };
+
     const items = await db
       .select()
       .from(salesReturnItems)
@@ -3202,10 +3211,15 @@ export async function getCustomerPayments(searchQuery?: string) {
 
 export async function createCustomerPayment(data: CustomerPaymentFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.customerId || !data.amount)
       return { success: false, error: "Customer and amount are required" };
+
+    const locked = await checkPeriodLocked(new Date(data.paymentDate));
+    if (locked) return { success: false, error: "Cannot record payment in a locked fiscal period" };
+
     const paymentNumber = await generatePaymentNumber(orgId);
     const [newPayment] = await db
       .insert(customerPayments)
@@ -3475,10 +3489,15 @@ export async function getSettlements(
 
 export async function createCustomerSettlement(data: SettlementFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.customerId || !data.documents.length)
       return { success: false, error: "Customer and documents are required" };
+
+    const locked = await checkPeriodLocked(new Date(data.settlementDate));
+    if (locked) return { success: false, error: "Cannot create settlement in a locked fiscal period" };
+
     const settlementNumber = await generateSettlementNumber(orgId);
     const totalOutstanding = data.documents.reduce(
       (sum, doc) => sum + parseFloat(doc.balanceAmount || "0"),

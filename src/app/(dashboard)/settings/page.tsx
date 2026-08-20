@@ -5,8 +5,9 @@ import { motion } from "framer-motion";
 import {
   Building2, Users, Save, Loader2, CheckCircle2, AlertCircle,
   X, Pencil, ShieldCheck, UserCheck, UserX, Settings2, Bell,
-  HandHeart,
+  HandHeart, BookOpen, Calculator,
 } from "lucide-react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -758,7 +759,19 @@ export default function SettingsPage() {
           </Card>
 
           {formData.islamicFinanceEnabled && (
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Link href="/settings/islamic-terminology">
+                <Button variant="outline" className="text-nexabook-600">
+                  <BookOpen className="h-4 w-4 mr-2" />
+                  Terminology Mapping
+                </Button>
+              </Link>
+              <Link href="/settings/zakat-calculator">
+                <Button variant="outline" className="text-nexabook-600">
+                  <Calculator className="h-4 w-4 mr-2" />
+                  Zakat Calculator
+                </Button>
+              </Link>
               <Button onClick={saveIslamic} disabled={saving} className="bg-nexabook-600 hover:bg-nexabook-700 text-white px-6">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
                 Save Islamic Finance Settings

@@ -81,8 +81,8 @@ export async function getBankConnections() {
       .orderBy(desc(bankConnections.createdAt));
 
     return { success: true as const, data: connections };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to load connections" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to load connections" };
   }
 }
 
@@ -120,8 +120,8 @@ export async function createBankConnection(data: {
 
     revalidatePath("/settings/bank-feeds");
     return { success: true as const, data: connection, message: "Bank connection created" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to create connection" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to create connection" };
   }
 }
 
@@ -136,8 +136,8 @@ export async function deleteBankConnection(id: string) {
 
     revalidatePath("/settings/bank-feeds");
     return { success: true as const, message: "Connection removed" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to delete connection" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to delete connection" };
   }
 }
 
@@ -232,8 +232,8 @@ export async function syncBankTransactions(connectionId: string) {
       message: `Synced ${syncResult.transactions.length} transactions`,
       data: { count: syncResult.transactions.length },
     };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Sync failed" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Sync failed" };
   }
 }
 
@@ -254,7 +254,7 @@ export async function syncAllBankConnections() {
     }
 
     return { success: true as const, data: results };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Bulk sync failed" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Bulk sync failed" };
   }
 }

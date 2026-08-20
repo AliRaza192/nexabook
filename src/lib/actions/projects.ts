@@ -30,8 +30,8 @@ export async function getProjects(search?: string, status?: string) {
       .orderBy(desc(projects.createdAt));
 
     return { success: true as const, data };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to load projects" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to load projects" };
   }
 }
 
@@ -48,8 +48,8 @@ export async function getProject(id: string) {
 
     if (!project) return { success: false as const, error: "Project not found" };
     return { success: true as const, data: project };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to load project" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to load project" };
   }
 }
 
@@ -87,9 +87,9 @@ export async function createProject(data: {
     revalidatePath("/projects");
     await createAuditLog({ action: "PROJECT_CREATED", entityType: "project", entityId: project.id });
     return { success: true as const, data: project, message: "Project created successfully" };
-  } catch (error: any) {
-    if (error.code === "23505") return { success: false as const, error: "A project with this code already exists" };
-    return { success: false as const, error: error.message || "Failed to create project" };
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code: string }).code === "23505") return { success: false as const, error: "A project with this code already exists" };
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to create project" };
   }
 }
 
@@ -129,8 +129,8 @@ export async function updateProject(id: string, data: {
     revalidatePath("/projects");
     await createAuditLog({ action: "PROJECT_UPDATED", entityType: "project", entityId: id });
     return { success: true as const, data: project, message: "Project updated successfully" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to update project" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to update project" };
   }
 }
 
@@ -143,8 +143,8 @@ export async function deleteProject(id: string) {
     revalidatePath("/projects");
     await createAuditLog({ action: "PROJECT_DELETED", entityType: "project", entityId: id });
     return { success: true as const, message: "Project deleted successfully" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to delete project" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to delete project" };
   }
 }
 
@@ -162,8 +162,8 @@ export async function getTasks(projectId: string) {
       .orderBy(desc(tasks.createdAt));
 
     return { success: true as const, data };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to load tasks" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to load tasks" };
   }
 }
 
@@ -197,8 +197,8 @@ export async function createTask(data: {
     revalidatePath(`/projects/${data.projectId}`);
     await createAuditLog({ action: "TASK_CREATED", entityType: "task", entityId: task.id });
     return { success: true as const, data: task, message: "Task created successfully" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to create task" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to create task" };
   }
 }
 
@@ -236,8 +236,8 @@ export async function updateTask(id: string, data: {
     revalidatePath(`/projects/${task.projectId}`);
     await createAuditLog({ action: "TASK_UPDATED", entityType: "task", entityId: id });
     return { success: true as const, data: task, message: "Task updated successfully" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to update task" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to update task" };
   }
 }
 
@@ -249,8 +249,8 @@ export async function deleteTask(id: string) {
     revalidatePath("/projects");
     await createAuditLog({ action: "TASK_DELETED", entityType: "task", entityId: id });
     return { success: true as const, message: "Task deleted successfully" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to delete task" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to delete task" };
   }
 }
 
@@ -281,8 +281,8 @@ export async function getTimesheets(filters?: {
       .orderBy(desc(timesheets.date));
 
     return { success: true as const, data };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to load timesheets" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to load timesheets" };
   }
 }
 
@@ -325,8 +325,8 @@ export async function createTimesheet(data: {
     revalidatePath("/timesheets");
     await createAuditLog({ action: "TIMESHEET_CREATED", entityType: "timesheet", entityId: timesheet.id });
     return { success: true as const, data: timesheet, message: "Timesheet entry added" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to create timesheet entry" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to create timesheet entry" };
   }
 }
 
@@ -345,8 +345,8 @@ export async function updateTimesheetStatus(id: string, status: string) {
     revalidatePath("/timesheets");
     await createAuditLog({ action: "TIMESHEET_STATUS_UPDATED", entityType: "timesheet", entityId: id });
     return { success: true as const, data: timesheet, message: `Timesheet ${status}` };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to update timesheet" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to update timesheet" };
   }
 }
 
@@ -358,8 +358,8 @@ export async function deleteTimesheet(id: string) {
     revalidatePath("/timesheets");
     await createAuditLog({ action: "TIMESHEET_DELETED", entityType: "timesheet", entityId: id });
     return { success: true as const, message: "Timesheet entry deleted" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to delete timesheet" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to delete timesheet" };
   }
 }
 
@@ -425,7 +425,7 @@ export async function getProjectProfitability() {
     });
 
     return { success: true as const, data: result };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to load project profitability" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to load project profitability" };
   }
 }

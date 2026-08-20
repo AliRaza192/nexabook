@@ -24,7 +24,7 @@ export function exportToExcel(options: ExcelExportOptions): void {
   const wb = XLSX.utils.book_new();
 
   // Prepare data array with title row if provided
-  const wsData: any[][] = [];
+  const wsData: (string | number)[][] = [];
 
   // Add title row
   if (title) {

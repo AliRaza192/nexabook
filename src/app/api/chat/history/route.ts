@@ -1,17 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/db";
-import { profiles, chatMessages } from "@/db/schema";
+import { chatMessages } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
-
-async function getCurrentOrgId(userId: string): Promise<string | null> {
-  const userProfile = await db
-    .select({ orgId: profiles.orgId })
-    .from(profiles)
-    .where(eq(profiles.userId, userId))
-    .limit(1);
-  return userProfile.length > 0 && userProfile[0].orgId ? userProfile[0].orgId : null;
-}
+import { getCurrentOrgId } from "@/lib/actions/shared";
 
 export async function GET() {
   try {
@@ -20,7 +12,7 @@ export async function GET() {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    const orgId = await getCurrentOrgId(userId);
+    const orgId = await getCurrentOrgId();
     if (!orgId) {
       return NextResponse.json({ success: false, error: "Organization not found" }, { status: 404 });
     }

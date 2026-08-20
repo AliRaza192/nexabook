@@ -1,24 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/db";
-import { paymentTransactions, profiles } from "@/db/schema";
+import { paymentTransactions } from "@/db/schema";
 import { eq } from "drizzle-orm";
-
-async function getCurrentOrgId(userId: string): Promise<string | null> {
-  const userProfile = await db
-    .select({ orgId: profiles.orgId })
-    .from(profiles)
-    .where(eq(profiles.userId, userId))
-    .limit(1);
-  return userProfile.length > 0 && userProfile[0].orgId ? userProfile[0].orgId : null;
-}
+import { getCurrentOrgId } from "@/lib/actions/shared";
 
 export async function POST(request: NextRequest) {
   try {
     const { userId } = await auth();
     if (!userId) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
-    const orgId = await getCurrentOrgId(userId);
+    const orgId = await getCurrentOrgId();
     if (!orgId) return NextResponse.json({ success: false, error: "Organization not found" }, { status: 404 });
 
     const { invoiceId, customerId, amount, gateway, returnOrigin, customerInfo } = await request.json();

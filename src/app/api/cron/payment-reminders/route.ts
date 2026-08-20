@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { invoices, customers, organizations, reminderSettings } from "@/db/schema";
-import { eq, and, sql, lte } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
+import { sendTextMessage, isWhatsAppConfigured } from "@/lib/utils/whatsapp";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -10,7 +11,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Get all orgs with active reminder settings
+    const whatsappEnabled = isWhatsAppConfigured();
+
     const activeOrgs = await db
       .select({
         orgId: reminderSettings.orgId,
@@ -25,10 +27,9 @@ export async function GET(request: NextRequest) {
       .innerJoin(organizations, eq(reminderSettings.orgId, organizations.id))
       .where(eq(reminderSettings.isActive, true));
 
-    const results: string[] = [];
+    const results: { customer: string; phone: string | null; message: string; sent: boolean }[] = [];
 
     for (const org of activeOrgs) {
-      // Find invoices due within the reminder window
       const today = new Date();
       const beforeDate = new Date();
       beforeDate.setDate(today.getDate() + org.daysBefore);
@@ -64,13 +65,28 @@ export async function GET(request: NextRequest) {
           .replace(/{amount}/g, inv.netAmount)
           .replace(/{dueDate}/g, inv.dueDate?.toLocaleDateString("en-PK") || "N/A");
 
-        results.push(`${inv.customerName} (${inv.customerPhone}): ${message}`);
+        let sent = false;
+        if (whatsappEnabled && inv.customerPhone) {
+          const result = await sendTextMessage(inv.customerPhone, message);
+          sent = result.success;
+          if (!result.success) {
+            console.error(`WhatsApp send failed for ${inv.customerPhone}: ${result.error}`);
+          }
+        }
+
+        results.push({
+          customer: inv.customerName || "Unknown",
+          phone: inv.customerPhone,
+          message,
+          sent,
+        });
       }
     }
 
     return NextResponse.json({
       success: true,
       processed: results.length,
+      whatsappEnabled,
       messages: results,
     });
   } catch (err) {

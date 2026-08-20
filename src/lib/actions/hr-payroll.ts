@@ -15,7 +15,8 @@ import {
 import { eq, and, desc, asc, ilike, or, sql, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
+import { checkPeriodLocked } from "./fiscal-periods";
 import { validateJournalBalance } from "../accounting";
 
 // Helper: Get current user name
@@ -104,7 +105,7 @@ export async function getEmployees(status?: string, searchQuery?: string, depart
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch employees" };
   }
 }
@@ -125,7 +126,7 @@ export async function getEmployee(id: string) {
 
     return { success: true, data: result[0] };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch employee" };
   }
 }
@@ -184,8 +185,8 @@ export async function createEmployee(data: EmployeeFormData) {
 
     revalidatePath('/hr-payroll/employees');
     return { success: true, data: newEmployee, message: "Employee created successfully" };
-  } catch (error: any) {
-    if (error.code === '23505') { // Unique violation
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code: string }).code === '23505') { // Unique violation
       return { success: false, error: "Employee code already exists" };
     }
     return { success: false, error: "Failed to create employee" };
@@ -249,8 +250,8 @@ export async function updateEmployee(id: string, data: EmployeeFormData) {
 
     revalidatePath('/hr-payroll/employees');
     return { success: true, data: updatedEmployee, message: "Employee updated successfully" };
-  } catch (error: any) {
-    if (error.code === '23505') {
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code: string }).code === '23505') {
       return { success: false, error: "Employee code already exists" };
     }
     return { success: false, error: "Failed to update employee" };
@@ -284,7 +285,7 @@ export async function deleteEmployee(id: string) {
     revalidatePath('/hr-payroll/employees');
     return { success: true, message: "Employee removed successfully" };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to remove employee" };
   }
 }
@@ -334,7 +335,7 @@ export async function getAttendance(startDate: string, endDate: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch attendance" };
   }
 }
@@ -396,7 +397,7 @@ export async function markAttendance(records: AttendanceRecord[]) {
     revalidatePath('/hr-payroll/attendance');
     return { success: true, message: `Attendance marked for ${records.length} employees` };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to mark attendance" };
   }
 }
@@ -567,7 +568,7 @@ export async function getPayrollCalculations(month: number, year: number) {
 
     return { success: true, data: calculations };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to calculate payroll" };
   }
 }
@@ -575,8 +576,12 @@ export async function getPayrollCalculations(month: number, year: number) {
 // Generate and approve payroll
 export async function generateAndApprovePayroll(month: number, year: number, calculations: PayrollCalculation[]) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
+
+    const locked = await checkPeriodLocked(new Date(year, month - 1, 1));
+    if (locked) return { success: false, error: "Cannot process payroll for a locked fiscal period" };
 
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Not authenticated" };
@@ -810,7 +815,7 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
       journalEntryId: journalEntry.id,
     };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to process payroll" };
   }
 }
@@ -831,7 +836,7 @@ export async function getPayrollRuns() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch payroll runs" };
   }
 }
@@ -850,7 +855,7 @@ export async function getPayslips(payrollRunId: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch payslips" };
   }
 }
@@ -871,7 +876,7 @@ export async function getPayslip(id: string) {
 
     return { success: true, data: result[0] };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch payslip" };
   }
 }
@@ -895,7 +900,7 @@ export async function markPayslipPaid(id: string, paymentMethod: string) {
     revalidatePath('/hr-payroll/reports');
     return { success: true, message: "Payslip marked as paid" };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to mark payslip as paid" };
   }
 }
@@ -919,7 +924,7 @@ export async function getDepartments() {
 
     return { success: true, data: departments };
   } catch (error) {
-    console.error("Error in hr-payroll.ts:", error);
+    console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to fetch departments" };
   }
 }
@@ -990,7 +995,7 @@ export async function generateBankFile(payrollRunId: string): Promise<{
       },
     };
   } catch (error) {
-    console.error("[generateBankFile]", error);
+    console.error("[generateBankFile]", error instanceof Error ? error.message : error);
     return { success: false, error: "Failed to generate bank file" };
   }
 }

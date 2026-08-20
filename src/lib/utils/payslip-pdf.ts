@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import autoTable, { type FontStyle } from 'jspdf-autotable';
 import { formatPKR, formatAmountWords } from '@/lib/utils/number-format';
 
 export interface PayslipData {
@@ -228,7 +228,8 @@ export function generatePayslipPDF(data: PayslipData, fileName?: string): void {
   doc.line(15, yPos, 195, yPos);
   yPos += 8;
   
-  const earningsBody: any[][] = [
+  type PdfCell = string | number | { content: string; styles: { fontStyle: FontStyle; textColor: [number, number, number] } };
+  const earningsBody: PdfCell[][] = [
     ['Basic Salary', formatPKR(data.basicSalary, 'south-asian')],
     ['House Rent', formatPKR(data.houseRent, 'south-asian')],
     ['Medical Allowance', formatPKR(data.medicalAllowance, 'south-asian')],
@@ -292,7 +293,7 @@ export function generatePayslipPDF(data: PayslipData, fileName?: string): void {
   doc.line(15, yPos, 195, yPos);
   yPos += 8;
   
-  const deductionsBody: any[][] = [
+  const deductionsBody: PdfCell[][] = [
     ['EOBI Deduction', formatPKR(data.eobiDeduction, 'south-asian')],
     ['Income Tax', formatPKR(data.incomeTax, 'south-asian')],
   ];
@@ -428,7 +429,11 @@ export function generatePayslipPDF(data: PayslipData, fileName?: string): void {
 /**
  * Helper: Convert payslip data to PDF format
  */
-export function downloadPayslip(payslip: any, employee: any, companyName: string, companyAddress: string, period: string) {
+export function downloadPayslip(payslip: Record<string, unknown>, employee: Record<string, unknown>, companyName: string, companyAddress: string, period: string) {
+  const s = (v: unknown): string => String(v ?? '');
+  const n = (v: unknown): number => parseFloat(String(v ?? '0'));
+  const i = (v: unknown): number => parseInt(String(v ?? '0'), 10);
+
   const data: PayslipData = {
     companyName,
     companyAddress,
@@ -439,38 +444,38 @@ export function downloadPayslip(payslip: any, employee: any, companyName: string
       day: 'numeric',
     }),
     
-    employeeName: employee?.fullName || payslip.employeeName || '',
-    employeeCode: employee?.employeeCode || payslip.employeeCode || '',
-    designation: employee?.designation || payslip.designation || '',
-    department: employee?.department || payslip.department || '',
-    cnic: employee?.cnic || payslip.cnic || '',
-    employeeId: payslip.id || '',
-    bankName: employee?.bankName || payslip.bankName || '',
-    accountNumber: employee?.accountNumber || payslip.accountNumber || '',
+    employeeName: s(employee?.fullName) || s(payslip.employeeName) || '',
+    employeeCode: s(employee?.employeeCode) || s(payslip.employeeCode) || '',
+    designation: s(employee?.designation) || s(payslip.designation) || '',
+    department: s(employee?.department) || s(payslip.department) || '',
+    cnic: s(employee?.cnic) || s(payslip.cnic) || '',
+    employeeId: s(payslip.id) || '',
+    bankName: s(employee?.bankName) || s(payslip.bankName) || '',
+    accountNumber: s(employee?.accountNumber) || s(payslip.accountNumber) || '',
     
-    basicSalary: parseFloat(payslip.basicSalary || '0'),
-    houseRent: parseFloat(payslip.houseRent || '0'),
-    medicalAllowance: parseFloat(payslip.medicalAllowance || '0'),
-    conveyanceAllowance: parseFloat(payslip.conveyanceAllowance || '0'),
-    otherAllowances: parseFloat(payslip.otherAllowances || '0'),
-    overtimePay: parseFloat(payslip.overtimePay || '0'),
-    bonus: parseFloat(payslip.bonus || '0'),
+    basicSalary: n(payslip.basicSalary),
+    houseRent: n(payslip.houseRent),
+    medicalAllowance: n(payslip.medicalAllowance),
+    conveyanceAllowance: n(payslip.conveyanceAllowance),
+    otherAllowances: n(payslip.otherAllowances),
+    overtimePay: n(payslip.overtimePay),
+    bonus: n(payslip.bonus),
     
-    eobiDeduction: parseFloat(payslip.eobiDeduction || '0'),
-    incomeTax: parseFloat(payslip.incomeTax || '0'),
-    providentFund: parseFloat(payslip.providentFund || '0'),
-    otherDeductions: parseFloat(payslip.otherDeductions || '0'),
-    unpaidLeaveDeduction: parseFloat(payslip.unpaidLeaveDeduction || '0'),
+    eobiDeduction: n(payslip.eobiDeduction),
+    incomeTax: n(payslip.incomeTax),
+    providentFund: n(payslip.providentFund),
+    otherDeductions: n(payslip.otherDeductions),
+    unpaidLeaveDeduction: n(payslip.unpaidLeaveDeduction),
     
-    totalEarnings: parseFloat(payslip.totalEarnings || '0'),
-    totalDeductions: parseFloat(payslip.totalDeductions || '0'),
-    netSalary: parseFloat(payslip.netSalary || '0'),
+    totalEarnings: n(payslip.totalEarnings),
+    totalDeductions: n(payslip.totalDeductions),
+    netSalary: n(payslip.netSalary),
     
-    presentDays: parseInt(payslip.presentDays || '0'),
-    absentDays: parseInt(payslip.absentDays || '0'),
-    leaveDays: parseInt(payslip.leaveDays || '0'),
-    unpaidLeaveDays: parseInt(payslip.unpaidLeaveDays || '0'),
-    totalWorkingDays: parseInt(payslip.totalWorkingDays || '0'),
+    presentDays: i(payslip.presentDays),
+    absentDays: i(payslip.absentDays),
+    leaveDays: i(payslip.leaveDays),
+    unpaidLeaveDays: i(payslip.unpaidLeaveDays),
+    totalWorkingDays: i(payslip.totalWorkingDays),
   };
   
   const fileName = `Payslip-${data.employeeCode}-${period.replace(/\s+/g, '-')}.pdf`;

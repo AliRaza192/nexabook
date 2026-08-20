@@ -1,8 +1,8 @@
 # NexaBook — Progress Tracker
 
-## Status: ✅ Completed — Sprint M (Multi-Company Consolidation)
-## Current Sprint: 16 complete
-## Last Completed: Sprint M — Multi-Company Consolidation
+## Status: ✅ Completed — Phase G Complete (All Sprints Done)
+## Current Sprint: All sprints complete
+## Last Completed: Phase G — All Remaining Sprints + RBAC + Period Locking
 
 ---
 
@@ -87,12 +87,12 @@
 ### Sprint 5 — Automated Payment Reminders
 - [x] 5.1 Reminder settings schema (`reminder_settings` table)
 - [x] 5.2 Cron job for daily reminders (`/api/cron/payment-reminders`)
-- [ ] 5.3 Reminder settings UI
+- [x] 5.3 Reminder settings UI (inline in settings page) + WhatsApp actual send in cron
 
 ### Sprint 6 — Recurring Invoice Auto-Generation
 - [x] 6.1 Schema exists — cron auto-trigger needed
 - [x] 6.2 Cron job (`/api/cron/recurring-invoices`)
-- [ ] 6.3 `vercel.json` cron configuration
+- [x] 6.3 `vercel.json` cron configuration (3 crons: reminders, recurring, low-stock)
 
 ### Sprint 7 — Low Stock Alerts
 - [x] 7.1 Low stock logic already exists
@@ -110,8 +110,8 @@
 
 ### Sprint 10 — Islamic Finance Mode
 - [x] 10.1 Islamic finance settings columns in `organizations` table
-- [ ] 10.2 Islamic terminology mapping (UI)
-- [ ] 10.3 Zakat calculator (UI)
+- [x] 10.2 Islamic terminology mapping (UI) — `/settings/islamic-terminology`
+- [x] 10.3 Zakat calculator (UI) — `/settings/zakat-calculator`
 
 ### Sprint K — Two-Factor Authentication
 - [x] K1: Clerk 2FA configuration — security settings page at `/settings/security`
@@ -144,6 +144,14 @@
 - [x] M5: Consolidated Balance Sheet at `/reports/consolidated-balance-sheet` — per-org breakdown with totals
 - [x] M6: Navigation — sidebar items under Reports + Settings
 - [x] M7: Migration SQL at `drizzle/0004_consolidation.sql`
+
+### Sprint P — RBAC & Period Locking Hardening
+- [x] P1: Fiscal period actions — `requireRole(["admin"])` on create/lock/delete
+- [x] P2: Critical purchase actions — RBAC + period lock on approve/revise/expense/payment/settlement
+- [x] P3: Critical sales actions — RBAC + period lock on delete/approve return/payment/settlement
+- [x] P4: Banking actions — RBAC + period lock on deposit/transfer/contra approval
+- [x] P5: Payroll — RBAC + period lock on payroll generation
+- [x] P6: Manual journal entries — RBAC on create/voucher creation
 
 ---
 1. `cat ROADMAP.md` — poori planning dekhein

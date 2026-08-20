@@ -5,7 +5,9 @@ import { profiles, digitalFteProducts, organizations } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import Stripe from "stripe";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+const stripeKey = process.env.STRIPE_SECRET_KEY;
+if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not configured");
+const stripe = new Stripe(stripeKey, {
   apiVersion: "2026-06-24.dahlia",
 });
 

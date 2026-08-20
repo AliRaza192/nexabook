@@ -47,8 +47,8 @@ export async function getOrgHierarchy() {
       success: true as const,
       data: { current, root: root || current, children: childOrgs.filter((o) => o.id !== orgId && o.id !== rootOrgId) },
     };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to load hierarchy" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to load hierarchy" };
   }
 }
 
@@ -69,8 +69,8 @@ export async function linkChildOrg(childOrgId: string) {
 
     revalidatePath("/settings/consolidation");
     return { success: true as const, message: "Child company linked" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to link org" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to link org" };
   }
 }
 
@@ -86,8 +86,8 @@ export async function unlinkChildOrg(childOrgId: string) {
 
     revalidatePath("/settings/consolidation");
     return { success: true as const, message: "Child company unlinked" };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to unlink org" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to unlink org" };
   }
 }
 
@@ -108,8 +108,8 @@ export async function getAvailableOrgsForConsolidation() {
       .orderBy(organizations.name);
 
     return { success: true as const, data: allOrgs };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to load orgs" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to load orgs" };
   }
 }
 
@@ -162,7 +162,8 @@ export async function getConsolidatedPandL(dateFrom: string, dateTo: string) {
       .groupBy(journalEntryLines.orgId, journalEntryLines.accountId, chartOfAccounts.subType, chartOfAccounts.type, chartOfAccounts.name);
 
     // Group by org
-    const orgMap = new Map<string, { income: any[]; expense: any[]; totalIncome: number; totalExpense: number }>();
+    type AccountEntry = { accountId: string; name: string; balance: number };
+    const orgMap = new Map<string, { income: AccountEntry[]; expense: AccountEntry[]; totalIncome: number; totalExpense: number }>();
     for (const info of orgInfo) {
       orgMap.set(info.id, { income: [], expense: [], totalIncome: 0, totalExpense: 0 });
     }
@@ -205,8 +206,8 @@ export async function getConsolidatedPandL(dateFrom: string, dateTo: string) {
     consolidated.netProfit = consolidated.totalIncome - consolidated.totalExpense;
 
     return { success: true as const, data: consolidated };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to generate consolidated P&L" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to generate consolidated P&L" };
   }
 }
 
@@ -246,7 +247,8 @@ export async function getConsolidatedBalanceSheet(asOfDate: string) {
       ))
       .groupBy(journalEntryLines.orgId, journalEntryLines.accountId, chartOfAccounts.type, chartOfAccounts.name, chartOfAccounts.subType);
 
-    const orgMap = new Map<string, { assets: any[]; liabilities: any[]; equity: any[]; totalAssets: number; totalLiabilities: number; totalEquity: number }>();
+    type AccountEntry = { accountId: string; name: string; balance: number };
+    const orgMap = new Map<string, { assets: AccountEntry[]; liabilities: AccountEntry[]; equity: AccountEntry[]; totalAssets: number; totalLiabilities: number; totalEquity: number }>();
     for (const info of orgInfo) {
       orgMap.set(info.id, { assets: [], liabilities: [], equity: [], totalAssets: 0, totalLiabilities: 0, totalEquity: 0 });
     }
@@ -284,7 +286,7 @@ export async function getConsolidatedBalanceSheet(asOfDate: string) {
     consolidated.totalEquity = consolidated.orgs.reduce((s, o) => s + o.totalEquity, 0);
 
     return { success: true as const, data: consolidated };
-  } catch (error: any) {
-    return { success: false as const, error: error.message || "Failed to generate consolidated balance sheet" };
+  } catch (error: unknown) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Failed to generate consolidated balance sheet" };
   }
 }

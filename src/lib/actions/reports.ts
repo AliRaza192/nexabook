@@ -567,18 +567,15 @@ export async function getTrialBalanceReport(asOfDate: string) {
       const result = balanceMap.get(account.id);
       const debit = result?.debit ?? 0;
       const credit = result?.credit ?? 0;
-      const balance = debit - credit;
 
-      if (balance !== 0) {
-        accountBalances.push({
-          ...account,
-          debit: balance > 0 ? balance : 0,
-          credit: balance < 0 ? Math.abs(balance) : 0,
-        });
+      accountBalances.push({
+        ...account,
+        debit,
+        credit,
+      });
 
-        if (balance > 0) totalDebit += balance;
-        else totalCredit += Math.abs(balance);
-      }
+      totalDebit += debit;
+      totalCredit += credit;
     }
 
     return {
@@ -2302,7 +2299,25 @@ export async function getProductSalesReport(
       .orderBy(products.name, desc(invoices.issueDate));
 
     // Aggregate by product
-    const productMap: Record<string, any> = {};
+    const productMap: Record<string, {
+      productId: string | null;
+      productName: string;
+      sku: string | null;
+      category: string;
+      totalQty: number;
+      totalRevenue: number;
+      totalCost: number;
+      grossProfit: number;
+      invoiceCount: number;
+      transactions: Array<{
+        date: Date;
+        invoiceNumber: string;
+        customer: string | null;
+        qty: number;
+        unitPrice: number;
+        lineTotal: number;
+      }>;
+    }> = {};
     for (const r of rows) {
       const key = r.productId || r.productName || "Unknown";
       if (!productMap[key]) {
@@ -2338,11 +2353,11 @@ export async function getProductSalesReport(
     }
 
     const summary = Object.values(productMap).sort(
-      (a: any, b: any) => b.totalRevenue - a.totalRevenue
+      (a, b) => b.totalRevenue - a.totalRevenue
     );
 
     const totals = summary.reduce(
-      (acc: any, p: any) => ({
+      (acc, p) => ({
         totalQty: acc.totalQty + p.totalQty,
         totalRevenue: acc.totalRevenue + p.totalRevenue,
         totalCost: acc.totalCost + p.totalCost,
@@ -2406,7 +2421,24 @@ export async function getDiscountSummaryReport(
       .orderBy(desc(invoices.issueDate));
 
     // Group by invoice
-    const invoiceMap: Record<string, any> = {};
+    const invoiceMap: Record<string, {
+      invoiceId: string;
+      invoiceNumber: string;
+      issueDate: Date;
+      customerName: string | null;
+      grossAmount: number;
+      discountAmount: number;
+      netAmount: number;
+      discountPct: number;
+      items: Array<{
+        productName: string;
+        qty: number;
+        unitPrice: number;
+        discountPct: number;
+        discountAmt: number;
+        lineTotal: number;
+      }>;
+    }> = {};
     for (const r of rows) {
       if (!invoiceMap[r.invoiceId]) {
         invoiceMap[r.invoiceId] = {
@@ -2443,11 +2475,11 @@ export async function getDiscountSummaryReport(
     }
 
     const invoiceRows = Object.values(invoiceMap).filter(
-      (i: any) => i.discountAmount > 0
+      (i) => i.discountAmount > 0
     );
 
     const totals = invoiceRows.reduce(
-      (acc: any, r: any) => ({
+      (acc, r) => ({
         grossAmount: acc.grossAmount + r.grossAmount,
         discountAmount: acc.discountAmount + r.discountAmount,
         netAmount: acc.netAmount + r.netAmount,

@@ -93,11 +93,12 @@ export async function GET(request: NextRequest) {
           status: "success",
           transactions: syncResult.transactions.length,
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unknown error";
         await db.update(bankConnections)
-          .set({ lastSyncStatus: "failed", errorMessage: err.message, updatedAt: new Date() })
+          .set({ lastSyncStatus: "failed", errorMessage: message, updatedAt: new Date() })
           .where(eq(bankConnections.id, conn.id));
-        results.push({ connectionId: conn.id, status: "error", error: err.message });
+        results.push({ connectionId: conn.id, status: "error", error: message });
       }
     }
 
