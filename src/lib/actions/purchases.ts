@@ -459,6 +459,8 @@ export async function approvePurchaseInvoice(invoiceId: string) {
           referenceType: 'purchase_invoice',
           referenceId: invoiceId,
           description: `Purchase Invoice ${invoice.billNumber} approval`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
 
@@ -644,7 +646,7 @@ export async function revisePurchaseInvoice(invoiceId: string) {
         .from(journalEntries)
         .where(and(
           eq(journalEntries.orgId, orgId),
-          eq(journalEntries.referenceType, 'purchase'),
+          eq(journalEntries.referenceType, 'purchase_invoice'),
           eq(journalEntries.referenceId, invoiceId)
         ))
         .limit(1);
@@ -668,6 +670,8 @@ export async function revisePurchaseInvoice(invoiceId: string) {
           referenceType: 'purchase_invoice_revision',
           referenceId: invoiceId,
           description: `Purchase Invoice ${invoice.billNumber} revision - reversal`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
 
@@ -818,6 +822,8 @@ export async function recordExpense(data: ExpenseFormData) {
         referenceType: 'expense',
         referenceId: newExpense.id,
         description: `Expense: ${data.description || data.reference || 'Recorded'}`,
+        status: "posted",
+        postedAt: new Date(),
       })
       .returning();
 
@@ -1651,6 +1657,8 @@ export async function approvePurchaseReturn(id: string) {
         referenceType: 'purchase_return',
         referenceId: id,
         description: `Purchase Return ${purchaseReturn.returnNumber} - Debit Note`,
+        status: "posted",
+        postedAt: new Date(),
       }).returning();
 
       const [accountsPayable] = await tx.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'accounts_payable'))).limit(1);
@@ -1836,6 +1844,8 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
         referenceType: 'vendor_payment',
         referenceId: newPayment.id,
         description: `Vendor Payment ${paymentNumber}${whtAmount > 0 ? ` (WHT: ${whtAmount.toFixed(2)})` : ''}`,
+        status: "posted",
+        postedAt: new Date(),
       }).returning();
 
       // Debit: Accounts Payable (full invoice amount)
@@ -1878,9 +1888,9 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
     }
 
     // Update vendor balance (reduce payable by full amount)
-    const [vendor] = await db.select().from(vendors).where(eq(vendors.id, data.vendorId)).limit(1);
+    const [vendor] = await db.select().from(vendors).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId))).limit(1);
     if (vendor) {
-      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${paymentAmount}, 0)` }).where(eq(vendors.id, data.vendorId));
+      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${paymentAmount}, 0)` }).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId)));
     }
 
     revalidatePath('/purchases/payments');
@@ -1897,7 +1907,7 @@ export async function allocateVendorPayment(paymentId: string, allocations: Arra
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const [payment] = await db.select().from(vendorPayments).where(eq(vendorPayments.id, paymentId)).limit(1);
+    const [payment] = await db.select().from(vendorPayments).where(and(eq(vendorPayments.id, paymentId), eq(vendorPayments.orgId, orgId))).limit(1);
     if (!payment) return { success: false, error: "Payment not found" };
 
     for (const alloc of allocations) {
@@ -2029,9 +2039,9 @@ export async function createVendorSettlement(data: {
     }
 
     // Update vendor balance (reduce payable)
-    const [vendor] = await db.select().from(vendors).where(eq(vendors.id, data.vendorId)).limit(1);
+    const [vendor] = await db.select().from(vendors).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId))).limit(1);
     if (vendor) {
-      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${totalSettlement}, 0)` }).where(eq(vendors.id, data.vendorId));
+      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${totalSettlement}, 0)` }).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId)));
     }
 
     revalidatePath('/purchases/settlement');

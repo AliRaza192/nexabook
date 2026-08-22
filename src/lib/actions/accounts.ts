@@ -290,6 +290,8 @@ export async function createJournalEntry(data: JournalEntryData) {
           entryDate: new Date(data.date),
           referenceType: 'manual',
           description: data.description,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
 
@@ -1242,6 +1244,8 @@ const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
           entryDate: new Date(data.date),
           referenceType: data.voucherType.toLowerCase(),
           description: data.description,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
 

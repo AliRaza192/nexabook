@@ -57,10 +57,19 @@ export async function linkChildOrg(childOrgId: string) {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
 
+    if (childOrgId === orgId) return { success: false as const, error: "Cannot link yourself as child" };
+
+    const [child] = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, childOrgId))
+      .limit(1);
+    if (!child) return { success: false as const, error: "Child organization not found" };
+
     await db
       .update(organizations)
       .set({ parentOrgId: orgId, consolidationEnabled: true, updatedAt: new Date() })
-      .where(eq(organizations.id, childOrgId));
+      .where(and(eq(organizations.id, childOrgId), sql`${organizations.id} != ${orgId}`));
 
     await db
       .update(organizations)
@@ -79,10 +88,18 @@ export async function unlinkChildOrg(childOrgId: string) {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
 
+    const [child] = await db
+      .select({ id: organizations.id, parentOrgId: organizations.parentOrgId })
+      .from(organizations)
+      .where(eq(organizations.id, childOrgId))
+      .limit(1);
+    if (!child) return { success: false as const, error: "Child organization not found" };
+    if (child.parentOrgId !== orgId) return { success: false as const, error: "This organization is not linked to yours" };
+
     await db
       .update(organizations)
       .set({ parentOrgId: null, consolidationEnabled: false, updatedAt: new Date() })
-      .where(eq(organizations.id, childOrgId));
+      .where(and(eq(organizations.id, childOrgId), eq(organizations.parentOrgId, orgId)));
 
     revalidatePath("/settings/consolidation");
     return { success: true as const, message: "Child company unlinked" };

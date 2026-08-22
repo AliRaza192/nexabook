@@ -375,6 +375,7 @@ export async function approveStockAdjustment(adjustmentId: string) {
           referenceType: "stock_adjustment",
           referenceId: adjustmentId,
           status: "posted",
+          postedAt: new Date(),
           sourceType: "inventory",
         }).returning();
 
@@ -405,6 +406,7 @@ export async function approveStockAdjustment(adjustmentId: string) {
           referenceType: "stock_adjustment",
           referenceId: adjustmentId,
           status: "posted",
+          postedAt: new Date(),
           sourceType: "inventory",
         }).returning();
 

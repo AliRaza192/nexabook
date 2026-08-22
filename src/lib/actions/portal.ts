@@ -4,14 +4,26 @@ import { db } from "@/db";
 import { customers, invoices, organizations, vendors, purchaseInvoices } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import crypto from "crypto";
+import { getCurrentOrgId, requireRole } from "./shared";
 
 export async function generatePortalToken(customerId: string) {
   try {
+    await requireRole(["admin"]);
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [customer] = await db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(and(eq(customers.id, customerId), eq(customers.orgId, orgId)))
+      .limit(1);
+    if (!customer) return { success: false, error: "Customer not found in your organization" };
+
     const token = crypto.randomBytes(32).toString("hex");
     await db
       .update(customers)
       .set({ portalToken: token, updatedAt: new Date() })
-      .where(eq(customers.id, customerId));
+      .where(and(eq(customers.id, customerId), eq(customers.orgId, orgId)));
     return { success: true, token };
   } catch (error) {
     console.error("Error in portal.ts:", error);
@@ -75,11 +87,22 @@ export async function getPortalData(token: string) {
 
 export async function generateVendorPortalToken(vendorId: string) {
   try {
+    await requireRole(["admin"]);
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const [vendor] = await db
+      .select({ id: vendors.id })
+      .from(vendors)
+      .where(and(eq(vendors.id, vendorId), eq(vendors.orgId, orgId)))
+      .limit(1);
+    if (!vendor) return { success: false, error: "Vendor not found in your organization" };
+
     const token = crypto.randomBytes(32).toString("hex");
     await db
       .update(vendors)
       .set({ portalToken: token, updatedAt: new Date() })
-      .where(eq(vendors.id, vendorId));
+      .where(and(eq(vendors.id, vendorId), eq(vendors.orgId, orgId)));
     return { success: true, token };
   } catch (error) {
     console.error("Error in portal.ts:", error);

@@ -11,9 +11,10 @@ import {
   customers,
   invoices,
   invoiceItems,
-  productCategories
+  productCategories,
+  productBatches,
 } from "@/db/schema";
-import { eq, and, desc, or, ilike, sum, gte, lte, sql, count as countFn } from "drizzle-orm";
+import { eq, and, desc, or, ilike, sum, gte, lte, sql, count as countFn, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
@@ -142,6 +143,8 @@ export async function startShift(openingAmount: number) {
         referenceType: 'pos_shift',
         referenceId: userId as any,
         description: 'open',
+        status: "posted",
+        postedAt: new Date(),
       })
       .returning();
 
@@ -165,6 +168,8 @@ export async function startShift(openingAmount: number) {
           referenceType: 'pos_shift_opening',
           referenceId: shift.id,
           description: `POS Shift Opening - Rs. ${openingAmount.toFixed(2)}`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
 
@@ -290,6 +295,8 @@ export async function endShift(actualCash: number, expectedCash: number) {
           referenceType: 'pos_shift_closing',
           referenceId: openShift.id,
           description: `POS Shift Closing - Expected: ${expectedCash.toFixed(2)}, Actual: ${actualCash.toFixed(2)}, Variance: ${variance.toFixed(2)}`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
     }
@@ -421,7 +428,7 @@ export async function processPosSale(saleData: PosSaleData) {
       const [product] = await db
         .select({ currentStock: products.currentStock })
         .from(products)
-        .where(eq(products.id, item.productId))
+        .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
         .limit(1);
 
       if (product) {
@@ -429,8 +436,21 @@ export async function processPosSale(saleData: PosSaleData) {
         await db
           .update(products)
           .set({ currentStock: String(newStock) })
-          .where(eq(products.id, item.productId));
+          .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)));
       }
+    }
+
+    // ACC-13: Batch-fetch product costs for COGS calculation
+    const productIds = saleData.items.map((i) => i.productId);
+    const costProducts = await db
+      .select({ id: products.id, costPrice: products.costPrice })
+      .from(products)
+      .where(and(inArray(products.id, productIds), eq(products.orgId, orgId)));
+    const costMap = new Map(costProducts.map((p) => [p.id, parseFloat(p.costPrice || "0")]));
+
+    let totalCOGS = 0;
+    for (const item of saleData.items) {
+      totalCOGS += item.quantity * (costMap.get(item.productId) || 0);
     }
 
     // Create journal entry
@@ -444,6 +464,8 @@ export async function processPosSale(saleData: PosSaleData) {
         referenceType: 'pos_sale',
         referenceId: invoice.id,
         description: `POS Sale ${invoiceNumber}`,
+        status: "posted",
+        postedAt: new Date(),
       })
       .returning();
 
@@ -466,18 +488,22 @@ export async function processPosSale(saleData: PosSaleData) {
       .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'tax_payable')))
       .limit(1);
 
-    if (posCashAccount && salesRevenue) {
-      const lineAmounts: { debitAmount: string; creditAmount: string }[] = [
-        { debitAmount: netAmount.toFixed(2), creditAmount: '0' },
-        { debitAmount: '0', creditAmount: (grossAmount - globalDiscount - totalDiscount).toFixed(2) },
-      ];
-      if (totalTax > 0 && salesTaxPayable) {
-        lineAmounts.push({ debitAmount: '0', creditAmount: totalTax.toFixed(2) });
-      }
-      if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance: total debits must equal total credits");
+    const [cogsAcc] = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cogs')))
+      .limit(1);
 
-      // Debit: POS Cash
-      await db.insert(journalEntryLines).values({
+    const [invAcc] = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'inventory')))
+      .limit(1);
+
+    if (posCashAccount && salesRevenue) {
+      const jeLines: typeof journalEntryLines.$inferInsert[] = [];
+
+      jeLines.push({
         orgId,
         journalEntryId: journalEntry.id,
         accountId: posCashAccount.id,
@@ -486,8 +512,7 @@ export async function processPosSale(saleData: PosSaleData) {
         creditAmount: '0',
       });
 
-      // Credit: Sales Revenue
-      await db.insert(journalEntryLines).values({
+      jeLines.push({
         orgId,
         journalEntryId: journalEntry.id,
         accountId: salesRevenue.id,
@@ -496,9 +521,8 @@ export async function processPosSale(saleData: PosSaleData) {
         creditAmount: (grossAmount - globalDiscount - totalDiscount).toFixed(2),
       });
 
-      // Credit: Sales Tax Payable
       if (totalTax > 0 && salesTaxPayable) {
-        await db.insert(journalEntryLines).values({
+        jeLines.push({
           orgId,
           journalEntryId: journalEntry.id,
           accountId: salesTaxPayable.id,
@@ -507,6 +531,29 @@ export async function processPosSale(saleData: PosSaleData) {
           creditAmount: totalTax.toFixed(2),
         });
       }
+
+      if (totalCOGS > 0 && cogsAcc && invAcc) {
+        jeLines.push({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: cogsAcc.id,
+          description: `Debit - COGS (POS Sale ${invoiceNumber})`,
+          debitAmount: totalCOGS.toFixed(2),
+          creditAmount: '0',
+        });
+        jeLines.push({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: invAcc.id,
+          description: `Credit - Inventory (POS Sale ${invoiceNumber})`,
+          debitAmount: '0',
+          creditAmount: totalCOGS.toFixed(2),
+        });
+      }
+
+      if (!validateJournalBalance(jeLines as { debitAmount: string; creditAmount: string }[])) throw new Error("Journal entry out of balance: total debits must equal total credits");
+
+      await db.insert(journalEntryLines).values(jeLines);
     }
 
     // Earn loyalty points (1 point per 100 PKR spent)
@@ -518,7 +565,7 @@ export async function processPosSale(saleData: PosSaleData) {
           loyaltyPoints: sql`COALESCE(${customers.loyaltyPoints}, 0) + ${pointsToEarn}`,
           updatedAt: new Date(),
         })
-        .where(eq(customers.id, saleData.customerId));
+        .where(and(eq(customers.id, saleData.customerId), eq(customers.orgId, orgId)));
     }
 
     // Audit log
@@ -921,6 +968,8 @@ export async function generatePOSReport(
             referenceType: 'pos_shift_closing',
             referenceId: shiftId,
             description: `POS Z-Report Closing - ${reportNumber}`,
+            status: "posted",
+            postedAt: new Date(),
           })
           .returning();
       }

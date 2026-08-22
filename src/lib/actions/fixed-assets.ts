@@ -545,6 +545,8 @@ export async function postDepreciation(
         referenceType: "depreciation",
         referenceId: assetId,
         description: `Depreciation for ${asset.name} - ${MONTH_NAMES[month - 1]} ${year}`,
+        status: "posted",
+        postedAt: new Date(),
       })
       .returning();
 

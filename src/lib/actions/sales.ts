@@ -1012,8 +1012,16 @@ export async function approveInvoice(invoiceId: string) {
           referenceType: "invoice",
           referenceId: invoiceId,
           description: `Invoice ${invoice.invoiceNumber} approval`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
+
+      // Write journalEntryId back to invoice (ACC-05)
+      await tx
+        .update(invoices)
+        .set({ journalEntryId: journalEntry.id })
+        .where(eq(invoices.id, invoiceId));
 
       // Account Lookups
       const [ar] = await tx
@@ -1283,9 +1291,14 @@ export async function updateInvoiceStatus(
     | "cancelled",
 ) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) {
       return { success: false, error: "No organization found" };
+    }
+
+    if (status === "approved") {
+      return { success: false, error: "Use approveInvoice for approval — it creates required journal entries and stock adjustments" };
     }
 
     const [updatedInvoice] = await db
@@ -1418,6 +1431,7 @@ export async function deleteInvoice(invoiceId: string) {
           referenceType: "reversal",
           referenceId: invoiceId,
           status: "posted",
+          postedAt: new Date(),
           sourceType: "invoice",
         }).returning();
 
@@ -2481,13 +2495,13 @@ export async function createDeliveryNote(data: DeliveryNoteFormData) {
       const [inv] = await db
         .select()
         .from(invoices)
-        .where(eq(invoices.id, data.invoiceId))
+        .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, orgId)))
         .limit(1);
       if (inv && inv.status === "approved") {
         await db
           .update(invoices)
           .set({ status: "sent" })
-          .where(eq(invoices.id, data.invoiceId));
+          .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, orgId)));
       }
     }
     revalidatePath("/sales/delivery");
@@ -3102,6 +3116,8 @@ export async function approveSalesReturn(returnId: string) {
             referenceType: "sales_return",
             referenceId: returnId,
             description: `Sales Return ${salesReturn.returnNumber} - Stock Reversal & Refund`,
+            status: "posted",
+            postedAt: new Date(),
           })
           .returning();
 
@@ -3245,7 +3261,7 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
         const [inv] = await db
           .select()
           .from(invoices)
-          .where(eq(invoices.id, alloc.invoiceId))
+          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)))
           .limit(1);
         if (inv) {
           const newBalance =
@@ -3264,7 +3280,7 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
           await db
             .update(invoices)
             .set({ balanceAmount: newBalance.toFixed(2), status: newStatus })
-            .where(eq(invoices.id, alloc.invoiceId));
+            .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)));
         }
       }
     }
@@ -3313,6 +3329,8 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
           referenceType: "customer_payment",
           referenceId: newPayment.id,
           description: `Customer Payment ${paymentNumber}`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
       const paymentLines = [
@@ -3365,7 +3383,7 @@ export async function allocatePayment(
     const [payment] = await db
       .select()
       .from(customerPayments)
-      .where(eq(customerPayments.id, paymentId))
+      .where(and(eq(customerPayments.id, paymentId), eq(customerPayments.orgId, orgId)))
       .limit(1);
     if (!payment) return { success: false, error: "Payment not found" };
     for (const alloc of allocations) {
@@ -3380,7 +3398,7 @@ export async function allocatePayment(
       const [inv] = await db
         .select()
         .from(invoices)
-        .where(eq(invoices.id, alloc.invoiceId))
+        .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)))
         .limit(1);
       if (inv) {
         const newBalance =
@@ -3399,7 +3417,7 @@ export async function allocatePayment(
         await db
           .update(invoices)
           .set({ balanceAmount: newBalance.toFixed(2), status: newStatus })
-          .where(eq(invoices.id, alloc.invoiceId));
+          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)));
       }
     }
     revalidatePath("/sales/receive-payment");

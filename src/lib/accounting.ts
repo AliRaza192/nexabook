@@ -70,7 +70,7 @@ export async function getTrialBalance(orgId: string) {
     )
     .where(and(
       eq(journalEntryLines.orgId, orgId),
-      sql`${journalEntries.status} != 'draft'`,
+      sql`${journalEntries.status} = 'posted'`,
     ))
     .groupBy(journalEntryLines.accountId);
 
@@ -134,7 +134,7 @@ export async function getProfitAndLoss(
         eq(journalEntryLines.orgId, orgId),
         sql`${journalEntries.entryDate} >= ${new Date(fromDate)}`,
         sql`${journalEntries.entryDate} <= ${new Date(toDate)}`,
-        sql`${journalEntries.status} != 'draft'`,
+        sql`${journalEntries.status} = 'posted'`,
       )
     )
     .groupBy(journalEntryLines.accountId);
@@ -202,7 +202,7 @@ export async function getBalanceSheet(orgId: string, asOfDate?: Date) {
     )
     .where(and(
       eq(journalEntryLines.orgId, orgId),
-      sql`${journalEntries.status} != 'draft'`,
+      sql`${journalEntries.status} = 'posted'`,
       dateFilter,
     ))
     .groupBy(journalEntryLines.accountId);

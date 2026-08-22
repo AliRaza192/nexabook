@@ -75,7 +75,7 @@ export async function getProfitAndLossReport(dateFrom: string, dateTo: string) {
         inArray(journalEntryLines.accountId, allRelevantIds),
         gte(journalEntries.entryDate, fromDate),
         lte(journalEntries.entryDate, toDate),
-        sql`${journalEntries.status} != 'draft'`,
+        sql`${journalEntries.status} = 'posted'`,
       ))
       .groupBy(journalEntryLines.accountId) : [];
 
@@ -300,7 +300,7 @@ export async function getBalanceSheetReport(asOfDate: string) {
         inArray(journalEntryLines.accountId, allAccountIds),
         eq(journalEntryLines.orgId, orgId),
         lte(journalEntries.entryDate, reportDate),
-        sql`${journalEntries.status} != 'draft'`,
+        sql`${journalEntries.status} = 'posted'`,
       ))
       .groupBy(journalEntryLines.accountId) : [];
 
@@ -551,7 +551,7 @@ export async function getTrialBalanceReport(asOfDate: string) {
         eq(journalEntryLines.orgId, orgId),
         inArray(journalEntryLines.accountId, accountIds),
         lte(journalEntries.entryDate, reportDate),
-        sql`${journalEntries.status} != 'draft'`,
+        sql`${journalEntries.status} = 'posted'`,
       ))
       .groupBy(journalEntryLines.accountId);
 
@@ -2968,7 +2968,7 @@ async function getNetIncomeForPeriod(orgId: string, fromDate: Date, toDate: Date
       eq(journalEntryLines.orgId, orgId),
       gte(journalEntries.entryDate, fromDate),
       lte(journalEntries.entryDate, toDate),
-      sql`${journalEntries.status} != 'draft'`,
+      sql`${journalEntries.status} = 'posted'`,
     ))
     .groupBy(journalEntryLines.accountId);
 
@@ -3001,7 +3001,7 @@ async function getAccountBalancesAsOf(orgId: string, asOfDate: Date): Promise<Ma
     .where(and(
       eq(journalEntryLines.orgId, orgId),
       lte(journalEntries.entryDate, asOfDate),
-      sql`${journalEntries.status} != 'draft'`,
+      sql`${journalEntries.status} = 'posted'`,
     ))
     .groupBy(journalEntryLines.accountId);
 

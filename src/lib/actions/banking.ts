@@ -133,6 +133,8 @@ export async function addBankAccount(data: BankAccountFormData) {
           referenceType: "bank_opening_balance",
           referenceId: newAccount.id,
           description: `Opening balance for ${data.accountName}`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
 
@@ -365,6 +367,8 @@ export async function approveBankDeposit(depositId: string) {
         referenceType: "bank_deposit",
         referenceId: deposit.id,
         description: `Bank deposit ${deposit.depositNumber}`,
+        status: "posted",
+        postedAt: new Date(),
       })
       .returning();
 
@@ -546,6 +550,8 @@ export async function approveFundsTransfer(transferId: string) {
         referenceType: "funds_transfer",
         referenceId: transfer.id,
         description: `Funds transfer ${transfer.transferNumber}`,
+        status: "posted",
+        postedAt: new Date(),
       })
       .returning();
 
@@ -963,6 +969,8 @@ export async function createContraEntry(data: ContraEntryFormData) {
         entryDate,
         referenceType: 'contra_entry',
         description: data.description || `Contra transfer: ${fromAccount.name} → ${toAccount.name}`,
+        status: "posted",
+        postedAt: new Date(),
       })
       .returning();
 

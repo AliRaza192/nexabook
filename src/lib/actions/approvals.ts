@@ -44,7 +44,10 @@ export async function createWorkflow(data: {
 export async function deleteWorkflow(id: string) {
   try {
     await requireRole(["admin"]);
-    await db.delete(approvalWorkflows).where(eq(approvalWorkflows.id, id));
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    await db.delete(approvalWorkflows).where(and(eq(approvalWorkflows.id, id), eq(approvalWorkflows.orgId, orgId)));
     revalidatePath("/settings/approvals");
     await createAuditLog({ action: "WORKFLOW_DELETED", entityType: "workflow", entityId: id });
     return { success: true };
@@ -157,9 +160,12 @@ export async function approveRequest(id: string, comment?: string) {
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
     await db.update(approvalRequests)
       .set({ status: "approved", approvedBy: userId, comment: comment || null, updatedAt: new Date() })
-      .where(eq(approvalRequests.id, id));
+      .where(and(eq(approvalRequests.id, id), eq(approvalRequests.orgId, orgId)));
 
     revalidatePath("/approvals");
     await createAuditLog({ action: "APPROVAL_APPROVED", entityType: "approval", entityId: id });
@@ -175,9 +181,12 @@ export async function rejectRequest(id: string, comment?: string) {
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Unauthorized" };
 
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
     await db.update(approvalRequests)
       .set({ status: "rejected", approvedBy: userId, comment: comment || null, updatedAt: new Date() })
-      .where(eq(approvalRequests.id, id));
+      .where(and(eq(approvalRequests.id, id), eq(approvalRequests.orgId, orgId)));
 
     revalidatePath("/approvals");
     await createAuditLog({ action: "APPROVAL_REJECTED", entityType: "approval", entityId: id });

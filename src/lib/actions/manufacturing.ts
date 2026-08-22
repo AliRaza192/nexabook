@@ -585,6 +585,8 @@ export async function completeJobOrder(jobOrderId: string) {
           referenceType: 'job_order',
           referenceId: jobOrderId,
           description: `Manufacturing: ${finishedGood.name} x ${qtyToProduce} units`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
 
@@ -752,7 +754,7 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
         costPrice: products.costPrice,
       })
       .from(products)
-      .where(eq(products.id, data.finishedGoodId))
+      .where(and(eq(products.id, data.finishedGoodId), eq(products.orgId, orgId)))
       .limit(1);
 
     if (!finishedGood) return { success: false, error: "Finished good not found" };
@@ -787,7 +789,7 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
         currentStock: sql`${products.currentStock} - ${data.quantity}`,
         updatedAt: new Date() 
       })
-      .where(eq(products.id, data.finishedGoodId));
+      .where(and(eq(products.id, data.finishedGoodId), eq(products.orgId, orgId)));
 
     // 2. Add raw materials back to stock
     for (const comp of components) {
@@ -799,7 +801,7 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
           currentStock: sql`${products.currentStock} + ${qtyToAdd}`,
           updatedAt: new Date() 
         })
-        .where(eq(products.id, comp.componentId));
+        .where(and(eq(products.id, comp.componentId), eq(products.orgId, orgId)));
     }
 
     // 3. Create journal entry for disassembly
@@ -828,6 +830,8 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
           entryNumber,
           referenceType: 'disassembly',
           description: `Disassembly: ${finishedGood.name} x ${data.quantity} units`,
+          status: "posted",
+          postedAt: new Date(),
         })
         .returning();
 

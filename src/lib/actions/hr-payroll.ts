@@ -704,6 +704,8 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
         referenceType: 'payroll',
         referenceId: payrollRunId,
         description: `Payroll for ${monthNames[month - 1]} ${year} - Total: PKR ${totalNet.toFixed(2)}`,
+        status: "posted",
+        postedAt: new Date(),
       })
       .returning();
 
@@ -895,7 +897,7 @@ export async function markPayslipPaid(id: string, paymentMethod: string) {
         paymentMethod,
         updatedAt: new Date(),
       })
-      .where(eq(payslips.id, id));
+      .where(and(eq(payslips.id, id), eq(payslips.orgId, orgId)));
 
     revalidatePath('/hr-payroll/reports');
     return { success: true, message: "Payslip marked as paid" };

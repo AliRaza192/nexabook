@@ -454,7 +454,7 @@ export async function approveMiscContactSettlement(settlementId: string) {
       const [bankAccount] = await db
         .select({ currentBalance: bankAccounts.currentBalance })
         .from(bankAccounts)
-        .where(eq(bankAccounts.id, settlement.bankAccountId))
+        .where(and(eq(bankAccounts.id, settlement.bankAccountId), eq(bankAccounts.orgId, orgId)))
         .limit(1);
 
       if (bankAccount) {
@@ -463,7 +463,7 @@ export async function approveMiscContactSettlement(settlementId: string) {
         await db
           .update(bankAccounts)
           .set({ currentBalance: newBalance.toString() })
-          .where(eq(bankAccounts.id, settlement.bankAccountId));
+          .where(and(eq(bankAccounts.id, settlement.bankAccountId), eq(bankAccounts.orgId, orgId)));
       }
     }
 

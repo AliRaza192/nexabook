@@ -1,252 +1,104 @@
 # NexaBook — Task Tracking System
-**Version:** 3.0  
-**Last Updated:** 2026-07-08  
-**Format:** GitHub task list with dependency tracking
+**Version:** 4.0
+**Last Updated:** 2026-08-20
+**Source of truth:** docs/CURRENT_STATE_2026-08-20.md (state) · docs/AUDIT_2026-08-20.md (findings) · docs/PRODUCTION_PLAN_2026-08-20.md (sequenced work)
+**Note:** The previous v3.0 (June-July 2026) planning docs were archived to `docs/archive/` because they contradicted the actual code. This file was rewritten from evidence, not from those docs.
 
 ---
 
-## How to Use This File
-
-- [ ] = Not started
-- [x] = Completed
-- [~] = In progress
-
-Each task links to IMPROVEMENT_PLAN.md for details.
+## Legend
+- [x] = verified DONE (checked against actual code in Phase 0 audit, 2026-08-20)
+- [ ] = not done
+- [~] = in progress
 
 ---
 
-## PHASE 1: SECURITY HARDENING
-**Status:** Not Started  
-**Estimated:** 3-4 weeks  
-**Priority:** P0 CRITICAL
+## ALREADY DONE (verified against code — do NOT redo)
 
-### Level 1: Middleware Protection
-- [ ] **1.1.1** Add Clerk Middleware to Pages (2h) → `src/middleware.ts`
-- [ ] **1.1.2** Add Rate Limiting Middleware (1h) → extend middleware
-- [ ] **1.1.3** Add CORS & Security Headers (1.5h) → `next.config.mjs`
-- [ ] **1.1.4** Env Var Validation at Startup (1h) → `src/lib/env.ts`
+### Security / Middleware
+- [x] Clerk middleware protects all pages (auth.protect on non-public routes) — `src/middleware.ts`
+- [x] Rate limiting on API routes (30 req/60s per IP, store-backed) — `src/middleware.ts` + `src/lib/rate-limit`
+- [x] CSRF validation for state-changing API methods — `src/middleware.ts`
+- [x] Stripe webhook signature verification — `api/stripe/webhook/route.ts`
+- [x] JazzCash callback signature verification — `api/payments/callback/route.ts`
+- [x] CRON_SECRET guard on cron routes
 
-**Subtotal Level 1:** 5.5 hours
-
-### Level 2: Multi-Tenant Isolation
-- [ ] **1.2.1** Add OrgId Scoping Middleware (6h) → `src/lib/db-middleware.ts`
-- [ ] **1.2.2** Audit All Server Actions for OrgId Leaks (8h) → all `src/lib/actions/*`
-- [ ] **1.2.3** Add Row-Level Security (RLS) in PostgreSQL (10h) → `drizzle/migrations/`
-- [ ] **1.2.4** Remove Auto-Org Creation (3h) → `src/lib/actions/shared.ts`
-
-**Subtotal Level 2:** 27 hours
-
-### Level 3: Advanced Security
-- [ ] **1.3.1** Implement Secrets Encryption (12h) → `src/lib/crypto.ts`
-- [ ] **1.3.2** Audit Logging for Sensitive Actions (10h) → all action files
-- [ ] **1.3.3** Implement 2FA Enforcement for Admin (8h) → settings page
-
-**Subtotal Level 3:** 30 hours
-
-**PHASE 1 TOTAL:** 62.5 hours (~3-4 weeks with focused effort)
+### Accounting (fixed since old docs)
+- [x] Balance sheet date filter (cumulative as-of-date) — `accounting.ts:187`, `reports.ts:302`
+- [x] P&L single-source (journal entries only, no double-count) — `reports.ts:47-124`
+- [x] Duplicate COA code 4500 fixed (Exchange Gain 4500 / Commission Income 4550) — `accounts.ts:142-143`
+- [x] getAccountById org-scoped — `accounts.ts:346`
+- [x] getCurrentOrgId no longer auto-creates orgs — `shared.ts:24-40`
+- [x] approveInvoice fully transactional (status + inventory + JE + lines) — `sales.ts:878-1204`
+- [x] Manual JE flow: RBAC + balance check + period lock + audit + SQL COUNT — `accounts.ts:231-330`
+- [x] generateJournalEntryNumber uses SQL COUNT (not load-all) — `shared.ts:208-223`
+- [x] Index migrations present — `migrations/001_add_org_indexes.sql`, `004_add_performance_indexes.sql`
+- [x] tsc --noEmit passes (0 errors)
 
 ---
 
-## PHASE 2: ACCOUNTING CORRECTIONS
-**Status:** Not Started  
-**Estimated:** 2-3 weeks  
-**Priority:** P0 CRITICAL (depends on Phase 1)
+## BLOCKERS FOUND IN AUDIT (fix first — see AUDIT_2026-08-20.md)
 
-### Level 1: Quick Fixes
-- [ ] **2.1.1** Fix Chart of Accounts Duplicate Codes (0.5h) → `src/lib/actions/accounts.ts:140`
-- [ ] **2.1.2** Filter Draft Entries from Reports (2h) → `src/lib/accounting.ts`
-- [ ] **2.1.3** Fix COGS Account Type in Trial Balance (1h) → `src/lib/accounting.ts:86`
+### P0 — Build & toolchain
+- [ ] Build passes (`npm run build`) — currently FAILS: sync exports in "use server" files `tax-filing.ts:19,30` (validateNTN/validateSTRN) and `bank-reconciliation.ts:818` (matchWithPatterns). Move to `src/lib/validation.ts` / utils. **(~2h)**
 
-**Subtotal Level 1:** 3.5 hours
+### P0 — Accounting integrity (financial numbers shown to owners are wrong)
+- [ ] Operational JEs post as `status='posted'` (not default `draft`) — `sales.ts:1006`, `purchases.ts:454`, `pos.ts:439`, `banking.ts:359`, etc. Currently approved invoices/POS/expenses are invisible in TB/P&L/BS. **(~8h)**
+- [ ] Report status filters exclude `reversed` correctly (use `= 'posted'`) — `accounting.ts:73/137/205`, `reports.ts:78/303/554`. **(~2h)**
+- [ ] `updateInvoiceStatus` cannot set `approved` without JE + RBAC — `sales.ts:1273`. **(~2h)**
+- [ ] `deleteInvoice` reversal actually fires (write journalEntryId back on approve) — `sales.ts:1390`. **(~2h)**
+- [ ] `revisePurchaseInvoice` reversal referenceType + posted status — `purchases.ts:592-720`. **(~3h)**
+- [ ] DB-level debits=credits constraint (trigger/check) on journal_entry_lines — `schema.ts:1174-1183`. **(~8h)**
+- [ ] POS posts COGS + period lock + transaction — `pos.ts:469-510, 320-570`. **(~10h)**
 
-### Level 2: Date Filtering
-- [ ] **2.2.1** Add Date Filtering to Balance Sheet (4h) → `src/lib/accounting.ts:getBalanceSheet`
-- [ ] **2.2.2** Add Date Filtering to P&L (4h) → `src/lib/accounting.ts:getProfitAndLoss`
+### P0 — Cross-tenant leaks
+- [ ] `portal.ts:11/79` generatePortalToken/generateVendorPortalToken — add auth + org check. **(~2h)**
+- [ ] `hr-payroll.ts:890` markPayslipPaid — org-scope + RBAC. **(~1h)**
+- [ ] `approvals.ts:160/178/47` approve/reject/deleteWorkflow — org-scope. **(~1h)**
+- [ ] `consolidation.ts:60/82` link/unlinkChildOrg — verify child org ownership. **(~1h)**
+- [ ] `purchases.ts:1881/1900/2032` vendor payment/settlement — org-scope vendor. **(~2h)**
+- [ ] `sales.ts:2481` createDeliveryNote, `:3245/3365` payment/allocate — org-scope. **(~3h)**
+- [ ] `pos.ts:421/515` product/customer stock+loyalty — org-scope. **(~2h)**
+- [ ] `manufacturing.ts:747/784`, `adjustments.ts:464` — org-scope. **(~2h)**
+- [ ] `api/send-invoice-email/route.ts:91` — org-scope invoice update. **(~1h)**
+- [ ] `inventory.ts:765` getWarehouseStock, `leaves.ts:375/193`, `accounts.ts:768` — org-scope. **(~3h)**
+- [ ] `updateInvoiceStatus` + banking/leave/PO/reconciliation/stock-count RBAC. **(~3h)**
 
-**Subtotal Level 2:** 8 hours
+### P1 — Period locking, currency, tax
+- [ ] checkPeriodLocked on POS, stock adjustment, depreciation, opening balances, manufacturing, GRN. **(~6h)**
+- [ ] Multi-currency: apply exchangeRate in JE, add currency/rate to journalEntries. **(~8h)**
+- [ ] Wire `tax_rates` table; server-side POS tax; sales WHT mapping. **(~6h)**
+- [ ] easypaisa callback signature verification; fail closed on missing salt. **(~3h)**
+- [ ] COGS consistency: snapshot unit cost on invoiceItems; align report. **(~6h)**
+- [ ] FIFO valuation direction fix — `inventory-depth.ts:452-507`. **(~4h)**
+- [ ] Transaction atomicity: pos.ts, customer payment/settlement, vendor payment, banking balances, payroll, depreciation, manufacturing, onboarding. **(~18h)**
 
-### Level 3: P&L Accuracy Fix
-- [ ] **2.3.1** Remove Double-Counting in P&L (6h) → accounting.ts + reports.ts
-- [ ] **2.3.2** Add Reversed Entry Filtering (2h) → all queries
+### P2/P3
+- [ ] N+1 batch fixes (approveInvoice, payment allocs, getLeads, POS report, payroll). **(~8h)**
+- [ ] Lint to zero errors (`react-hooks/set-state-in-effect` etc.). **(~3h)**
+- [ ] Coverage baseline (`@vitest/coverage-v8`). **(~1h)**
+- [ ] Error logging in `hr-payroll.ts:188/253`. **(~1h)**
+- [ ] Money precision → decimal(14,2) consistency; `banking.ts` balance toFixed(2). **(~3h)**
+- [ ] Dead code: events skeleton, sentry stub, duplicate functions. **(~4h)**
+- [ ] Observability: real Sentry/logger. **(~4h)**
 
-**Subtotal Level 3:** 8 hours
-
-**PHASE 2 TOTAL:** 19.5 hours (~2-3 weeks, can start parallel with Phase 1 @ week 2)
-
----
-
-## PHASE 3: TESTING & QUALITY
-**Status:** Not Started  
-**Estimated:** 2-3 weeks  
-**Priority:** P2 (depends on Phase 2 > 50%)
-
-### Level 1: Setup & Basics
-- [ ] **3.1.1** Setup Comprehensive Test Structure (3h) → `src/__tests__/`
-- [ ] **3.1.2** Write Accounting Unit Tests (6h) → `src/__tests__/unit/accounting.test.ts`
-
-**Subtotal Level 1:** 9 hours
-
-### Level 2: Integration Tests
-- [ ] **3.2.1** Invoice-to-GL Flow Test (8h) → `src/__tests__/integration/invoice-workflow.test.ts`
-- [ ] **3.2.2** Multi-Tenant Isolation Test (6h) → `src/__tests__/integration/multi-tenant.test.ts`
-
-**Subtotal Level 2:** 14 hours
-
-### Level 3: Performance & Load Tests
-- [ ] **3.3.1** N+1 Query Elimination Test (10h) → performance test
-
-**Subtotal Level 3:** 10 hours
-
-**PHASE 3 TOTAL:** 33 hours (~2-3 weeks, starts week 4)
-
----
-
-## PHASE 4: PERFORMANCE OPTIMIZATION
-**Status:** Not Started  
-**Estimated:** 1-2 weeks  
-**Priority:** P1 (depends on Phase 3)
-
-### Level 1: Database Indexes
-- [ ] **4.1.1** Add Missing Indexes (2h) → `src/db/schema.ts` + migrations
-- [ ] **4.1.2** Query Optimization — N+1 Patterns (4h) → all action files
-
-**Subtotal Level 1:** 6 hours
-
-### Level 2: Query Plan Analysis
-- [ ] **4.2.1** Analyze Slow Queries with EXPLAIN ANALYZE (6h) → PostgreSQL profiling
-
-**Subtotal Level 2:** 6 hours
-
-**PHASE 4 TOTAL:** 12 hours (~1-2 weeks, starts week 7)
+### Testing (P0 financial trust — highest priority after fixes)
+- [ ] Regression: approve invoice → posted JE → appears in P&L/BS. **(~4h)**
+- [ ] Regression: delete/void invoice → reversed → net-zero. **(~3h)**
+- [ ] Multi-tenant isolation tests for every fixed IDOR path. **(~6h)**
+- [ ] POS COGS + balance test. **(~3h)**
+- [ ] Balance sheet as-of-date / P&L period-bound tests. **(~3h)**
+- [ ] Period-lock rejection tests (POS, stock adj, status flip). **(~3h)**
 
 ---
 
-## PHASE 5: ADVANCED FEATURES
-**Status:** Not Started  
-**Estimated:** 2-3 weeks  
-**Priority:** P2 (depends on Phase 4)
+## Full sequenced plan
+See `docs/PRODUCTION_PLAN_2026-08-20.md` — Waves 0-6 with file references and hour estimates (~163h total).
 
-### Level 1: Subscription Billing
-- [ ] **5.1.1** Stripe Integration (8h) → `src/lib/actions/billing.ts` + API routes
-
-**Subtotal Level 1:** 8 hours
-
-### Level 2: Period Locking
-- [ ] **5.2.1** Period Lock Enforcement (6h) → all financial actions
-
-**Subtotal Level 2:** 6 hours
-
-### Level 3: Cash Flow Statement
-- [ ] **5.3.1** Cash Flow Report Implementation (10h) → `src/lib/accounting.ts`
-
-**Subtotal Level 3:** 10 hours
-
-**PHASE 5 TOTAL:** 24 hours (~2-3 weeks, starts week 8)
-
----
-
-## PHASE 6: DEPLOYMENT & MONITORING
-**Status:** Not Started  
-**Estimated:** 1 week  
-**Priority:** P3 (depends on Phase 5)
-
-### Level 1: Error Monitoring
-- [ ] **6.1.1** Setup Sentry Integration (2h) → Sentry dashboard
-
-**Subtotal Level 1:** 2 hours
-
-### Level 2: Performance Monitoring
-- [ ] **6.2.1** Add Metrics Collection (4h) → logging + metrics
-
-**Subtotal Level 2:** 4 hours
-
-### Level 3: Launch Checklist
-- [ ] **6.3.1** Pre-Launch Verification (8h) → comprehensive checklist
-
-**Subtotal Level 3:** 8 hours
-
-**PHASE 6 TOTAL:** 14 hours (~1 week, final step)
-
----
-
-## GRAND TOTALS
-
-| Phase | Hours | Weeks | Status |
-|-------|-------|-------|--------|
-| 1 — Security | 62.5 | 3-4 | ⏳ Not Started |
-| 2 — Accounting | 19.5 | 2-3 | ⏳ Blocked by Phase 1 |
-| 3 — Testing | 33 | 2-3 | ⏳ Blocked by Phase 2 |
-| 4 — Performance | 12 | 1-2 | ⏳ Blocked by Phase 3 |
-| 5 — Features | 24 | 2-3 | ⏳ Blocked by Phase 4 |
-| 6 — Deployment | 14 | 1 | ⏳ Blocked by Phase 5 |
-| **TOTAL** | **165 hours** | **8-12 weeks** | — |
-
----
-
-## Current Sprint (STARTER)
-
-Pick ONE task to start with:
-
-### Recommended Starter Tasks (Quick Wins, High Impact)
-
-1. **2.1.1** Fix Chart of Accounts Duplicate Codes (0.5h) ← START HERE
-   - Lowest risk, highest visibility
-   - Immediate verification (seed won't fail silently)
-   
-2. **1.1.1** Add Clerk Middleware to Pages (2h) ← IF SECURITY FIRST
-   - Critical security fix
-   - Medium complexity
-
-3. **2.1.2** Filter Draft Entries from Reports (2h) ← IF ACCOUNTING FIRST
-   - Fixes financial reporting
-   - Medium complexity
-
-**Next Steps After First Task:**
-1. Complete all Level 1 tasks in current phase
-2. Move to Level 2 when Level 1 done
-3. Level 3 can start while Level 2 finishing
-
----
-
-## Milestone Checkpoints
-
-### Checkpoint 1: Phase 1 Security (Week 4)
-- [ ] Middleware protects all dashboard routes
-- [ ] No unauthenticated page access
-- [ ] All server actions audit orgId scoping
-- [ ] Rate limiting enforced
-
-**GO/NO-GO:** If not done by week 4, extend Phase 1 timeline
-
-### Checkpoint 2: Phase 2 Accounting (Week 5)
-- [ ] All P0 accounting issues fixed
-- [ ] Trial balance balances correctly
-- [ ] P&L accurate (verified manually)
-- [ ] Draft entries filtered from reports
-
-**GO/NO-GO:** If not done by week 5, delay Phase 3
-
-### Checkpoint 3: Phase 3 Testing (Week 7)
-- [ ] 60%+ code coverage
-- [ ] All critical workflows tested
-- [ ] Multi-tenant tests passing
-
-**GO/NO-GO:** If not done by week 7, request more resources
-
-### Checkpoint 4: Phase 6 Launch (Week 12)
-- [ ] All security ✅
-- [ ] All accounting ✅
-- [ ] Testing ✅
-- [ ] Performance ✅
-- [ ] Features ✅
-- [ ] Monitoring ✅
-
----
-
-## Notes & Context
-
-- Tasks are sequential but can parallelize within same phase
-- Phase 1 MUST complete before moving to Phase 2+
-- Each task has estimated time — actual time may vary ±30%
-- See IMPROVEMENT_PLAN.md for detailed task specifications
-- See PROJECT_CONTEXT.md for architecture context
+## Milestone checkpoints
+1. **Wave 0 (0.5d):** `npm run build` green.
+2. **Wave 1 (3-4d):** all IDOR paths org-scoped; isolation tests pass.
+3. **Wave 2 (6-7d):** approved invoices visible & balanced in P&L/BS; DB balance constraint active; POS posts COGS.
+4. **Wave 3 (2d):** no non-transactional financial write remains.
+5. **Wave 4 (2-3d):** locked periods reject all writes; FX + tax correct; webhooks verified.
+6. **Wave 5-6 (2-3d):** performance batch queries; lint clean; observability live.

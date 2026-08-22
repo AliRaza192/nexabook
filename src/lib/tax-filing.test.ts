@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateNTN, validateSTRN } from "./actions/tax-filing";
+import { validateNTN, validateSTRN } from "./validation";
 
 describe("Tax Filing - Business Logic", () => {
   // FR-2: NTN Validation

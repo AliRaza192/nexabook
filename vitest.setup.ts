@@ -7,6 +7,12 @@ vi.mock("@/db", () => ({
     insert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    transaction: vi.fn(async (fn: any) => fn({
+      select: vi.fn(),
+      insert: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    })),
     query: {},
   },
 }));
