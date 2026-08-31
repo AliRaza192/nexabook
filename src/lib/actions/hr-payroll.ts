@@ -608,213 +608,218 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
     const totalDeductions = calculations.reduce((sum, c) => sum + c.totalDeductions, 0);
     const totalNet = calculations.reduce((sum, c) => sum + c.netSalary, 0);
 
-    let payrollRunId: string;
+    let payrollRunId = '';
+    let journalEntryId = '';
 
-    if (existingPayroll.length > 0) {
-      // Update existing draft
-      payrollRunId = existingPayroll[0].id;
-      await db
+    await db.transaction(async (tx) => {
+      if (existingPayroll.length > 0) {
+        // Update existing draft
+        payrollRunId = existingPayroll[0].id;
+        await tx
+          .update(payrollRuns)
+          .set({
+            totalEmployees: calculations.length,
+            totalGross: totalGross.toFixed(2),
+            totalDeductions: totalDeductions.toFixed(2),
+            totalNet: totalNet.toFixed(2),
+            status: 'Approved',
+            approvedBy: userName || undefined,
+            approvedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(payrollRuns.id, payrollRunId));
+
+        // Delete old payslips
+        await tx
+          .delete(payslips)
+          .where(eq(payslips.payrollRunId, payrollRunId));
+      } else {
+        // Create new payroll run
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const [payrollRun] = await tx
+          .insert(payrollRuns)
+          .values({
+            orgId,
+            month,
+            year,
+            title: `${monthNames[month - 1]} ${year} Payroll`,
+            totalEmployees: calculations.length,
+            totalGross: totalGross.toFixed(2),
+            totalDeductions: totalDeductions.toFixed(2),
+            totalNet: totalNet.toFixed(2),
+            status: 'Approved',
+            processedBy: userName || undefined,
+            approvedBy: userName || undefined,
+            approvedAt: new Date(),
+          })
+          .returning({ id: payrollRuns.id });
+
+        payrollRunId = payrollRun.id;
+      }
+
+      // Create payslips
+      for (const calc of calculations) {
+        await tx.insert(payslips).values({
+          orgId,
+          payrollRunId,
+          employeeId: calc.employeeId,
+          employeeName: calc.employeeName,
+          employeeCode: calc.employeeCode,
+          designation: calc.designation,
+          department: calc.department,
+          cnic: calc.cnic,
+          bankName: calc.bankName,
+          accountNumber: calc.accountNumber,
+          basicSalary: calc.basicSalary.toFixed(2),
+          houseRent: calc.houseRent.toFixed(2),
+          medicalAllowance: calc.medicalAllowance.toFixed(2),
+          conveyanceAllowance: calc.conveyanceAllowance.toFixed(2),
+          otherAllowances: calc.otherAllowances.toFixed(2),
+          overtimePay: calc.overtimePay.toFixed(2),
+          bonus: calc.bonus.toFixed(2),
+          totalEarnings: calc.totalEarnings.toFixed(2),
+          eobiDeduction: calc.eobiDeduction.toFixed(2),
+          incomeTax: calc.incomeTax.toFixed(2),
+          providentFund: calc.providentFund.toFixed(2),
+          otherDeductions: calc.otherDeductions.toFixed(2),
+          unpaidLeaveDeduction: calc.unpaidLeaveDeduction.toFixed(2),
+          totalDeductions: calc.totalDeductions.toFixed(2),
+          netSalary: calc.netSalary.toFixed(2),
+          presentDays: calc.presentDays.toFixed(2),
+          absentDays: calc.absentDays.toFixed(2),
+          leaveDays: calc.leaveDays.toFixed(2),
+          unpaidLeaveDays: calc.unpaidLeaveDays.toFixed(2),
+          totalWorkingDays: calc.totalWorkingDays,
+        });
+      }
+
+      // Create journal entry
+      const entryNumber = `PAYROLL-${year}-${String(month).padStart(2, '0')}-${Date.now()}`;
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+      const [journalEntry] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          entryNumber,
+          entryDate: new Date(),
+          referenceType: 'payroll',
+          referenceId: payrollRunId,
+          description: `Payroll for ${monthNames[month - 1]} ${year} - Total: PKR ${totalNet.toFixed(2)}`,
+          status: "posted",
+          postedAt: new Date(),
+        })
+        .returning();
+
+      journalEntryId = journalEntry.id;
+
+      // Find accounts
+      const [salaryExpenseAccount] = await tx
+        .select()
+        .from(chartOfAccounts)
+        .where(and(
+          eq(chartOfAccounts.orgId, orgId),
+          eq(chartOfAccounts.subType, 'salary_expense')
+        ))
+        .limit(1);
+
+      const [salariesPayableAccount] = await tx
+        .select()
+        .from(chartOfAccounts)
+        .where(and(
+          eq(chartOfAccounts.orgId, orgId),
+          eq(chartOfAccounts.subType, 'salaries_payable')
+        ))
+        .limit(1);
+
+      // Create journal entry lines
+      if (salaryExpenseAccount && salariesPayableAccount) {
+        const totalTax = calculations.reduce((sum, c) => sum + c.incomeTax + c.eobiDeduction, 0);
+
+        const lineAmounts: { debitAmount: string; creditAmount: string }[] = [
+          { debitAmount: totalGross.toFixed(2), creditAmount: '0' },
+          { debitAmount: '0', creditAmount: totalNet.toFixed(2) },
+        ];
+        if (totalTax > 0) {
+          lineAmounts.push({ debitAmount: '0', creditAmount: totalTax.toFixed(2) });
+        }
+        if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance: total debits must equal total credits");
+
+        // Debit: Salaries & Wages Expense
+        await tx.insert(journalEntryLines).values({
+          orgId,
+          journalEntryId,
+          accountId: salaryExpenseAccount.id,
+          description: `Debit - Salaries & Wages Expense (${monthNames[month - 1]} ${year})`,
+          debitAmount: totalGross.toFixed(2),
+          creditAmount: '0',
+        });
+
+        // Credit: Salaries Payable
+        await tx.insert(journalEntryLines).values({
+          orgId,
+          journalEntryId,
+          accountId: salariesPayableAccount.id,
+          description: `Credit - Salaries Payable (${monthNames[month - 1]} ${year})`,
+          debitAmount: '0',
+          creditAmount: totalNet.toFixed(2),
+        });
+
+        // Credit: Tax Deductions Payable (if applicable)
+        if (totalTax > 0) {
+          const [taxPayableAccount] = await tx
+            .select()
+            .from(chartOfAccounts)
+            .where(and(
+              eq(chartOfAccounts.orgId, orgId),
+              or(
+                eq(chartOfAccounts.subType, 'income_tax_payable'),
+                eq(chartOfAccounts.subType, 'tax_payable')
+              )
+            ))
+            .limit(1);
+
+          if (taxPayableAccount) {
+            await tx.insert(journalEntryLines).values({
+              orgId,
+              journalEntryId,
+              accountId: taxPayableAccount.id,
+              description: `Credit - Tax Deductions Payable (${monthNames[month - 1]} ${year})`,
+              debitAmount: '0',
+              creditAmount: totalTax.toFixed(2),
+            });
+          }
+        }
+      }
+
+      // Update payroll run with journal entry ID
+      await tx
         .update(payrollRuns)
         .set({
-          totalEmployees: calculations.length,
-          totalGross: totalGross.toFixed(2),
-          totalDeductions: totalDeductions.toFixed(2),
-          totalNet: totalNet.toFixed(2),
-          status: 'Approved',
-          approvedBy: userName || undefined,
-          approvedAt: new Date(),
+          journalEntryId,
+          status: 'Posted',
           updatedAt: new Date(),
         })
         .where(eq(payrollRuns.id, payrollRunId));
 
-      // Delete old payslips
-      await db
-        .delete(payslips)
-        .where(eq(payslips.payrollRunId, payrollRunId));
-    } else {
-      // Create new payroll run
-      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-      const [payrollRun] = await db
-        .insert(payrollRuns)
-        .values({
-          orgId,
-          month,
-          year,
-          title: `${monthNames[month - 1]} ${year} Payroll`,
-          totalEmployees: calculations.length,
-          totalGross: totalGross.toFixed(2),
-          totalDeductions: totalDeductions.toFixed(2),
-          totalNet: totalNet.toFixed(2),
-          status: 'Approved',
-          processedBy: userName || undefined,
-          approvedBy: userName || undefined,
-          approvedAt: new Date(),
-        })
-        .returning({ id: payrollRuns.id });
-
-      payrollRunId = payrollRun.id;
-    }
-
-    // Create payslips
-    for (const calc of calculations) {
-      await db.insert(payslips).values({
+      // Audit log
+      await tx.insert(auditLogs).values({
         orgId,
-        payrollRunId,
-        employeeId: calc.employeeId,
-        employeeName: calc.employeeName,
-        employeeCode: calc.employeeCode,
-        designation: calc.designation,
-        department: calc.department,
-        cnic: calc.cnic,
-        bankName: calc.bankName,
-        accountNumber: calc.accountNumber,
-        basicSalary: calc.basicSalary.toFixed(2),
-        houseRent: calc.houseRent.toFixed(2),
-        medicalAllowance: calc.medicalAllowance.toFixed(2),
-        conveyanceAllowance: calc.conveyanceAllowance.toFixed(2),
-        otherAllowances: calc.otherAllowances.toFixed(2),
-        overtimePay: calc.overtimePay.toFixed(2),
-        bonus: calc.bonus.toFixed(2),
-        totalEarnings: calc.totalEarnings.toFixed(2),
-        eobiDeduction: calc.eobiDeduction.toFixed(2),
-        incomeTax: calc.incomeTax.toFixed(2),
-        providentFund: calc.providentFund.toFixed(2),
-        otherDeductions: calc.otherDeductions.toFixed(2),
-        unpaidLeaveDeduction: calc.unpaidLeaveDeduction.toFixed(2),
-        totalDeductions: calc.totalDeductions.toFixed(2),
-        netSalary: calc.netSalary.toFixed(2),
-        presentDays: calc.presentDays.toFixed(2),
-        absentDays: calc.absentDays.toFixed(2),
-        leaveDays: calc.leaveDays.toFixed(2),
-        unpaidLeaveDays: calc.unpaidLeaveDays.toFixed(2),
-        totalWorkingDays: calc.totalWorkingDays,
+        userId,
+        action: 'PAYROLL_APPROVED',
+        entityType: 'payroll_run',
+        entityId: payrollRunId,
+        changes: JSON.stringify({ month, year, totalEmployees: calculations.length, totalNet }),
       });
-    }
-
-    // Create journal entry
-    const entryNumber = `PAYROLL-${year}-${String(month).padStart(2, '0')}-${Date.now()}`;
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    
-    const [journalEntry] = await db
-      .insert(journalEntries)
-      .values({
-        orgId,
-        entryNumber,
-        entryDate: new Date(),
-        referenceType: 'payroll',
-        referenceId: payrollRunId,
-        description: `Payroll for ${monthNames[month - 1]} ${year} - Total: PKR ${totalNet.toFixed(2)}`,
-        status: "posted",
-        postedAt: new Date(),
-      })
-      .returning();
-
-    // Find accounts
-    const [salaryExpenseAccount] = await db
-      .select()
-      .from(chartOfAccounts)
-      .where(and(
-        eq(chartOfAccounts.orgId, orgId),
-        eq(chartOfAccounts.subType, 'salary_expense')
-      ))
-      .limit(1);
-
-    const [salariesPayableAccount] = await db
-      .select()
-      .from(chartOfAccounts)
-      .where(and(
-        eq(chartOfAccounts.orgId, orgId),
-        eq(chartOfAccounts.subType, 'salaries_payable')
-      ))
-      .limit(1);
-
-    // Create journal entry lines
-    if (salaryExpenseAccount && salariesPayableAccount) {
-      const totalTax = calculations.reduce((sum, c) => sum + c.incomeTax + c.eobiDeduction, 0);
-
-      const lineAmounts: { debitAmount: string; creditAmount: string }[] = [
-        { debitAmount: totalGross.toFixed(2), creditAmount: '0' },
-        { debitAmount: '0', creditAmount: totalNet.toFixed(2) },
-      ];
-      if (totalTax > 0) {
-        lineAmounts.push({ debitAmount: '0', creditAmount: totalTax.toFixed(2) });
-      }
-      if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-      // Debit: Salaries & Wages Expense
-      await db.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: salaryExpenseAccount.id,
-        description: `Debit - Salaries & Wages Expense (${monthNames[month - 1]} ${year})`,
-        debitAmount: totalGross.toFixed(2),
-        creditAmount: '0',
-      });
-
-      // Credit: Salaries Payable
-      await db.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: salariesPayableAccount.id,
-        description: `Credit - Salaries Payable (${monthNames[month - 1]} ${year})`,
-        debitAmount: '0',
-        creditAmount: totalNet.toFixed(2),
-      });
-
-      // Credit: Tax Deductions Payable (if applicable)
-      if (totalTax > 0) {
-        const [taxPayableAccount] = await db
-          .select()
-          .from(chartOfAccounts)
-          .where(and(
-            eq(chartOfAccounts.orgId, orgId),
-            or(
-              eq(chartOfAccounts.subType, 'income_tax_payable'),
-              eq(chartOfAccounts.subType, 'tax_payable')
-            )
-          ))
-          .limit(1);
-
-        if (taxPayableAccount) {
-          await db.insert(journalEntryLines).values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: taxPayableAccount.id,
-            description: `Credit - Tax Deductions Payable (${monthNames[month - 1]} ${year})`,
-            debitAmount: '0',
-            creditAmount: totalTax.toFixed(2),
-          });
-        }
-      }
-    }
-
-    // Update payroll run with journal entry ID
-    await db
-      .update(payrollRuns)
-      .set({
-        journalEntryId: journalEntry.id,
-        status: 'Posted',
-        updatedAt: new Date(),
-      })
-      .where(eq(payrollRuns.id, payrollRunId));
-
-    // Audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId,
-      action: 'PAYROLL_APPROVED',
-      entityType: 'payroll_run',
-      entityId: payrollRunId,
-      changes: JSON.stringify({ month, year, totalEmployees: calculations.length, totalNet }),
     });
 
     revalidatePath('/hr-payroll/run');
     revalidatePath('/hr-payroll/reports');
-    return { 
-      success: true, 
+    return {
+      success: true,
       message: `Payroll approved and posted for ${calculations.length} employees. Total: PKR ${totalNet.toFixed(2)}`,
       payrollRunId,
-      journalEntryId: journalEntry.id,
+      journalEntryId,
     };
   } catch (error) {
     console.error("Error in hr-payroll.ts:", error instanceof Error ? error.message : error);

@@ -1008,7 +1008,7 @@ export async function approveInvoice(invoiceId: string) {
         .values({
           orgId,
           entryNumber,
-          entryDate: new Date(),
+          entryDate: new Date(invoice.issueDate),
           referenceType: "invoice",
           referenceId: invoiceId,
           description: `Invoice ${invoice.invoiceNumber} approval`,
@@ -1344,7 +1344,7 @@ export async function deleteInvoice(invoiceId: string) {
     const locked = await checkPeriodLocked(new Date(invoice.issueDate));
     if (locked) return { success: false, error: "Cannot delete invoice in a locked fiscal period" };
 
-    // If invoice was approved, reverse stock movements
+    // If invoice was approved, reverse stock, JE, and delete — all atomically
     if (invoice.status === "approved") {
       const items = await db
         .select()
@@ -1396,61 +1396,65 @@ export async function deleteInvoice(invoiceId: string) {
             runningBalance: newRunningBalance,
           });
         }
+
+        // If invoice has a journal entry, create reversal
+        if (invoice.journalEntryId) {
+          const [je] = await tx
+            .select()
+            .from(journalEntries)
+            .where(eq(journalEntries.id, invoice.journalEntryId))
+            .limit(1);
+
+          if (je && je.status !== "reversed") {
+            const lines = await tx
+              .select()
+              .from(journalEntryLines)
+              .where(eq(journalEntryLines.journalEntryId, invoice.journalEntryId));
+
+            const reversalLines = lines.map((l) => ({
+              orgId,
+              journalEntryId: "", // set after insert
+              accountId: l.accountId,
+              description: `Reversal: ${l.description}`,
+              debitAmount: l.creditAmount,
+              creditAmount: l.debitAmount,
+            }));
+
+            const entryNumber = await generateJournalEntryNumber(orgId);
+            const [revEntry] = await tx.insert(journalEntries).values({
+              orgId,
+              entryNumber,
+              entryDate: new Date(),
+              description: `Reversal of Invoice ${invoice.invoiceNumber}`,
+              referenceType: "reversal",
+              referenceId: invoiceId,
+              status: "posted",
+              postedAt: new Date(),
+              sourceType: "invoice",
+            }).returning();
+
+            reversalLines.forEach((l) => { l.journalEntryId = revEntry.id; });
+            await tx.insert(journalEntryLines).values(reversalLines);
+
+            await tx.update(journalEntries)
+              .set({ status: "reversed" })
+              .where(eq(journalEntries.id, invoice.journalEntryId));
+          }
+        }
+
+        // Delete invoice items and invoice
+        await tx.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+        await tx
+          .delete(invoices)
+          .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
       });
+    } else {
+      // Draft or pending: just delete items + invoice
+      await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+      await db
+        .delete(invoices)
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
     }
-
-    // If invoice has a journal entry, create reversal
-    if (invoice.journalEntryId) {
-      const [je] = await db
-        .select()
-        .from(journalEntries)
-        .where(eq(journalEntries.id, invoice.journalEntryId))
-        .limit(1);
-
-      if (je && je.status !== "reversed") {
-        const lines = await db
-          .select()
-          .from(journalEntryLines)
-          .where(eq(journalEntryLines.journalEntryId, invoice.journalEntryId));
-
-        const reversalLines = lines.map((l) => ({
-          orgId,
-          journalEntryId: "", // set after insert
-          accountId: l.accountId,
-          description: `Reversal: ${l.description}`,
-          debitAmount: l.creditAmount,
-          creditAmount: l.debitAmount,
-        }));
-
-        const entryNumber = await generateJournalEntryNumber(orgId);
-        const [revEntry] = await db.insert(journalEntries).values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(),
-          description: `Reversal of Invoice ${invoice.invoiceNumber}`,
-          referenceType: "reversal",
-          referenceId: invoiceId,
-          status: "posted",
-          postedAt: new Date(),
-          sourceType: "invoice",
-        }).returning();
-
-        reversalLines.forEach((l) => { l.journalEntryId = revEntry.id; });
-        await db.insert(journalEntryLines).values(reversalLines);
-
-        await db.update(journalEntries)
-          .set({ status: "reversed" })
-          .where(eq(journalEntries.id, invoice.journalEntryId));
-      }
-    }
-
-    // Delete invoice items first
-    await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
-
-    // Delete invoice
-    await db
-      .delete(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
 
     revalidatePath("/sales/invoices");
 
@@ -3237,53 +3241,7 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
     if (locked) return { success: false, error: "Cannot record payment in a locked fiscal period" };
 
     const paymentNumber = await generatePaymentNumber(orgId);
-    const [newPayment] = await db
-      .insert(customerPayments)
-      .values({
-        orgId,
-        paymentNumber,
-        customerId: data.customerId,
-        paymentDate: new Date(data.paymentDate),
-        paymentMethod: data.paymentMethod,
-        amount: data.amount,
-        reference: data.reference || "",
-        notes: data.notes || null,
-      })
-      .returning();
-    if (data.allocations && data.allocations.length > 0) {
-      for (const alloc of data.allocations) {
-        await db.insert(customerPaymentAllocations).values({
-          orgId,
-          customerPaymentId: newPayment.id,
-          invoiceId: alloc.invoiceId,
-          allocatedAmount: alloc.amount,
-        });
-        const [inv] = await db
-          .select()
-          .from(invoices)
-          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)))
-          .limit(1);
-        if (inv) {
-          const newBalance =
-            parseFloat(inv.balanceAmount || "0") - parseFloat(alloc.amount);
-          let newStatus:
-            | "draft"
-            | "pending"
-            | "approved"
-            | "sent"
-            | "paid"
-            | "partial"
-            | "overdue"
-            | "cancelled" = inv.status;
-          if (newBalance <= 0) newStatus = "paid";
-          else newStatus = "partial";
-          await db
-            .update(invoices)
-            .set({ balanceAmount: newBalance.toFixed(2), status: newStatus })
-            .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)));
-        }
-      }
-    }
+
     const paymentSubType = data.paymentMethod === 'cash' ? 'cash' : 'bank';
     const [cashBankAccount] = await db
       .select()
@@ -3305,66 +3263,121 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
         ),
       )
       .limit(1);
-    if (cashBankAccount && arAccount) {
-      const entryNumber = await (async () => {
-        const result = await db
-          .select({ entryNumber: journalEntries.entryNumber })
-          .from(journalEntries)
-          .where(eq(journalEntries.orgId, orgId))
-          .orderBy(desc(journalEntries.createdAt))
-          .limit(1);
-        let nextNumber = 1;
-        if (result.length > 0 && result[0].entryNumber) {
-          const match = result[0].entryNumber.match(/\d+$/);
-          if (match) nextNumber = parseInt(match[0]) + 1;
-        }
-        return `JE-${String(nextNumber).padStart(5, "0")}`;
-      })();
-      const [journalEntry] = await db
-        .insert(journalEntries)
+
+    const result = await db.transaction(async (tx) => {
+      const [newPayment] = await tx
+        .insert(customerPayments)
         .values({
           orgId,
-          entryNumber,
-          entryDate: new Date(data.paymentDate),
-          referenceType: "customer_payment",
-          referenceId: newPayment.id,
-          description: `Customer Payment ${paymentNumber}`,
-          status: "posted",
-          postedAt: new Date(),
+          paymentNumber,
+          customerId: data.customerId,
+          paymentDate: new Date(data.paymentDate),
+          paymentMethod: data.paymentMethod,
+          amount: data.amount,
+          reference: data.reference || "",
+          notes: data.notes || null,
         })
         .returning();
-      const paymentLines = [
-        { debitAmount: data.amount, creditAmount: "0" },
-        { debitAmount: "0", creditAmount: data.amount },
-      ];
-      if (!validateJournalBalance(paymentLines)) throw new Error("Journal entry out of balance");
 
-      await db
-        .insert(journalEntryLines)
-        .values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: cashBankAccount.id,
-          description: `Debit - ${cashBankAccount.name}`,
-          debitAmount: data.amount,
-          creditAmount: "0",
-        });
-      await db
-        .insert(journalEntryLines)
-        .values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: arAccount.id,
-          description: `Credit - Accounts Receivable`,
-          debitAmount: "0",
-          creditAmount: data.amount,
-        });
-    }
+      if (data.allocations && data.allocations.length > 0) {
+        for (const alloc of data.allocations) {
+          await tx.insert(customerPaymentAllocations).values({
+            orgId,
+            customerPaymentId: newPayment.id,
+            invoiceId: alloc.invoiceId,
+            allocatedAmount: alloc.amount,
+          });
+          const [inv] = await tx
+            .select()
+            .from(invoices)
+            .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)))
+            .limit(1);
+          if (inv) {
+            const newBalance =
+              parseFloat(inv.balanceAmount || "0") - parseFloat(alloc.amount);
+            let newStatus:
+              | "draft"
+              | "pending"
+              | "approved"
+              | "sent"
+              | "paid"
+              | "partial"
+              | "overdue"
+              | "cancelled" = inv.status;
+            if (newBalance <= 0) newStatus = "paid";
+            else newStatus = "partial";
+            await tx
+              .update(invoices)
+              .set({ balanceAmount: newBalance.toFixed(2), status: newStatus })
+              .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)));
+          }
+        }
+      }
+
+      if (cashBankAccount && arAccount) {
+        const entryNumber = await (async () => {
+          const result = await tx
+            .select({ entryNumber: journalEntries.entryNumber })
+            .from(journalEntries)
+            .where(eq(journalEntries.orgId, orgId))
+            .orderBy(desc(journalEntries.createdAt))
+            .limit(1);
+          let nextNumber = 1;
+          if (result.length > 0 && result[0].entryNumber) {
+            const match = result[0].entryNumber.match(/\d+$/);
+            if (match) nextNumber = parseInt(match[0]) + 1;
+          }
+          return `JE-${String(nextNumber).padStart(5, "0")}`;
+        })();
+        const [journalEntry] = await tx
+          .insert(journalEntries)
+          .values({
+            orgId,
+            entryNumber,
+            entryDate: new Date(data.paymentDate),
+            referenceType: "customer_payment",
+            referenceId: newPayment.id,
+            description: `Customer Payment ${paymentNumber}`,
+            status: "posted",
+            postedAt: new Date(),
+          })
+          .returning();
+        const paymentLines = [
+          { debitAmount: data.amount, creditAmount: "0" },
+          { debitAmount: "0", creditAmount: data.amount },
+        ];
+        if (!validateJournalBalance(paymentLines)) throw new Error("Journal entry out of balance");
+
+        await tx
+          .insert(journalEntryLines)
+          .values({
+            orgId,
+            journalEntryId: journalEntry.id,
+            accountId: cashBankAccount.id,
+            description: `Debit - ${cashBankAccount.name}`,
+            debitAmount: data.amount,
+            creditAmount: "0",
+          });
+        await tx
+          .insert(journalEntryLines)
+          .values({
+            orgId,
+            journalEntryId: journalEntry.id,
+            accountId: arAccount.id,
+            description: `Credit - Accounts Receivable`,
+            debitAmount: "0",
+            creditAmount: data.amount,
+          });
+      }
+
+      return newPayment;
+    });
+
     revalidatePath("/sales/receive-payment");
     revalidatePath("/sales/invoices");
     return {
       success: true,
-      data: newPayment,
+      data: result,
       message: "Payment recorded successfully",
     };
   } catch (error) {
@@ -3386,40 +3399,44 @@ export async function allocatePayment(
       .where(and(eq(customerPayments.id, paymentId), eq(customerPayments.orgId, orgId)))
       .limit(1);
     if (!payment) return { success: false, error: "Payment not found" };
-    for (const alloc of allocations) {
-      await db
-        .insert(customerPaymentAllocations)
-        .values({
-          orgId,
-          customerPaymentId: paymentId,
-          invoiceId: alloc.invoiceId,
-          allocatedAmount: alloc.amount,
-        });
-      const [inv] = await db
-        .select()
-        .from(invoices)
-        .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)))
-        .limit(1);
-      if (inv) {
-        const newBalance =
-          parseFloat(inv.balanceAmount || "0") - parseFloat(alloc.amount);
-        let newStatus:
-          | "draft"
-          | "pending"
-          | "approved"
-          | "sent"
-          | "paid"
-          | "partial"
-          | "overdue"
-          | "cancelled" = inv.status;
-        if (newBalance <= 0) newStatus = "paid";
-        else newStatus = "partial";
-        await db
-          .update(invoices)
-          .set({ balanceAmount: newBalance.toFixed(2), status: newStatus })
-          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)));
+
+    await db.transaction(async (tx) => {
+      for (const alloc of allocations) {
+        await tx
+          .insert(customerPaymentAllocations)
+          .values({
+            orgId,
+            customerPaymentId: paymentId,
+            invoiceId: alloc.invoiceId,
+            allocatedAmount: alloc.amount,
+          });
+        const [inv] = await tx
+          .select()
+          .from(invoices)
+          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)))
+          .limit(1);
+        if (inv) {
+          const newBalance =
+            parseFloat(inv.balanceAmount || "0") - parseFloat(alloc.amount);
+          let newStatus:
+            | "draft"
+            | "pending"
+            | "approved"
+            | "sent"
+            | "paid"
+            | "partial"
+            | "overdue"
+            | "cancelled" = inv.status;
+          if (newBalance <= 0) newStatus = "paid";
+          else newStatus = "partial";
+          await tx
+            .update(invoices)
+            .set({ balanceAmount: newBalance.toFixed(2), status: newStatus })
+            .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)));
+        }
       }
-    }
+    });
+
     revalidatePath("/sales/receive-payment");
     revalidatePath("/sales/invoices");
     return { success: true, message: "Payment allocated successfully" };
@@ -3529,50 +3546,55 @@ export async function createCustomerSettlement(data: SettlementFormData) {
       (sum, doc) => sum + parseFloat(doc.settlementAmount || "0"),
       0,
     );
-    const [newSettlement] = await db
-      .insert(settlements)
-      .values({
-        orgId,
-        settlementNumber,
-        entityType: "customer",
-        entityId: data.customerId,
-        settlementDate: new Date(data.settlementDate),
-        totalOutstanding: totalOutstanding.toFixed(2),
-        discountAmount: totalDiscount.toFixed(2),
-        paidAmount: totalSettlement.toFixed(2),
-        status:
-          totalSettlement >= totalOutstanding - totalDiscount
-            ? "settled"
-            : "partial",
-        paymentMethod: data.paymentMethod,
-        reference: data.reference || "",
-        notes: data.notes || null,
-      })
-      .returning();
-    for (const doc of data.documents) {
-      await db.insert(settlementLines).values({
-        orgId,
-        settlementId: newSettlement.id,
-        documentType: doc.documentType,
-        documentId: doc.documentId,
-        originalAmount: doc.originalAmount,
-        paidAmount: doc.paidAmount,
-        adjustedAmount: doc.settlementAmount,
-        discountAmount: doc.discountAmount,
-        balanceAmount: "0",
-      });
-      if (doc.documentType === "invoice") {
-        await db
-          .update(invoices)
-          .set({
-            balanceAmount: "0",
-            status: "paid",
-          })
-          .where(
-            and(eq(invoices.id, doc.documentId), eq(invoices.orgId, orgId)),
-          );
+
+    const newSettlement = await db.transaction(async (tx) => {
+      const [settlement] = await tx
+        .insert(settlements)
+        .values({
+          orgId,
+          settlementNumber,
+          entityType: "customer",
+          entityId: data.customerId,
+          settlementDate: new Date(data.settlementDate),
+          totalOutstanding: totalOutstanding.toFixed(2),
+          discountAmount: totalDiscount.toFixed(2),
+          paidAmount: totalSettlement.toFixed(2),
+          status:
+            totalSettlement >= totalOutstanding - totalDiscount
+              ? "settled"
+              : "partial",
+          paymentMethod: data.paymentMethod,
+          reference: data.reference || "",
+          notes: data.notes || null,
+        })
+        .returning();
+      for (const doc of data.documents) {
+        await tx.insert(settlementLines).values({
+          orgId,
+          settlementId: settlement.id,
+          documentType: doc.documentType,
+          documentId: doc.documentId,
+          originalAmount: doc.originalAmount,
+          paidAmount: doc.paidAmount,
+          adjustedAmount: doc.settlementAmount,
+          discountAmount: doc.discountAmount,
+          balanceAmount: "0",
+        });
+        if (doc.documentType === "invoice") {
+          await tx
+            .update(invoices)
+            .set({
+              balanceAmount: "0",
+              status: "paid",
+            })
+            .where(
+              and(eq(invoices.id, doc.documentId), eq(invoices.orgId, orgId)),
+            );
+        }
       }
-    }
+      return settlement;
+    });
+
     revalidatePath("/sales/settlement");
     return {
       success: true,

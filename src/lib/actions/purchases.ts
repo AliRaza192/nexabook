@@ -263,55 +263,59 @@ export async function createPurchaseInvoice(data: PurchaseInvoiceFormData) {
       return { success: false, error: "Failed to generate bill number" };
     }
 
-    const [newInvoice] = await db
-      .insert(purchaseInvoices)
-      .values({
-        orgId,
-        vendorId: data.vendorId,
-        warehouseId: data.warehouseId || null,
-        billNumber,
-        date: data.date,
-        dueDate: data.dueDate || null,
-        reference: data.reference || null,
-        subject: data.subject || null,
-        grossAmount: data.grossAmount,
-        discountTotal: data.discountTotal,
-        taxTotal: data.taxTotal,
-        netAmount: data.netAmount,
-        status: 'Draft',
-        notes: data.notes,
-      })
-      .returning();
+    const newInvoice = await db.transaction(async (tx) => {
+      const [invoice] = await tx
+        .insert(purchaseInvoices)
+        .values({
+          orgId,
+          vendorId: data.vendorId,
+          warehouseId: data.warehouseId || null,
+          billNumber,
+          date: data.date,
+          dueDate: data.dueDate || null,
+          reference: data.reference || null,
+          subject: data.subject || null,
+          grossAmount: data.grossAmount,
+          discountTotal: data.discountTotal,
+          taxTotal: data.taxTotal,
+          netAmount: data.netAmount,
+          status: 'Draft',
+          notes: data.notes,
+        })
+        .returning();
 
-    for (const item of data.items) {
-      await db.insert(purchaseItems).values({
+      for (const item of data.items) {
+        await tx.insert(purchaseItems).values({
+          orgId,
+          purchaseInvoiceId: invoice.id,
+          productId: item.productId || null,
+          uomId: item.uomId || null,
+          batchNo: item.batchNo || null,
+          expiryDate: item.expiryDate || null,
+          manufacturingDate: item.manufacturingDate || null,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountPercentage: item.discountPercentage || '0',
+          taxRate: item.taxRate,
+          lineTotal: item.lineTotal,
+        });
+      }
+
+      await tx.insert(auditLogs).values({
         orgId,
-        purchaseInvoiceId: newInvoice.id,
-        productId: item.productId || null,
-        uomId: item.uomId || null,
-        batchNo: item.batchNo || null,
-        expiryDate: item.expiryDate || null,
-        manufacturingDate: item.manufacturingDate || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercentage: item.discountPercentage || '0',
-        taxRate: item.taxRate,
-        lineTotal: item.lineTotal,
+        userId: (await auth()).userId || 'system',
+        action: 'PURCHASE_INVOICE_CREATED',
+        entityType: 'purchase_invoice',
+        entityId: invoice.id,
+        changes: JSON.stringify({
+          billNumber: invoice.billNumber,
+          netAmount: invoice.netAmount,
+          status: invoice.status,
+        }),
       });
-    }
 
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || 'system',
-      action: 'PURCHASE_INVOICE_CREATED',
-      entityType: 'purchase_invoice',
-      entityId: newInvoice.id,
-      changes: JSON.stringify({
-        billNumber: newInvoice.billNumber,
-        netAmount: newInvoice.netAmount,
-        status: newInvoice.status,
-      }),
+      return invoice;
     });
 
     revalidatePath('/purchases/invoices');
@@ -455,7 +459,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         .values({
           orgId,
           entryNumber,
-          entryDate: new Date(),
+          entryDate: new Date(invoice.date),
           referenceType: 'purchase_invoice',
           referenceId: invoiceId,
           description: `Purchase Invoice ${invoice.billNumber} approval`,
@@ -797,70 +801,73 @@ export async function recordExpense(data: ExpenseFormData) {
     const locked = await checkPeriodLocked(data.date);
     if (locked) return { success: false, error: "Cannot record expense in a locked fiscal period" };
 
-    const [newExpense] = await db
-      .insert(expenses)
-      .values({
-        orgId,
-        accountId: data.accountId,
-        amount: data.amount,
-        date: data.date,
-        reference: data.reference || null,
-        description: data.description || null,
-        paidFromAccountId: data.paidFromAccountId,
-      })
-      .returning();
-
-    // Create journal entry
     const entryNumber = await generateJournalEntryNumber(orgId);
 
-    const [journalEntry] = await db
-      .insert(journalEntries)
-      .values({
+    const newExpense = await db.transaction(async (tx) => {
+      const [expense] = await tx
+        .insert(expenses)
+        .values({
+          orgId,
+          accountId: data.accountId,
+          amount: data.amount,
+          date: data.date,
+          reference: data.reference || null,
+          description: data.description || null,
+          paidFromAccountId: data.paidFromAccountId,
+        })
+        .returning();
+
+      const [journalEntry] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          entryNumber,
+          entryDate: data.date,
+          referenceType: 'expense',
+          referenceId: expense.id,
+          description: `Expense: ${data.description || data.reference || 'Recorded'}`,
+          status: "posted",
+          postedAt: new Date(),
+        })
+        .returning();
+
+      if (!validateJournalBalance([{ debitAmount: data.amount, creditAmount: "0" }, { debitAmount: "0", creditAmount: data.amount }]))
+        throw new Error("Journal entry out of balance: total debits must equal total credits");
+
+      // Debit: Expense Account
+      await tx.insert(journalEntryLines).values({
         orgId,
-        entryNumber,
-        entryDate: data.date,
-        referenceType: 'expense',
-        referenceId: newExpense.id,
-        description: `Expense: ${data.description || data.reference || 'Recorded'}`,
-        status: "posted",
-        postedAt: new Date(),
-      })
-      .returning();
+        journalEntryId: journalEntry.id,
+        accountId: data.accountId,
+        description: `Debit - Expense Account`,
+        debitAmount: data.amount,
+        creditAmount: '0',
+      });
 
-    if (!validateJournalBalance([{ debitAmount: data.amount, creditAmount: "0" }, { debitAmount: "0", creditAmount: data.amount }]))
-      throw new Error("Journal entry out of balance: total debits must equal total credits");
+      // Credit: Cash/Bank Account
+      await tx.insert(journalEntryLines).values({
+        orgId,
+        journalEntryId: journalEntry.id,
+        accountId: data.paidFromAccountId,
+        description: `Credit - Cash/Bank Account`,
+        debitAmount: '0',
+        creditAmount: data.amount,
+      });
 
-    // Debit: Expense Account
-    await db.insert(journalEntryLines).values({
-      orgId,
-      journalEntryId: journalEntry.id,
-      accountId: data.accountId,
-      description: `Debit - Expense Account`,
-      debitAmount: data.amount,
-      creditAmount: '0',
-    });
+      // Audit log
+      await tx.insert(auditLogs).values({
+        orgId,
+        userId: (await auth()).userId || 'system',
+        action: 'EXPENSE_RECORDED',
+        entityType: 'expense',
+        entityId: expense.id,
+        changes: JSON.stringify({
+          amount: data.amount,
+          journalEntry: entryNumber,
+        }),
+      });
 
-    // Credit: Cash/Bank Account
-    await db.insert(journalEntryLines).values({
-      orgId,
-      journalEntryId: journalEntry.id,
-      accountId: data.paidFromAccountId,
-      description: `Credit - Cash/Bank Account`,
-      debitAmount: '0',
-      creditAmount: data.amount,
-    });
-
-    // Audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || 'system',
-      action: 'EXPENSE_RECORDED',
-      entityType: 'expense',
-      entityId: newExpense.id,
-      changes: JSON.stringify({
-        amount: data.amount,
-        journalEntry: entryNumber,
-      }),
+      return expense;
     });
 
     revalidatePath('/accounts/expenses');
@@ -1075,52 +1082,55 @@ export async function createPurchaseOrder(data: PurchaseOrderFormData) {
     const shipping = parseFloat(data.shippingCharges || '0');
     const netAmount = grossAmount - discountAmount + taxAmount + shipping;
 
-    const [newPO] = await db.insert(purchaseOrders).values({
-      orgId,
-      orderNumber,
-      vendorId: data.vendorId,
-      orderDate: new Date(data.orderDate),
-      expectedDeliveryDate: data.expectedDeliveryDate ? new Date(data.expectedDeliveryDate) : null,
-      reference: data.reference || '',
-      subject: data.subject || '',
-      grossAmount: grossAmount.toFixed(2),
-      discountPercentage: globalDiscPct.toFixed(2),
-      discountAmount: discountAmount.toFixed(2),
-      taxAmount: taxAmount.toFixed(2),
-      shippingCharges: shipping.toFixed(2),
-      netAmount: netAmount.toFixed(2),
-      status: 'draft',
-      notes: data.notes || null,
-      terms: data.terms || null,
-    }).returning();
-
-    for (const item of data.items) {
-      const qty = parseFloat(item.quantity || '0');
-      const price = parseFloat(item.unitPrice || '0');
-      const discPct = parseFloat(item.discountPercentage || '0');
-      const taxRate = parseFloat(item.taxRate || '0');
-      const lineTotal = (qty * price) - ((qty * price) * discPct / 100);
-
-      await db.insert(purchaseOrderItems).values({
+    const newPO = await db.transaction(async (tx) => {
+      const [po] = await tx.insert(purchaseOrders).values({
         orgId,
-        purchaseOrderId: newPO.id,
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercentage: item.discountPercentage || '0',
-        taxRate: item.taxRate || '0',
-        lineTotal: lineTotal.toFixed(2),
-      });
-    }
+        orderNumber,
+        vendorId: data.vendorId,
+        orderDate: new Date(data.orderDate),
+        expectedDeliveryDate: data.expectedDeliveryDate ? new Date(data.expectedDeliveryDate) : null,
+        reference: data.reference || '',
+        subject: data.subject || '',
+        grossAmount: grossAmount.toFixed(2),
+        discountPercentage: globalDiscPct.toFixed(2),
+        discountAmount: discountAmount.toFixed(2),
+        taxAmount: taxAmount.toFixed(2),
+        shippingCharges: shipping.toFixed(2),
+        netAmount: netAmount.toFixed(2),
+        status: 'draft',
+        notes: data.notes || null,
+        terms: data.terms || null,
+      }).returning();
 
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || 'system',
-      action: 'PURCHASE_ORDER_CREATED',
-      entityType: 'purchase_order',
-      entityId: newPO.id,
-      changes: JSON.stringify({ orderNumber, netAmount: newPO.netAmount }),
+      for (const item of data.items) {
+        const qty = parseFloat(item.quantity || '0');
+        const price = parseFloat(item.unitPrice || '0');
+        const discPct = parseFloat(item.discountPercentage || '0');
+        const lineTotal = (qty * price) - ((qty * price) * discPct / 100);
+
+        await tx.insert(purchaseOrderItems).values({
+          orgId,
+          purchaseOrderId: po.id,
+          productId: item.productId || null,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountPercentage: item.discountPercentage || '0',
+          taxRate: item.taxRate || '0',
+          lineTotal: lineTotal.toFixed(2),
+        });
+      }
+
+      await tx.insert(auditLogs).values({
+        orgId,
+        userId: (await auth()).userId || 'system',
+        action: 'PURCHASE_ORDER_CREATED',
+        entityType: 'purchase_order',
+        entityId: po.id,
+        changes: JSON.stringify({ orderNumber, netAmount: po.netAmount }),
+      });
+
+      return po;
     });
 
     revalidatePath('/purchases/orders');
@@ -1789,109 +1799,113 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
 
     const paymentNumber = await generateVendorPaymentNumber(orgId);
 
-    const [newPayment] = await db.insert(vendorPayments).values({
-      orgId,
-      paymentNumber,
-      vendorId: data.vendorId,
-      paymentDate: new Date(data.paymentDate),
-      paymentMethod: data.paymentMethod,
-      amount: data.amount,
-      whtAmount: whtAmount > 0 ? String(whtAmount) : '0',
-      whtRate: whtRate > 0 ? String(whtRate) : '0',
-      reference: data.reference || '',
-      notes: data.notes || null,
-    }).returning();
-
-    // Process allocations
-    if (data.allocations && data.allocations.length > 0) {
-      for (const alloc of data.allocations) {
-        await db.insert(vendorPaymentAllocations).values({
-          orgId,
-          vendorPaymentId: newPayment.id,
-          purchaseInvoiceId: alloc.invoiceId,
-          allocatedAmount: alloc.amount,
-        });
-      }
-    }
-
-    // Create journal entry: Debit Accounts Payable, Credit Cash/Bank, Credit WHT Payable
-    const entryNumber = await (async () => {
-      const res = await db.select({ entryNumber: journalEntries.entryNumber }).from(journalEntries).where(eq(journalEntries.orgId, orgId)).orderBy(desc(journalEntries.createdAt)).limit(1);
-      let nextNum = 1;
-      if (res.length > 0 && res[0].entryNumber) { const m = res[0].entryNumber.match(/\d+$/); if (m) nextNum = parseInt(m[0]) + 1; }
-      return `JE-${String(nextNum).padStart(5, '0')}`;
-    })();
-
     const paymentSubType = data.paymentMethod === 'cash' ? 'cash' : 'bank';
     const [cashBankAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, paymentSubType))).limit(1);
     const [apAccount] = await db.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'accounts_payable'))).limit(1);
 
-    if (cashBankAccount && apAccount) {
-      const lines = [
-        { debitAmount: String(paymentAmount), creditAmount: '0' },
-        { debitAmount: '0', creditAmount: String(netPayment) },
-      ];
-      if (whtAmount > 0) {
-        lines.push({ debitAmount: '0', creditAmount: String(whtAmount) });
-      }
-      if (!validateJournalBalance(lines))
-        throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-      const [journalEntry] = await db.insert(journalEntries).values({
+    const newPayment = await db.transaction(async (tx) => {
+      const [payment] = await tx.insert(vendorPayments).values({
         orgId,
-        entryNumber,
-        entryDate: new Date(data.paymentDate),
-        referenceType: 'vendor_payment',
-        referenceId: newPayment.id,
-        description: `Vendor Payment ${paymentNumber}${whtAmount > 0 ? ` (WHT: ${whtAmount.toFixed(2)})` : ''}`,
-        status: "posted",
-        postedAt: new Date(),
+        paymentNumber,
+        vendorId: data.vendorId,
+        paymentDate: new Date(data.paymentDate),
+        paymentMethod: data.paymentMethod,
+        amount: data.amount,
+        whtAmount: whtAmount > 0 ? String(whtAmount) : '0',
+        whtRate: whtRate > 0 ? String(whtRate) : '0',
+        reference: data.reference || '',
+        notes: data.notes || null,
       }).returning();
 
-      // Debit: Accounts Payable (full invoice amount)
-      await db.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: apAccount.id,
-        description: `Debit - Accounts Payable`,
-        debitAmount: String(paymentAmount),
-        creditAmount: '0',
-      });
-
-      // Credit: Cash/Bank (net of WHT)
-      await db.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: cashBankAccount.id,
-        description: `Credit - ${cashBankAccount.name}`,
-        debitAmount: '0',
-        creditAmount: String(netPayment),
-      });
-
-      // Credit: WHT Payable (WHT amount)
-      if (whtAmount > 0) {
-        const [whtAccount] = await db.select().from(chartOfAccounts).where(
-          and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'wht_payable'))
-        ).limit(1);
-
-        if (whtAccount) {
-          await db.insert(journalEntryLines).values({
+      // Process allocations
+      if (data.allocations && data.allocations.length > 0) {
+        for (const alloc of data.allocations) {
+          await tx.insert(vendorPaymentAllocations).values({
             orgId,
-            journalEntryId: journalEntry.id,
-            accountId: whtAccount.id,
-            description: `Credit - WHT Payable (${whtRate > 0 ? whtRate + '%' : 'Fixed'})`,
-            debitAmount: '0',
-            creditAmount: String(whtAmount),
+            vendorPaymentId: payment.id,
+            purchaseInvoiceId: alloc.invoiceId,
+            allocatedAmount: alloc.amount,
           });
         }
       }
-    }
 
-    // Update vendor balance (reduce payable by full amount)
-    const [vendor] = await db.select().from(vendors).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId))).limit(1);
-    if (vendor) {
-      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${paymentAmount}, 0)` }).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId)));
-    }
+      // Create journal entry: Debit Accounts Payable, Credit Cash/Bank, Credit WHT Payable
+      const entryNumber = await (async () => {
+        const res = await tx.select({ entryNumber: journalEntries.entryNumber }).from(journalEntries).where(eq(journalEntries.orgId, orgId)).orderBy(desc(journalEntries.createdAt)).limit(1);
+        let nextNum = 1;
+        if (res.length > 0 && res[0].entryNumber) { const m = res[0].entryNumber.match(/\d+$/); if (m) nextNum = parseInt(m[0]) + 1; }
+        return `JE-${String(nextNum).padStart(5, '0')}`;
+      })();
+
+      if (cashBankAccount && apAccount) {
+        const lines = [
+          { debitAmount: String(paymentAmount), creditAmount: '0' },
+          { debitAmount: '0', creditAmount: String(netPayment) },
+        ];
+        if (whtAmount > 0) {
+          lines.push({ debitAmount: '0', creditAmount: String(whtAmount) });
+        }
+        if (!validateJournalBalance(lines))
+          throw new Error("Journal entry out of balance: total debits must equal total credits");
+
+        const [journalEntry] = await tx.insert(journalEntries).values({
+          orgId,
+          entryNumber,
+          entryDate: new Date(data.paymentDate),
+          referenceType: 'vendor_payment',
+          referenceId: payment.id,
+          description: `Vendor Payment ${paymentNumber}${whtAmount > 0 ? ` (WHT: ${whtAmount.toFixed(2)})` : ''}`,
+          status: "posted",
+          postedAt: new Date(),
+        }).returning();
+
+        // Debit: Accounts Payable (full invoice amount)
+        await tx.insert(journalEntryLines).values({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: apAccount.id,
+          description: `Debit - Accounts Payable`,
+          debitAmount: String(paymentAmount),
+          creditAmount: '0',
+        });
+
+        // Credit: Cash/Bank (net of WHT)
+        await tx.insert(journalEntryLines).values({
+          orgId,
+          journalEntryId: journalEntry.id,
+          accountId: cashBankAccount.id,
+          description: `Credit - ${cashBankAccount.name}`,
+          debitAmount: '0',
+          creditAmount: String(netPayment),
+        });
+
+        // Credit: WHT Payable (WHT amount)
+        if (whtAmount > 0) {
+          const [whtAccount] = await tx.select().from(chartOfAccounts).where(
+            and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'wht_payable'))
+          ).limit(1);
+
+          if (whtAccount) {
+            await tx.insert(journalEntryLines).values({
+              orgId,
+              journalEntryId: journalEntry.id,
+              accountId: whtAccount.id,
+              description: `Credit - WHT Payable (${whtRate > 0 ? whtRate + '%' : 'Fixed'})`,
+              debitAmount: '0',
+              creditAmount: String(whtAmount),
+            });
+          }
+        }
+      }
+
+      // Update vendor balance (reduce payable by full amount)
+      const [vendor] = await tx.select().from(vendors).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId))).limit(1);
+      if (vendor) {
+        await tx.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${paymentAmount}, 0)` }).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId)));
+      }
+
+      return payment;
+    });
 
     revalidatePath('/purchases/payments');
     revalidatePath('/purchases/invoices');
@@ -1910,14 +1924,16 @@ export async function allocateVendorPayment(paymentId: string, allocations: Arra
     const [payment] = await db.select().from(vendorPayments).where(and(eq(vendorPayments.id, paymentId), eq(vendorPayments.orgId, orgId))).limit(1);
     if (!payment) return { success: false, error: "Payment not found" };
 
-    for (const alloc of allocations) {
-      await db.insert(vendorPaymentAllocations).values({
-        orgId,
-        vendorPaymentId: paymentId,
-        purchaseInvoiceId: alloc.invoiceId,
-        allocatedAmount: alloc.amount,
-      });
-    }
+    await db.transaction(async (tx) => {
+      for (const alloc of allocations) {
+        await tx.insert(vendorPaymentAllocations).values({
+          orgId,
+          vendorPaymentId: paymentId,
+          purchaseInvoiceId: alloc.invoiceId,
+          allocatedAmount: alloc.amount,
+        });
+      }
+    });
 
     revalidatePath('/purchases/payments');
     return { success: true, message: "Payment allocated successfully" };

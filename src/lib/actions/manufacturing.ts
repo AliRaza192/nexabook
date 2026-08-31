@@ -532,162 +532,162 @@ export async function completeJobOrder(jobOrderId: string) {
       }
     }
 
-    // Start transaction-like operation (Drizzle supports transactions)
-    // 1. Deduct raw materials from stock
-    for (const comp of components) {
-      const required = parseFloat(comp.requiredQty);
-      
-      await db
-        .update(products)
-        .set({ 
-          currentStock: sql`${products.currentStock} - ${required}`,
-          updatedAt: new Date() 
-        })
-        .where(eq(products.id, comp.componentId));
-    }
-
-    // 2. Add finished goods to stock
-    const qtyToProduce = jobOrder.quantityToProduce;
-    await db
-      .update(products)
-      .set({ 
-        currentStock: sql`${products.currentStock} + ${qtyToProduce}`,
-        updatedAt: new Date() 
-      })
-      .where(eq(products.id, bom.finishedGoodId));
-
-    // 3. Create journal entry for the manufacturing
     const costPrice = finishedGood.costPrice ? parseFloat(finishedGood.costPrice) : 0;
+    const qtyToProduce = jobOrder.quantityToProduce;
     const totalValue = costPrice * qtyToProduce;
 
-    if (totalValue > 0) {
-      // Generate journal entry number
-      const [lastEntry] = await db
-        .select({ entryNumber: journalEntries.entryNumber })
-        .from(journalEntries)
-        .where(eq(journalEntries.orgId, orgId))
-        .orderBy(desc(journalEntries.createdAt))
-        .limit(1);
+    await db.transaction(async (tx) => {
+      // 1. Deduct raw materials from stock
+      for (const comp of components) {
+        const required = parseFloat(comp.requiredQty);
 
-      let entryNumber = 'JE-0001';
-      if (lastEntry?.entryNumber) {
-        const lastNum = parseInt(lastEntry.entryNumber.split('-').pop() || '0');
-        entryNumber = `JE-${String(lastNum + 1).padStart(4, '0')}`;
+        await tx
+          .update(products)
+          .set({
+            currentStock: sql`${products.currentStock} - ${required}`,
+            updatedAt: new Date()
+          })
+          .where(eq(products.id, comp.componentId));
       }
 
-      // Create journal entry
-      const [journalEntry] = await db
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryDate: new Date(),
-          entryNumber,
-          referenceType: 'job_order',
-          referenceId: jobOrderId,
-          description: `Manufacturing: ${finishedGood.name} x ${qtyToProduce} units`,
-          status: "posted",
-          postedAt: new Date(),
+      // 2. Add finished goods to stock
+      await tx
+        .update(products)
+        .set({
+          currentStock: sql`${products.currentStock} + ${qtyToProduce}`,
+          updatedAt: new Date()
         })
-        .returning();
+        .where(eq(products.id, bom.finishedGoodId));
 
-      // Debit: Inventory Asset (Finished Goods)
-      // Find Inventory Asset account (assuming it exists in COA)
-      const inventoryAccount = await db
-        .select({ id: chartOfAccounts.id })
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'inventory'),
-          eq(chartOfAccounts.type, 'asset')
-        ))
-        .limit(1);
+      // 3. Create journal entry for the manufacturing
+      if (totalValue > 0) {
+        // Generate journal entry number
+        const [lastEntry] = await tx
+          .select({ entryNumber: journalEntries.entryNumber })
+          .from(journalEntries)
+          .where(eq(journalEntries.orgId, orgId))
+          .orderBy(desc(journalEntries.createdAt))
+          .limit(1);
 
-      if (inventoryAccount.length > 0) {
-        // Calculate total raw material cost and collect validation pairs
-        let totalRawMaterialCost = 0;
-        const validationLines: { debitAmount: string; creditAmount: string }[] = [
-          { debitAmount: totalValue.toFixed(2), creditAmount: '0' },
-        ];
-        for (const comp of components) {
-          const qty = parseFloat(comp.requiredQty);
-          const costPrice = parseFloat(comp.component?.costPrice || '0');
-          const lineValue = qty * costPrice;
-          totalRawMaterialCost += lineValue;
-          validationLines.push({ debitAmount: '0', creditAmount: lineValue.toFixed(2) });
+        let entryNumber = 'JE-0001';
+        if (lastEntry?.entryNumber) {
+          const lastNum = parseInt(lastEntry.entryNumber.split('-').pop() || '0');
+          entryNumber = `JE-${String(lastNum + 1).padStart(4, '0')}`;
         }
 
-        const variance = totalValue - totalRawMaterialCost;
-        if (Math.abs(variance) > 0.01) {
-          if (variance > 0) {
-            validationLines.push({ debitAmount: variance.toFixed(2), creditAmount: '0' });
-          } else {
-            validationLines.push({ debitAmount: '0', creditAmount: Math.abs(variance).toFixed(2) });
+        // Create journal entry
+        const [journalEntry] = await tx
+          .insert(journalEntries)
+          .values({
+            orgId,
+            entryDate: new Date(),
+            entryNumber,
+            referenceType: 'job_order',
+            referenceId: jobOrderId,
+            description: `Manufacturing: ${finishedGood.name} x ${qtyToProduce} units`,
+            status: "posted",
+            postedAt: new Date(),
+          })
+          .returning();
+
+        // Find Inventory Asset account (assuming it exists in COA)
+        const inventoryAccount = await tx
+          .select({ id: chartOfAccounts.id })
+          .from(chartOfAccounts)
+          .where(and(
+            eq(chartOfAccounts.orgId, orgId),
+            eq(chartOfAccounts.subType, 'inventory'),
+            eq(chartOfAccounts.type, 'asset')
+          ))
+          .limit(1);
+
+        if (inventoryAccount.length > 0) {
+          // Calculate total raw material cost and collect validation pairs
+          let totalRawMaterialCost = 0;
+          const validationLines: { debitAmount: string; creditAmount: string }[] = [
+            { debitAmount: totalValue.toFixed(2), creditAmount: '0' },
+          ];
+          for (const comp of components) {
+            const qty = parseFloat(comp.requiredQty);
+            const costPrice = parseFloat(comp.component?.costPrice || '0');
+            const lineValue = qty * costPrice;
+            totalRawMaterialCost += lineValue;
+            validationLines.push({ debitAmount: '0', creditAmount: lineValue.toFixed(2) });
           }
-        }
 
-        if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
+          const variance = totalValue - totalRawMaterialCost;
+          if (Math.abs(variance) > 0.01) {
+            if (variance > 0) {
+              validationLines.push({ debitAmount: variance.toFixed(2), creditAmount: '0' });
+            } else {
+              validationLines.push({ debitAmount: '0', creditAmount: Math.abs(variance).toFixed(2) });
+            }
+          }
 
-        // Debit entry for finished goods
-        await db.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: inventoryAccount[0].id,
-          description: `Debit: Finished Goods - ${finishedGood.name}`,
-          debitAmount: totalValue.toFixed(2),
-          creditAmount: '0',
-        });
+          if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
-        // Credit: Raw Material with monetary value
-        for (const comp of components) {
-          const qty = parseFloat(comp.requiredQty);
-          const costPrice = parseFloat(comp.component?.costPrice || '0');
-          const lineValue = qty * costPrice;
-
-          await db.insert(journalEntryLines).values({
+          // Debit entry for finished goods
+          await tx.insert(journalEntryLines).values({
             orgId,
             journalEntryId: journalEntry.id,
             accountId: inventoryAccount[0].id,
-            description: `Credit: Raw Material - ${comp.component?.name || 'Component'}`,
-            debitAmount: '0',
-            creditAmount: lineValue.toFixed(2),
+            description: `Debit: Finished Goods - ${finishedGood.name}`,
+            debitAmount: totalValue.toFixed(2),
+            creditAmount: '0',
           });
-        }
 
-        // Balance the journal entry: if finished goods value differs from
-        // raw material cost, post the difference to the same inventory account
-        if (Math.abs(variance) > 0.01) {
-          if (variance > 0) {
-            await db.insert(journalEntryLines).values({
+          // Credit: Raw Material with monetary value
+          for (const comp of components) {
+            const qty = parseFloat(comp.requiredQty);
+            const costPrice = parseFloat(comp.component?.costPrice || '0');
+            const lineValue = qty * costPrice;
+
+            await tx.insert(journalEntryLines).values({
               orgId,
               journalEntryId: journalEntry.id,
               accountId: inventoryAccount[0].id,
-              description: `Debit: Manufacturing Value Adjustment`,
-              debitAmount: variance.toFixed(2),
-              creditAmount: '0',
-            });
-          } else {
-            await db.insert(journalEntryLines).values({
-              orgId,
-              journalEntryId: journalEntry.id,
-              accountId: inventoryAccount[0].id,
-              description: `Credit: Manufacturing Value Adjustment`,
+              description: `Credit: Raw Material - ${comp.component?.name || 'Component'}`,
               debitAmount: '0',
-              creditAmount: Math.abs(variance).toFixed(2),
+              creditAmount: lineValue.toFixed(2),
             });
+          }
+
+          // Balance the journal entry: if finished goods value differs from
+          // raw material cost, post the difference to the same inventory account
+          if (Math.abs(variance) > 0.01) {
+            if (variance > 0) {
+              await tx.insert(journalEntryLines).values({
+                orgId,
+                journalEntryId: journalEntry.id,
+                accountId: inventoryAccount[0].id,
+                description: `Debit: Manufacturing Value Adjustment`,
+                debitAmount: variance.toFixed(2),
+                creditAmount: '0',
+              });
+            } else {
+              await tx.insert(journalEntryLines).values({
+                orgId,
+                journalEntryId: journalEntry.id,
+                accountId: inventoryAccount[0].id,
+                description: `Credit: Manufacturing Value Adjustment`,
+                debitAmount: '0',
+                creditAmount: Math.abs(variance).toFixed(2),
+              });
+            }
           }
         }
       }
-    }
 
-    // 4. Update job order status to completed
-    await db
-      .update(jobOrders)
-      .set({ 
-        status: 'completed',
-        completionDate: new Date(),
-        updatedAt: new Date() 
-      })
-      .where(eq(jobOrders.id, jobOrderId));
+      // 4. Update job order status to completed
+      await tx
+        .update(jobOrders)
+        .set({
+          status: 'completed',
+          completionDate: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(jobOrders.id, jobOrderId));
+    });
 
     revalidatePath('/manufacturing/job-orders');
     await createAuditLog({ action: "JOB_ORDER_COMPLETED", entityType: "jobOrder", entityId: jobOrderId });
@@ -783,102 +783,104 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
     const multiplier = data.quantity / bom.quantity;
 
     // 1. Reduce finished good stock
-    await db
-      .update(products)
-      .set({ 
-        currentStock: sql`${products.currentStock} - ${data.quantity}`,
-        updatedAt: new Date() 
-      })
-      .where(and(eq(products.id, data.finishedGoodId), eq(products.orgId, orgId)));
-
     // 2. Add raw materials back to stock
-    for (const comp of components) {
-      const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
-      
-      await db
-        .update(products)
-        .set({ 
-          currentStock: sql`${products.currentStock} + ${qtyToAdd}`,
-          updatedAt: new Date() 
-        })
-        .where(and(eq(products.id, comp.componentId), eq(products.orgId, orgId)));
-    }
-
     // 3. Create journal entry for disassembly
     const costPrice = finishedGood.costPrice ? parseFloat(finishedGood.costPrice) : 0;
     const totalValue = costPrice * data.quantity;
 
-    if (totalValue > 0) {
-      const [lastEntry] = await db
-        .select({ entryNumber: journalEntries.entryNumber })
-        .from(journalEntries)
-        .where(eq(journalEntries.orgId, orgId))
-        .orderBy(desc(journalEntries.createdAt))
-        .limit(1);
+    await db.transaction(async (tx) => {
+      await tx
+        .update(products)
+        .set({
+          currentStock: sql`${products.currentStock} - ${data.quantity}`,
+          updatedAt: new Date()
+        })
+        .where(and(eq(products.id, data.finishedGoodId), eq(products.orgId, orgId)));
 
-      let entryNumber = 'JE-0001';
-      if (lastEntry?.entryNumber) {
-        const lastNum = parseInt(lastEntry.entryNumber.split('-').pop() || '0');
-        entryNumber = `JE-${String(lastNum + 1).padStart(4, '0')}`;
+      for (const comp of components) {
+        const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
+
+        await tx
+          .update(products)
+          .set({
+            currentStock: sql`${products.currentStock} + ${qtyToAdd}`,
+            updatedAt: new Date()
+          })
+          .where(and(eq(products.id, comp.componentId), eq(products.orgId, orgId)));
       }
 
-      const [journalEntry] = await db
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryDate: new Date(),
-          entryNumber,
-          referenceType: 'disassembly',
-          description: `Disassembly: ${finishedGood.name} x ${data.quantity} units`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
+      if (totalValue > 0) {
+        const [lastEntry] = await tx
+          .select({ entryNumber: journalEntries.entryNumber })
+          .from(journalEntries)
+          .where(eq(journalEntries.orgId, orgId))
+          .orderBy(desc(journalEntries.createdAt))
+          .limit(1);
 
-      const inventoryAccount = await db
-        .select({ id: chartOfAccounts.id })
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'inventory'),
-          eq(chartOfAccounts.type, 'asset')
-        ))
-        .limit(1);
-
-      if (inventoryAccount.length > 0) {
-        const validationLines: { debitAmount: string; creditAmount: string }[] = [
-          { debitAmount: '0', creditAmount: totalValue.toFixed(2) },
-        ];
-        for (const comp of components) {
-          const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
-          validationLines.push({ debitAmount: qtyToAdd.toFixed(2), creditAmount: '0' });
+        let entryNumber = 'JE-0001';
+        if (lastEntry?.entryNumber) {
+          const lastNum = parseInt(lastEntry.entryNumber.split('-').pop() || '0');
+          entryNumber = `JE-${String(lastNum + 1).padStart(4, '0')}`;
         }
-        if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
-        // Credit: Inventory Asset (Finished Goods)
-        await db.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: inventoryAccount[0].id,
-          description: `Credit: Finished Goods - ${finishedGood.name}`,
-          debitAmount: '0',
-          creditAmount: totalValue.toFixed(2),
-        });
+        const [journalEntry] = await tx
+          .insert(journalEntries)
+          .values({
+            orgId,
+            entryDate: new Date(),
+            entryNumber,
+            referenceType: 'disassembly',
+            description: `Disassembly: ${finishedGood.name} x ${data.quantity} units`,
+            status: "posted",
+            postedAt: new Date(),
+          })
+          .returning();
 
-        // Debit entries for raw materials
-        for (const comp of components) {
-          const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
-          await db.insert(journalEntryLines).values({
+        const inventoryAccount = await tx
+          .select({ id: chartOfAccounts.id })
+          .from(chartOfAccounts)
+          .where(and(
+            eq(chartOfAccounts.orgId, orgId),
+            eq(chartOfAccounts.subType, 'inventory'),
+            eq(chartOfAccounts.type, 'asset')
+          ))
+          .limit(1);
+
+        if (inventoryAccount.length > 0) {
+          const validationLines: { debitAmount: string; creditAmount: string }[] = [
+            { debitAmount: '0', creditAmount: totalValue.toFixed(2) },
+          ];
+          for (const comp of components) {
+            const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
+            validationLines.push({ debitAmount: qtyToAdd.toFixed(2), creditAmount: '0' });
+          }
+          if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
+
+          // Credit: Inventory Asset (Finished Goods)
+          await tx.insert(journalEntryLines).values({
             orgId,
             journalEntryId: journalEntry.id,
             accountId: inventoryAccount[0].id,
-            description: `Debit: Raw Material - ${comp.component?.name || 'Component'}`,
-            debitAmount: qtyToAdd.toFixed(2),
-            creditAmount: '0',
+            description: `Credit: Finished Goods - ${finishedGood.name}`,
+            debitAmount: '0',
+            creditAmount: totalValue.toFixed(2),
           });
+
+          // Debit entries for raw materials
+          for (const comp of components) {
+            const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
+            await tx.insert(journalEntryLines).values({
+              orgId,
+              journalEntryId: journalEntry.id,
+              accountId: inventoryAccount[0].id,
+              description: `Debit: Raw Material - ${comp.component?.name || 'Component'}`,
+              debitAmount: qtyToAdd.toFixed(2),
+              creditAmount: '0',
+            });
+          }
         }
       }
-    }
+    });
 
     revalidatePath('/manufacturing/disassemble');
     await createAuditLog({ action: "FINISHED_GOOD_DISASSEMBLED", entityType: "jobOrder", entityId: data.finishedGoodId });

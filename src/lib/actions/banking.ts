@@ -99,65 +99,67 @@ export async function addBankAccount(data: BankAccountFormData) {
 
     const openingBalance = parseFloat(data.openingBalance || "0");
 
-    const [newAccount] = await db
-      .insert(bankAccounts)
-      .values({
-        orgId,
-        accountName: data.accountName,
-        iban: data.iban,
-        accountNumber: data.accountNumber,
-        branchName: data.branchName,
-        bankName: data.bankName,
-        accountType: data.accountType,
-        openingBalance: data.openingBalance,
-        currentBalance: data.openingBalance,
-        currency: data.currency || "PKR",
-        notes: data.notes,
-        approvalStatus: "approved",
-        approvedBy: (await auth()).userId || "system",
-        approvedAt: new Date(),
-      })
-      .returning();
+    const bankAccountId = await findAccountBySubType(orgId, "bank", "asset");
+    const cashAccountId = await findAccountBySubType(orgId, "cash", "asset");
 
-    // Create opening balance journal entry if opening balance is non-zero
-    if (openingBalance !== 0) {
-      const entryCount = await db.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
-      const entryNumber = `JE-OPEN-${String(entryCount.length + 1).padStart(5, "0")}`;
-
-      const [journalEntry] = await db
-        .insert(journalEntries)
+    const newAccount = await db.transaction(async (tx) => {
+      const [newAccount] = await tx
+        .insert(bankAccounts)
         .values({
           orgId,
-          entryNumber,
-          entryDate: new Date(),
-          referenceType: "bank_opening_balance",
-          referenceId: newAccount.id,
-          description: `Opening balance for ${data.accountName}`,
-          status: "posted",
-          postedAt: new Date(),
+          accountName: data.accountName,
+          iban: data.iban,
+          accountNumber: data.accountNumber,
+          branchName: data.branchName,
+          bankName: data.bankName,
+          accountType: data.accountType,
+          openingBalance: parseFloat(data.openingBalance || "0").toFixed(2),
+          currentBalance: parseFloat(data.openingBalance || "0").toFixed(2),
+          currency: data.currency || "PKR",
+          notes: data.notes,
+          approvalStatus: "approved",
+          approvedBy: (await auth()).userId || "system",
+          approvedAt: new Date(),
         })
         .returning();
 
-      const bankAccountId = await findAccountBySubType(orgId, "bank", "asset");
-      const cashAccountId = await findAccountBySubType(orgId, "cash", "asset");
+      if (openingBalance !== 0) {
+        const entryCount = await tx.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
+        const entryNumber = `JE-OPEN-${String(entryCount.length + 1).padStart(5, "0")}`;
 
-      if (openingBalance > 0) {
-        // Debit Bank, Credit Opening Equity
-        const lines = [
-          { debitAmount: data.openingBalance, creditAmount: "0" },
-          { debitAmount: "0", creditAmount: data.openingBalance },
-        ];
-        if (!validateJournalBalance(lines)) {
-          throw new Error("Journal entry out of balance: total debits must equal total credits");
+        const [journalEntry] = await tx
+          .insert(journalEntries)
+          .values({
+            orgId,
+            entryNumber,
+            entryDate: new Date(),
+            referenceType: "bank_opening_balance",
+            referenceId: newAccount.id,
+            description: `Opening balance for ${data.accountName}`,
+            status: "posted",
+            postedAt: new Date(),
+          })
+          .returning();
+
+        if (openingBalance > 0) {
+          const lines = [
+            { debitAmount: data.openingBalance, creditAmount: "0" },
+            { debitAmount: "0", creditAmount: data.openingBalance },
+          ];
+          if (!validateJournalBalance(lines)) {
+            throw new Error("Journal entry out of balance: total debits must equal total credits");
+          }
+          await tx.insert(journalEntryLines).values({
+            orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: data.openingBalance, creditAmount: "0", description: "Bank opening balance"
+          });
+          await tx.insert(journalEntryLines).values({
+            orgId, journalEntryId: journalEntry.id, accountId: cashAccountId, debitAmount: "0", creditAmount: data.openingBalance, description: "Opening balance equity"
+          });
         }
-        await db.insert(journalEntryLines).values({
-          orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: data.openingBalance, creditAmount: "0", description: "Bank opening balance"
-        });
-        await db.insert(journalEntryLines).values({
-          orgId, journalEntryId: journalEntry.id, accountId: cashAccountId, debitAmount: "0", creditAmount: data.openingBalance, description: "Opening balance equity"
-        });
       }
-    }
+
+      return newAccount;
+    });
 
     revalidatePath("/accounts/banking");
     return { success: true, data: newAccount, message: "Bank account added successfully" };
@@ -340,53 +342,53 @@ export async function approveBankDeposit(depositId: string) {
     const locked = await checkPeriodLocked(new Date(deposit.depositDate));
     if (locked) return { success: false, error: "Cannot approve deposit in a locked fiscal period" };
 
-    // Update bank account balance
-    await db
-      .update(bankAccounts)
-      .set({
-        currentBalance: (parseFloat(deposit.amount) + parseFloat((await db.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, deposit.bankAccountId)).limit(1))[0].currentBalance || "0")).toString(),
-      })
-      .where(eq(bankAccounts.id, deposit.bankAccountId));
-
-    // Update deposit status
-    await db
-      .update(bankDeposits)
-      .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
-      .where(eq(bankDeposits.id, depositId));
-
-    // Create journal entry
-    const entryCount = await db.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
-    const entryNumber = `JE-DEP-${String(entryCount.length + 1).padStart(5, "0")}`;
-
-    const [journalEntry] = await db
-      .insert(journalEntries)
-      .values({
-        orgId,
-        entryNumber,
-        entryDate: deposit.depositDate,
-        referenceType: "bank_deposit",
-        referenceId: deposit.id,
-        description: `Bank deposit ${deposit.depositNumber}`,
-        status: "posted",
-        postedAt: new Date(),
-      })
-      .returning();
-
     const bankAccountId = await findAccountBySubType(orgId, "asset", "Bank");
     const cashAccountId = await findAccountBySubType(orgId, "asset", "Cash");
 
-    const lines = [
-      { debitAmount: deposit.amount, creditAmount: "0" },
-      { debitAmount: "0", creditAmount: deposit.amount },
-    ];
-    if (!validateJournalBalance(lines)) {
-      throw new Error("Journal entry out of balance: total debits must equal total credits");
-    }
-    await db.insert(journalEntryLines).values({
-      orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: deposit.amount, creditAmount: "0", description: "Bank deposit"
-    });
-    await db.insert(journalEntryLines).values({
-      orgId, journalEntryId: journalEntry.id, accountId: cashAccountId, debitAmount: "0", creditAmount: deposit.amount, description: "Cash deposited"
+    await db.transaction(async (tx) => {
+      const [acct] = await tx.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, deposit.bankAccountId)).limit(1);
+      const newBalance = parseFloat(deposit.amount) + parseFloat(acct?.currentBalance || "0");
+
+      await tx
+        .update(bankAccounts)
+        .set({ currentBalance: newBalance.toFixed(2) })
+        .where(eq(bankAccounts.id, deposit.bankAccountId));
+
+      await tx
+        .update(bankDeposits)
+        .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
+        .where(eq(bankDeposits.id, depositId));
+
+      const entryCount = await tx.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
+      const entryNumber = `JE-DEP-${String(entryCount.length + 1).padStart(5, "0")}`;
+
+      const [journalEntry] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          entryNumber,
+          entryDate: deposit.depositDate,
+          referenceType: "bank_deposit",
+          referenceId: deposit.id,
+          description: `Bank deposit ${deposit.depositNumber}`,
+          status: "posted",
+          postedAt: new Date(),
+        })
+        .returning();
+
+      const lines = [
+        { debitAmount: deposit.amount, creditAmount: "0" },
+        { debitAmount: "0", creditAmount: deposit.amount },
+      ];
+      if (!validateJournalBalance(lines)) {
+        throw new Error("Journal entry out of balance: total debits must equal total credits");
+      }
+      await tx.insert(journalEntryLines).values({
+        orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: deposit.amount, creditAmount: "0", description: "Bank deposit"
+      });
+      await tx.insert(journalEntryLines).values({
+        orgId, journalEntryId: journalEntry.id, accountId: cashAccountId, debitAmount: "0", creditAmount: deposit.amount, description: "Cash deposited"
+      });
     });
 
     revalidatePath("/accounts/banking");
@@ -520,52 +522,49 @@ export async function approveFundsTransfer(transferId: string) {
 
     const amount = parseFloat(transfer.amount);
 
-    // Update balances
-    await db
-      .update(bankAccounts)
-      .set({ currentBalance: (parseFloat((await db.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, transfer.fromBankAccountId)).limit(1))[0].currentBalance || "0") - amount).toString() })
-      .where(eq(bankAccounts.id, transfer.fromBankAccountId));
+    await db.transaction(async (tx) => {
+      const [fromAcct] = await tx.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, transfer.fromBankAccountId)).limit(1);
+      const fromBalance = parseFloat(fromAcct?.currentBalance || "0") - amount;
+      await tx.update(bankAccounts).set({ currentBalance: fromBalance.toFixed(2) }).where(eq(bankAccounts.id, transfer.fromBankAccountId));
 
-    await db
-      .update(bankAccounts)
-      .set({ currentBalance: (parseFloat((await db.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, transfer.toBankAccountId)).limit(1))[0].currentBalance || "0") + amount).toString() })
-      .where(eq(bankAccounts.id, transfer.toBankAccountId));
+      const [toAcct] = await tx.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, transfer.toBankAccountId)).limit(1);
+      const toBalance = parseFloat(toAcct?.currentBalance || "0") + amount;
+      await tx.update(bankAccounts).set({ currentBalance: toBalance.toFixed(2) }).where(eq(bankAccounts.id, transfer.toBankAccountId));
 
-    // Update transfer status
-    await db
-      .update(fundsTransfers)
-      .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
-      .where(eq(fundsTransfers.id, transferId));
+      await tx
+        .update(fundsTransfers)
+        .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
+        .where(eq(fundsTransfers.id, transferId));
 
-    // Create journal entry
-    const entryCount = await db.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
-    const entryNumber = `JE-FT-${String(entryCount.length + 1).padStart(5, "0")}`;
+      const entryCount = await tx.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
+      const entryNumber = `JE-FT-${String(entryCount.length + 1).padStart(5, "0")}`;
 
-    const [journalEntry] = await db
-      .insert(journalEntries)
-      .values({
-        orgId,
-        entryNumber,
-        entryDate: transfer.transferDate,
-        referenceType: "funds_transfer",
-        referenceId: transfer.id,
-        description: `Funds transfer ${transfer.transferNumber}`,
-        status: "posted",
-        postedAt: new Date(),
-      })
-      .returning();
+      const [journalEntry] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          entryNumber,
+          entryDate: transfer.transferDate,
+          referenceType: "funds_transfer",
+          referenceId: transfer.id,
+          description: `Funds transfer ${transfer.transferNumber}`,
+          status: "posted",
+          postedAt: new Date(),
+        })
+        .returning();
 
-    const lines = [
-      { debitAmount: transfer.amount, creditAmount: "0" },
-      { debitAmount: "0", creditAmount: transfer.amount },
-    ];
-    if (!validateJournalBalance(lines)) {
-      throw new Error("Journal entry out of balance: total debits must equal total credits");
-    }
-    await db.insert(journalEntryLines).values([
-      { orgId, journalEntryId: journalEntry.id, accountId: transfer.toBankAccountId, debitAmount: transfer.amount, creditAmount: "0", description: "Funds transfer to" },
-      { orgId, journalEntryId: journalEntry.id, accountId: transfer.fromBankAccountId, debitAmount: "0", creditAmount: transfer.amount, description: "Funds transfer from" },
-    ]);
+      const lines = [
+        { debitAmount: transfer.amount, creditAmount: "0" },
+        { debitAmount: "0", creditAmount: transfer.amount },
+      ];
+      if (!validateJournalBalance(lines)) {
+        throw new Error("Journal entry out of balance: total debits must equal total credits");
+      }
+      await tx.insert(journalEntryLines).values([
+        { orgId, journalEntryId: journalEntry.id, accountId: transfer.toBankAccountId, debitAmount: transfer.amount, creditAmount: "0", description: "Funds transfer to" },
+        { orgId, journalEntryId: journalEntry.id, accountId: transfer.fromBankAccountId, debitAmount: "0", creditAmount: transfer.amount, description: "Funds transfer from" },
+      ]);
+    });
 
     revalidatePath("/accounts/banking");
     return { success: true, message: "Funds transfer approved and posted" };
@@ -955,66 +954,64 @@ export async function createContraEntry(data: ContraEntryFormData) {
       return { success: false, error: "One or both accounts not found" };
     }
 
-    // Generate entry number
     const entryNumber = await generateContraEntryNumber(orgId);
 
-    // Create journal entry
     const entryDate = new Date(data.entryDate);
 
-    const [journalEntry] = await db
-      .insert(journalEntries)
-      .values({
+    const journalEntry = await db.transaction(async (tx) => {
+      const [journalEntry] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          entryNumber,
+          entryDate,
+          referenceType: 'contra_entry',
+          description: data.description || `Contra transfer: ${fromAccount.name} → ${toAccount.name}`,
+          status: "posted",
+          postedAt: new Date(),
+        })
+        .returning();
+
+      const lines = [
+        { debitAmount: data.amount, creditAmount: '0' },
+        { debitAmount: '0', creditAmount: data.amount },
+      ];
+      if (!validateJournalBalance(lines)) {
+        throw new Error("Journal entry out of balance: total debits must equal total credits");
+      }
+      await tx.insert(journalEntryLines).values({
         orgId,
-        entryNumber,
-        entryDate,
-        referenceType: 'contra_entry',
-        description: data.description || `Contra transfer: ${fromAccount.name} → ${toAccount.name}`,
-        status: "posted",
-        postedAt: new Date(),
-      })
-      .returning();
+        journalEntryId: journalEntry.id,
+        accountId: data.toAccountId,
+        debitAmount: data.amount,
+        creditAmount: '0',
+        description: `Transfer from ${fromAccount.name}`,
+      });
 
-    // Create journal entry lines
-    // Debit: To Account (receiving)
-    // Credit: From Account (sending)
-    const lines = [
-      { debitAmount: data.amount, creditAmount: '0' },
-      { debitAmount: '0', creditAmount: data.amount },
-    ];
-    if (!validateJournalBalance(lines)) {
-      throw new Error("Journal entry out of balance: total debits must equal total credits");
-    }
-    await db.insert(journalEntryLines).values({
-      orgId,
-      journalEntryId: journalEntry.id,
-      accountId: data.toAccountId,
-      debitAmount: data.amount,
-      creditAmount: '0',
-      description: `Transfer from ${fromAccount.name}`,
-    });
+      await tx.insert(journalEntryLines).values({
+        orgId,
+        journalEntryId: journalEntry.id,
+        accountId: data.fromAccountId,
+        debitAmount: '0',
+        creditAmount: data.amount,
+        description: `Transfer to ${toAccount.name}`,
+      });
 
-    await db.insert(journalEntryLines).values({
-      orgId,
-      journalEntryId: journalEntry.id,
-      accountId: data.fromAccountId,
-      debitAmount: '0',
-      creditAmount: data.amount,
-      description: `Transfer to ${toAccount.name}`,
-    });
+      await tx.insert(auditLogs).values({
+        orgId,
+        userId: (await auth()).userId || 'system',
+        action: 'CONTRA_ENTRY_CREATED',
+        entityType: 'journal_entry',
+        entityId: journalEntry.id,
+        changes: JSON.stringify({
+          entryNumber,
+          fromAccount: fromAccount.name,
+          toAccount: toAccount.name,
+          amount: data.amount,
+        }),
+      });
 
-    // Create audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || 'system',
-      action: 'CONTRA_ENTRY_CREATED',
-      entityType: 'journal_entry',
-      entityId: journalEntry.id,
-      changes: JSON.stringify({
-        entryNumber,
-        fromAccount: fromAccount.name,
-        toAccount: toAccount.name,
-        amount: data.amount,
-      }),
+      return journalEntry;
     });
 
     revalidatePath('/accounts/banking');

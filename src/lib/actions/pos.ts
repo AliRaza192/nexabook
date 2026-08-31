@@ -460,7 +460,7 @@ export async function processPosSale(saleData: PosSaleData) {
       .values({
         orgId,
         entryNumber,
-        entryDate: new Date(),
+        entryDate: new Date(invoice.issueDate),
         referenceType: 'pos_sale',
         referenceId: invoice.id,
         description: `POS Sale ${invoiceNumber}`,

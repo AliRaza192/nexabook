@@ -526,97 +526,100 @@ export async function postDepreciation(
     }
 
     // Generate journal entry number
-    const entryCount = await db
-      .select()
-      .from(journalEntries)
-      .where(eq(journalEntries.orgId, orgId));
-    const entryNumber = `JE-DEP-${String(entryCount.length + 1).padStart(5, "0")}`;
-
-    // Create depreciation date
     const depreciationDate = new Date(year, month - 1, 1);
 
-    // Create journal entry
-    const [journalEntry] = await db
-      .insert(journalEntries)
-      .values({
+    const result = await db.transaction(async (tx) => {
+      const entryCount = await tx
+        .select()
+        .from(journalEntries)
+        .where(eq(journalEntries.orgId, orgId));
+      const entryNumber = `JE-DEP-${String(entryCount.length + 1).padStart(5, "0")}`;
+
+      // Create journal entry
+      const [journalEntry] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          entryNumber,
+          entryDate: depreciationDate,
+          referenceType: "depreciation",
+          referenceId: assetId,
+          description: `Depreciation for ${asset.name} - ${MONTH_NAMES[month - 1]} ${year}`,
+          status: "posted",
+          postedAt: new Date(),
+        })
+        .returning();
+
+      // Create journal entry lines
+      if (!validateJournalBalance([
+        { debitAmount: monthlyDepreciation.toFixed(2), creditAmount: "0" },
+        { debitAmount: "0", creditAmount: monthlyDepreciation.toFixed(2) },
+      ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
+
+      // Debit: Depreciation Expense
+      await tx.insert(journalEntryLines).values({
         orgId,
-        entryNumber,
-        entryDate: depreciationDate,
-        referenceType: "depreciation",
-        referenceId: assetId,
-        description: `Depreciation for ${asset.name} - ${MONTH_NAMES[month - 1]} ${year}`,
-        status: "posted",
-        postedAt: new Date(),
-      })
-      .returning();
-
-    // Create journal entry lines
-    if (!validateJournalBalance([
-      { debitAmount: monthlyDepreciation.toFixed(2), creditAmount: "0" },
-      { debitAmount: "0", creditAmount: monthlyDepreciation.toFixed(2) },
-    ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-    // Debit: Depreciation Expense
-    await db.insert(journalEntryLines).values({
-      orgId,
-      journalEntryId: journalEntry.id,
-      accountId: depreciationExpenseAccount.id,
-      debitAmount: monthlyDepreciation.toFixed(2),
-      creditAmount: "0",
-      description: `Depreciation expense - ${asset.name}`,
-    });
-
-    // Credit: Accumulated Depreciation
-    await db.insert(journalEntryLines).values({
-      orgId,
-      journalEntryId: journalEntry.id,
-      accountId: accumulatedDepreciationAccount.id,
-      debitAmount: "0",
-      creditAmount: monthlyDepreciation.toFixed(2),
-      description: `Accumulated depreciation - ${asset.name}`,
-    });
-
-    // Calculate new book value
-    const newAccumulatedDep = currentAccumulatedDep + monthlyDepreciation;
-    const newBookValue = purchaseCost - newAccumulatedDep;
-
-    // Update asset's accumulated depreciation
-    await db
-      .update(fixedAssets)
-      .set({
-        accumulatedDepreciation: newAccumulatedDep.toFixed(2),
-      })
-      .where(eq(fixedAssets.id, assetId));
-
-    // Create depreciation log
-    const [depLog] = await db
-      .insert(depreciationLogs)
-      .values({
-        orgId,
-        assetId,
-        depreciationDate,
-        amount: monthlyDepreciation.toFixed(2),
-        bookValueAfter: Math.max(salvageValue, newBookValue).toFixed(2),
         journalEntryId: journalEntry.id,
-        isPosted: true,
-        notes: `Posted via journal entry ${entryNumber}`,
-      })
-      .returning();
+        accountId: depreciationExpenseAccount.id,
+        debitAmount: monthlyDepreciation.toFixed(2),
+        creditAmount: "0",
+        description: `Depreciation expense - ${asset.name}`,
+      });
 
-    // Create audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || "system",
-      action: "DEPRECIATION_POSTED",
-      entityType: "fixed_asset",
-      entityId: assetId,
-      changes: JSON.stringify({
-        assetName: asset.name,
-        entryNumber,
-        depreciationAmount: monthlyDepreciation,
-        month: MONTH_NAMES[month - 1],
-        year,
-      }),
+      // Credit: Accumulated Depreciation
+      await tx.insert(journalEntryLines).values({
+        orgId,
+        journalEntryId: journalEntry.id,
+        accountId: accumulatedDepreciationAccount.id,
+        debitAmount: "0",
+        creditAmount: monthlyDepreciation.toFixed(2),
+        description: `Accumulated depreciation - ${asset.name}`,
+      });
+
+      // Calculate new book value
+      const newAccumulatedDep = currentAccumulatedDep + monthlyDepreciation;
+      const newBookValue = purchaseCost - newAccumulatedDep;
+
+      // Update asset's accumulated depreciation
+      await tx
+        .update(fixedAssets)
+        .set({
+          accumulatedDepreciation: newAccumulatedDep.toFixed(2),
+        })
+        .where(eq(fixedAssets.id, assetId));
+
+      // Create depreciation log
+      const [depLog] = await tx
+        .insert(depreciationLogs)
+        .values({
+          orgId,
+          assetId,
+          depreciationDate,
+          amount: monthlyDepreciation.toFixed(2),
+          bookValueAfter: Math.max(salvageValue, newBookValue).toFixed(2),
+          journalEntryId: journalEntry.id,
+          isPosted: true,
+          notes: `Posted via journal entry ${entryNumber}`,
+        })
+        .returning();
+
+      // Create audit log
+      await tx.insert(auditLogs).values({
+        orgId,
+        userId: (await auth()).userId || "system",
+        action: "DEPRECIATION_POSTED",
+        entityType: "fixed_asset",
+        entityId: assetId,
+        changes: JSON.stringify({
+          assetName: asset.name,
+          entryNumber,
+          depreciationAmount: monthlyDepreciation,
+          month: MONTH_NAMES[month - 1],
+          year,
+        }),
+      });
+
+      return { entryNumber, monthlyDepreciation };
     });
 
     revalidatePath("/fixed-assets/depreciation");
@@ -625,8 +628,8 @@ export async function postDepreciation(
     return {
       success: true,
       data: {
-        journalEntryNumber: entryNumber,
-        depreciationAmount: monthlyDepreciation,
+        journalEntryNumber: result.entryNumber,
+        depreciationAmount: result.monthlyDepreciation,
       },
     };
   } catch (error) {
