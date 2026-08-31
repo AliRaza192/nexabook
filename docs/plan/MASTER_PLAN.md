@@ -64,6 +64,10 @@
 | 2026-08-31 | `npx tsc --noEmit` | exit 0 (zero errors) |
 | 2026-08-31 | Wave 4 complete | Period-lock, multi-currency, tax_rates, Easypaisa SEC-24, entryDate gaps — all fixed |
 | 2026-08-31 | W4-GATE (real pglite) | 7/7 tests pass — period-lock rejection (POS, stock adj, JE), tax validation, multi-currency, Easypaisa missing salt + forged hash |
+| 2026-08-31 | `npm run test` | 23 files · 231 tests passed · 0 failed · exit 0 |
+| 2026-08-31 | `npx tsc --noEmit` | exit 0 (zero errors) |
+| 2026-08-31 | Wave 5 complete | N+1 query batching: CRM batch prefetch, POS batch items, allocatePayment batch invoices, banking SQL COUNT, dashboard GROUP BY trends, hr-payroll batch inserts |
+| 2026-08-31 | W5-GATE (real pglite) | 5/5 tests pass — CRM ≤3 queries, POS ≤5 queries, allocatePayment ≤4 queries, banking ≤3 queries, dashboard ≤15 queries |
 
 ## Wave 4 Findings (2026-08-31)
 
@@ -83,9 +87,21 @@
 | 2 | Entry number races | Some POS/manufacturing/inventory sites use Date.now() for entry numbers | P2 |
 | 3 | Stale read risk | convertToBaseUnit() uses db not tx inside approvePurchaseInvoice transaction | P3 |
 
-## Post-Wave-3 Audit Findings (2026-08-31)
+---
 
-### Fixed in this session
+## Wave 5 Findings (2026-08-31)
+
+### Fixed in Wave 5 (Performance: N+1 Query Batching)
+| # | Module | What changed | Before → After |
+|---|--------|-------------|----------------|
+| 1 | crm.ts | Batch customer prefetch in `getLeads()` via `inArray` | N customer queries → 1 query |
+| 2 | pos.ts | Batch invoice items fetch before shift report loop | N invoice_items queries → 1 query |
+| 3 | sales.ts | Batch invoice prefetch in `allocatePayment()` via `inArray` | N invoice queries → 1 query |
+| 4 | banking.ts | JE numbering + transfer numbering use `sql\`count(*)::int\`` | N select rows → 1 COUNT |
+| 5 | dashboard.ts | Monthly trends use `GROUP BY to_char()` single queries | 12 monthly loops → 2 GROUP BY |
+| 6 | hr-payroll.ts | Batch payslip inserts via single `values(array)` | N inserts → 1 batch |
+
+### Post-Wave-3 Audit Findings (fixed in Wave 3 session)
 | # | Category | Finding | Fix |
 |---|----------|---------|-----|
 | 1 | Infrastructure | `/drizzle` in .gitignore — ACC-03 migration files never committed | Moved 0001/0002 to `/migrations/`, updated test-db.ts paths |
@@ -97,7 +113,7 @@
 | 7 | COGS consistency (ACC-11) | invoiceItems had no unitCost snapshot; report used current WAC | Added unitCost column to invoiceItems + schema + migration; approveInvoice now writes unitCost; product-sales report reads it |
 | 8 | POS deadlock | processPosSale called generateJournalEntryNumber and getDefaultWalkInCustomer inside tx using db (not tx) | Moved both calls outside transaction |
 
-### Remaining findings (fixed in Wave 4)
+### Remaining (P2-P3)
 | # | Category | Finding | Status |
 |---|----------|---------|--------|
 | 1 | entryDate | importOpeningBalances and addBankAccount used new Date() — fixed with optional date param | ✅ Fixed |

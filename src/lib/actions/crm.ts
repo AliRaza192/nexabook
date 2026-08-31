@@ -9,7 +9,7 @@ import {
   customers,
 } from "@/db/schema";
 import { createAuditLog } from "./audit";
-import { eq, and, or, ilike, desc, gte, lte, sql } from "drizzle-orm";
+import { eq, and, or, ilike, desc, gte, lte, sql, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
@@ -95,21 +95,24 @@ export async function getLeads(searchQuery?: string, statusFilter?: string) {
       );
     }
 
-    // Enrich with converted customer info
-    const leadsWithCustomer: LeadWithCustomer[] = await Promise.all(
-      result.map(async (lead) => {
-        let convertedCustomer = null;
-        if (lead.convertedToCustomerId) {
-          const [cust] = await db
-            .select({ id: customers.id, name: customers.name })
-            .from(customers)
-            .where(eq(customers.id, lead.convertedToCustomerId!))
-            .limit(1);
-          convertedCustomer = cust || null;
-        }
-        return { ...lead, convertedCustomer };
-      })
-    );
+    // Enrich with converted customer info — batch-fetch via inArray
+    const convertedIds = result
+      .filter((l) => l.convertedToCustomerId)
+      .map((l) => l.convertedToCustomerId as string);
+    const convertedCustomerMap = new Map<string, { id: string; name: string }>();
+    if (convertedIds.length > 0) {
+      const custs = await db
+        .select({ id: customers.id, name: customers.name })
+        .from(customers)
+        .where(inArray(customers.id, convertedIds));
+      for (const c of custs) convertedCustomerMap.set(c.id, c);
+    }
+    const leadsWithCustomer: LeadWithCustomer[] = result.map((lead) => ({
+      ...lead,
+      convertedCustomer: lead.convertedToCustomerId
+        ? convertedCustomerMap.get(lead.convertedToCustomerId) || null
+        : null,
+    }));
 
     return { success: true, data: leadsWithCustomer };
   } catch (error) {

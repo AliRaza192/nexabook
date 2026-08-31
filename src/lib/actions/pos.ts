@@ -899,32 +899,43 @@ export async function generatePOSReport(
     // Track product sales for top products
     const productSales: Record<string, { name: string; sku: string; quantity: number; revenue: number }> = {};
 
+    // Batch-fetch all invoice items for this shift (fix N+1)
+    const invoiceIds = shiftInvoices.map((inv) => inv.id);
+    const allItems = invoiceIds.length > 0
+      ? await db
+          .select({
+            invoiceId: invoiceItems.invoiceId,
+            productId: invoiceItems.productId,
+            productName: invoiceItems.description,
+            quantity: invoiceItems.quantity,
+            lineTotal: invoiceItems.lineTotal,
+            productSku: products.sku,
+            productNameFull: products.name,
+          })
+          .from(invoiceItems)
+          .leftJoin(products, eq(invoiceItems.productId, products.id))
+          .where(inArray(invoiceItems.invoiceId, invoiceIds))
+      : [];
+
+    const itemsByInvoice = new Map<string, typeof allItems>();
+    for (const item of allItems) {
+      const list = itemsByInvoice.get(item.invoiceId) || [];
+      list.push(item);
+      itemsByInvoice.set(item.invoiceId, list);
+    }
+
     for (const invoice of shiftInvoices) {
       totalSales += parseFloat(invoice.netAmount || '0');
       totalDiscounts += parseFloat(invoice.discountAmount || '0');
       totalTaxCollected += parseFloat(invoice.taxAmount || '0');
 
-      // Determine payment method based on balance
       const balance = parseFloat(invoice.balanceAmount || '0');
       if (balance <= 0) {
-        // Fully paid - assume cash by default for POS
         cashSales += parseFloat(invoice.netAmount || '0');
         cashTransactions++;
       }
 
-      // Get invoice items for top products
-      const items = await db
-        .select({
-          productId: invoiceItems.productId,
-          productName: invoiceItems.description,
-          quantity: invoiceItems.quantity,
-          lineTotal: invoiceItems.lineTotal,
-          productSku: products.sku,
-          productNameFull: products.name,
-        })
-        .from(invoiceItems)
-        .leftJoin(products, eq(invoiceItems.productId, products.id))
-        .where(eq(invoiceItems.invoiceId, invoice.id));
+      const items = itemsByInvoice.get(invoice.id) || [];
 
       for (const item of items) {
         if (!item.productId) continue;

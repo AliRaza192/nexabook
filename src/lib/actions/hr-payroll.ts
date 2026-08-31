@@ -657,9 +657,9 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
         payrollRunId = payrollRun.id;
       }
 
-      // Create payslips
-      for (const calc of calculations) {
-        await tx.insert(payslips).values({
+      // Create payslips — batch insert (fix N+1)
+      if (calculations.length > 0) {
+        await tx.insert(payslips).values(calculations.map((calc) => ({
           orgId,
           payrollRunId,
           employeeId: calc.employeeId,
@@ -690,7 +690,7 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
           leaveDays: calc.leaveDays.toFixed(2),
           unpaidLeaveDays: calc.unpaidLeaveDays.toFixed(2),
           totalWorkingDays: calc.totalWorkingDays,
-        });
+        })));
       }
 
       // Create journal entry

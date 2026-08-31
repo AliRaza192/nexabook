@@ -205,37 +205,49 @@ let inventoryValue = 0;
     const previousInventory = 0;
     const inventoryTrend = 0;
 
-    // ============ Monthly Trends (Last 6 months) ============
-    const monthlyTrends: MonthlyTrend[] = [];
+    // ============ Monthly Trends (Last 6 months) — single GROUP BY query
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const revenueByMonth = await db
+      .select({
+        month: sql<string>`to_char(${invoices.issueDate}, 'YYYY-MM')`,
+        total: sql<string>`COALESCE(SUM(${invoices.netAmount}), 0)`,
+      })
+      .from(invoices)
+      .where(and(
+        eq(invoices.orgId, orgId),
+        gte(invoices.issueDate, sixMonthsAgo),
+        lte(invoices.issueDate, now),
+        sql`${invoices.status} IN ('approved', 'sent', 'paid', 'partial')`
+      ))
+      .groupBy(sql`to_char(${invoices.issueDate}, 'YYYY-MM')`);
+
+    const expensesByMonth = await db
+      .select({
+        month: sql<string>`to_char(${expenses.date}, 'YYYY-MM')`,
+        total: sql<string>`COALESCE(SUM(${expenses.amount}), 0)`,
+      })
+      .from(expenses)
+      .where(and(
+        eq(expenses.orgId, orgId),
+        gte(expenses.date, sixMonthsAgo),
+        lte(expenses.date, now)
+      ))
+      .groupBy(sql`to_char(${expenses.date}, 'YYYY-MM')`);
+
+    const revenueMap = new Map<string, number>();
+    const expenseMap = new Map<string, number>();
+    for (const r of revenueByMonth) revenueMap.set(r.month, parseFloat(r.total || '0'));
+    for (const e of expensesByMonth) expenseMap.set(e.month, parseFloat(e.total || '0'));
+
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
+    const monthlyTrends: MonthlyTrend[] = [];
     for (let i = 5; i >= 0; i--) {
-      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
-
-      const [monthRevenue] = await db
-        .select({ total: sql<string>`COALESCE(SUM(${invoices.netAmount}), 0)` })
-        .from(invoices)
-        .where(and(
-          eq(invoices.orgId, orgId),
-          gte(invoices.issueDate, monthStart),
-          lte(invoices.issueDate, monthEnd),
-          sql`${invoices.status} IN ('approved', 'sent', 'paid', 'partial')`
-        ));
-
-      const [monthExpenses] = await db
-        .select({ total: sql<string>`COALESCE(SUM(${expenses.amount}), 0)` })
-        .from(expenses)
-        .where(and(
-          eq(expenses.orgId, orgId),
-          gte(expenses.date, monthStart),
-          lte(expenses.date, monthEnd)
-        ));
-
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       monthlyTrends.push({
-        month: months[monthStart.getMonth()],
-        revenue: parseFloat(monthRevenue?.total || '0'),
-        expenses: parseFloat(monthExpenses?.total || '0'),
+        month: months[d.getMonth()],
+        revenue: revenueMap.get(key) || 0,
+        expenses: expenseMap.get(key) || 0,
       });
     }
 

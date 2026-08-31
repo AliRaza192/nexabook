@@ -125,8 +125,11 @@ export async function addBankAccount(data: BankAccountFormData) {
         .returning();
 
       if (openingBalance !== 0) {
-        const entryCount = await tx.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
-        const entryNumber = `JE-OPEN-${String(entryCount.length + 1).padStart(5, "0")}`;
+        const [{ count: entryCount }] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(journalEntries)
+          .where(eq(journalEntries.orgId, orgId));
+        const entryNumber = `JE-OPEN-${String(entryCount + 1).padStart(5, "0")}`;
 
         const [journalEntry] = await tx
           .insert(journalEntries)
@@ -360,8 +363,11 @@ export async function approveBankDeposit(depositId: string) {
         .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
         .where(eq(bankDeposits.id, depositId));
 
-      const entryCount = await tx.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
-      const entryNumber = `JE-DEP-${String(entryCount.length + 1).padStart(5, "0")}`;
+      const [{ count: entryCount }] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(journalEntries)
+        .where(eq(journalEntries.orgId, orgId));
+      const entryNumber = `JE-DEP-${String(entryCount + 1).padStart(5, "0")}`;
 
       const [journalEntry] = await tx
         .insert(journalEntries)
@@ -474,8 +480,11 @@ export async function addFundsTransfer(data: FundsTransferFormData) {
       return { success: false, error: `Insufficient balance. Available: ${fromBalance.toFixed(2)}` };
     }
 
-    const count = await db.select().from(fundsTransfers).where(eq(fundsTransfers.orgId, orgId));
-    const transferNumber = `FT-${String(count.length + 1).padStart(5, "0")}`;
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(fundsTransfers)
+      .where(eq(fundsTransfers.orgId, orgId));
+    const transferNumber = `FT-${String(count + 1).padStart(5, "0")}`;
 
     const [transfer] = await db
       .insert(fundsTransfers)

@@ -3405,6 +3405,17 @@ export async function allocatePayment(
     if (!payment) return { success: false, error: "Payment not found" };
 
     await db.transaction(async (tx) => {
+      // Batch-fetch all invoices (fix N+1)
+      const invoiceIds = allocations.map((a) => a.invoiceId);
+      const invoiceMap = new Map<string, typeof invoices.$inferSelect>();
+      if (invoiceIds.length > 0) {
+        const invs = await tx
+          .select()
+          .from(invoices)
+          .where(and(inArray(invoices.id, invoiceIds), eq(invoices.orgId, orgId)));
+        for (const inv of invs) invoiceMap.set(inv.id, inv);
+      }
+
       for (const alloc of allocations) {
         await tx
           .insert(customerPaymentAllocations)
@@ -3414,11 +3425,7 @@ export async function allocatePayment(
             invoiceId: alloc.invoiceId,
             allocatedAmount: alloc.amount,
           });
-        const [inv] = await tx
-          .select()
-          .from(invoices)
-          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)))
-          .limit(1);
+        const inv = invoiceMap.get(alloc.invoiceId);
         if (inv) {
           const newBalance =
             parseFloat(inv.balanceAmount || "0") - parseFloat(alloc.amount);
