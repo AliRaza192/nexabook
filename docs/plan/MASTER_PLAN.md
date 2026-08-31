@@ -55,6 +55,56 @@
 | 2026-08-22 | `npm run test` | 20 files · 212 tests passed · exit 0 |
 | 2026-08-22 | `npx tsc --noEmit` | exit 0 |
 | 2026-08-22 | W2-GATE (real pglite) | 6/6 tests pass — approveInvoice, deleteInvoice, revisePurchaseInvoice, POS COGS, deferred constraint, financial reports |
+| 2026-08-31 | `npm run build` | Compiled successfully in 71s · exit 0 |
+| 2026-08-31 | `npm run test` | 22 files · 226 tests passed · 0 failed · exit 0 |
+| 2026-08-31 | `npx tsc --noEmit` | exit 0 (zero errors) |
+| 2026-08-31 | Post-Wave-3 audit | Comprehensive audit of accounting, security, transactions, tests — see findings below |
+| 2026-08-31 | `npm run build` | Compiled successfully in 64s · exit 0 |
+| 2026-08-31 | `npm run test` | 22 files · 226 tests passed · 0 failed · exit 0 |
+| 2026-08-31 | `npx tsc --noEmit` | exit 0 (zero errors) |
+| 2026-08-31 | Wave 4 complete | Period-lock, multi-currency, tax_rates, Easypaisa SEC-24, entryDate gaps — all fixed |
+| 2026-08-31 | W4-GATE (real pglite) | 7/7 tests pass — period-lock rejection (POS, stock adj, JE), tax validation, multi-currency, Easypaisa missing salt + forged hash |
+
+## Wave 4 Findings (2026-08-31)
+
+### Fixed in Wave 4
+| # | Category | Finding | Fix |
+|---|----------|---------|-----|
+| 1 | Period-lock | 11 functions missing checkPeriodLocked: POS (startShift, processPosSale, endShift, generatePOSReport), stock adjustment, depreciation, opening balances (2), manufacturing (2), GRN | Added checkPeriodLocked to all 11 functions across 6 files |
+| 2 | Multi-currency | journalEntries and journalEntryLines had no currency/exchangeRate columns — GL was PKR-only | Added currency + exchangeRate to journalEntries, originalAmount + originalCurrency to journalEntryLines, migration 0004, COA seed for unrealized FX account |
+| 3 | Tax validation | tax_rates table existed but was unused — POS accepted arbitrary tax % from client with no server-side validation | POS now validates taxPercentage against tax_rates table; rejects unconfigured rates |
+| 4 | SEC-24 | Easypaisa callback had ZERO signature verification; JazzCash failed open when salt missing | Added Easypaisa hash verification branch; both gateways now fail closed (400 response) when salt is missing |
+| 5 | entryDate | importOpeningBalances and addBankAccount used new Date() with no date param | Added optional date param to both functions; callers can now specify document date |
+
+### Remaining (P2-P3)
+| # | Category | Finding | Priority |
+|---|----------|---------|----------|
+| 1 | Lint | 159 errors, 588 warnings (react-hooks, no-explicit-any) | P2 |
+| 2 | Entry number races | Some POS/manufacturing/inventory sites use Date.now() for entry numbers | P2 |
+| 3 | Stale read risk | convertToBaseUnit() uses db not tx inside approvePurchaseInvoice transaction | P3 |
+
+## Post-Wave-3 Audit Findings (2026-08-31)
+
+### Fixed in this session
+| # | Category | Finding | Fix |
+|---|----------|---------|-----|
+| 1 | Infrastructure | `/drizzle` in .gitignore — ACC-03 migration files never committed | Moved 0001/0002 to `/migrations/`, updated test-db.ts paths |
+| 2 | Tests | purchases.test.ts and manufacturing.test.ts broke from Wave 3 tx wrapping | Added `transaction` mock to both test db mocks |
+| 3 | POS atomicity | POS had ZERO db.transaction() calls — 5 JE insert sites non-atomic | Wrapped startShift, endShift, processPosSale in db.transaction |
+| 4 | Purchases atomicity | createVendorSettlement, updateGRN, createPurchaseReturn had no transaction | Wrapped all three in db.transaction |
+| 5 | Sales atomicity | duplicateInvoice had no transaction | Wrapped in db.transaction |
+| 6 | entryDate wrong | 6 sites used new Date() instead of document date for JE entryDate | Fixed: deleteInvoice, approveSalesReturn, revisePurchaseInvoice, approvePurchaseReturn, runPayroll, approveStockAdjustment |
+| 7 | COGS consistency (ACC-11) | invoiceItems had no unitCost snapshot; report used current WAC | Added unitCost column to invoiceItems + schema + migration; approveInvoice now writes unitCost; product-sales report reads it |
+| 8 | POS deadlock | processPosSale called generateJournalEntryNumber and getDefaultWalkInCustomer inside tx using db (not tx) | Moved both calls outside transaction |
+
+### Remaining findings (fixed in Wave 4)
+| # | Category | Finding | Status |
+|---|----------|---------|--------|
+| 1 | entryDate | importOpeningBalances and addBankAccount used new Date() — fixed with optional date param | ✅ Fixed |
+| 2 | Multi-currency | journalEntries schema had no currency/exchangeRate columns — added with migration 0004 | ✅ Fixed |
+| 3 | Lint | 159 errors, 588 warnings (react-hooks, no-explicit-any) | P2 — deferred |
+| 4 | Entry number races | Some POS/manufacturing/inventory sites use Date.now() for entry numbers | P2 — deferred |
+| 5 | Stale read risk | convertToBaseUnit() uses db not tx inside approvePurchaseInvoice transaction | P3 — deferred |
 
 ---
 
