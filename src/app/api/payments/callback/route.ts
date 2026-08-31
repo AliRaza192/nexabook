@@ -19,13 +19,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify signature to prevent forged callbacks
-    const integritySalt = process.env.JAZZCASH_INTEGRITY_SALT || "";
-    const receivedHash = params["pp_SecureHash"] || "";
+    const jazzcashSalt = process.env.JAZZCASH_INTEGRITY_SALT || "";
+    const easypaisaSalt = process.env.EASYPAISA_INTEGRITY_SALT || "";
+    const receivedHash = params["pp_SecureHash"] || params["secureHash"] || "";
 
-    if (gateway === "jazzcash" && integritySalt && receivedHash) {
+    if (gateway === "jazzcash" && jazzcashSalt && receivedHash) {
       const paramsForVerification = { ...params };
       delete paramsForVerification["pp_SecureHash"];
-      const computedHash = computeSecureHash(integritySalt, paramsForVerification);
+      const computedHash = computeSecureHash(jazzcashSalt, paramsForVerification);
 
       if (computedHash.toLowerCase() !== receivedHash.toLowerCase()) {
         console.error("[Payment Callback] Signature mismatch — possible forged callback", {
@@ -34,8 +35,25 @@ export async function POST(request: NextRequest) {
         });
         return NextResponse.redirect(new URL("/dashboard?payment=failed&reason=invalid_signature", request.url));
       }
-    } else if (gateway === "jazzcash" && !integritySalt) {
-      console.warn("[Payment Callback] JAZZCASH_INTEGRITY_SALT not set — skipping verification (INSECURE)");
+    } else if (gateway === "jazzcash" && !jazzcashSalt) {
+      console.warn("[Payment Callback] JAZZCASH_INTEGRITY_SALT not set — rejecting callback (fail-closed)");
+      return NextResponse.redirect(new URL("/dashboard?payment=failed&reason=missing_salt", request.url));
+    } else if (gateway === "easypaisa" && easypaisaSalt && receivedHash) {
+      const paramsForVerification = { ...params };
+      delete paramsForVerification["secureHash"];
+      delete paramsForVerification["pp_SecureHash"];
+      const computedHash = computeSecureHash(easypaisaSalt, paramsForVerification);
+
+      if (computedHash.toLowerCase() !== receivedHash.toLowerCase()) {
+        console.error("[Payment Callback] Easypaisa signature mismatch — possible forged callback", {
+          orderRef,
+          gateway,
+        });
+        return NextResponse.redirect(new URL("/dashboard?payment=failed&reason=invalid_signature", request.url));
+      }
+    } else if (gateway === "easypaisa" && !easypaisaSalt) {
+      console.warn("[Payment Callback] EASYPAISA_INTEGRITY_SALT not set — rejecting callback (fail-closed)");
+      return NextResponse.redirect(new URL("/dashboard?payment=failed&reason=missing_salt", request.url));
     }
 
     const status = params["pp_ResponseCode"] === "000" || params["status"] === "completed"

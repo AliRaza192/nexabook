@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
 import { validateJournalBalance } from "../accounting";
+import { checkPeriodLocked } from "./fiscal-periods";
 
 // ==========================================
 // STOCK MOVEMENTS
@@ -331,6 +332,9 @@ export async function approveStockAdjustment(adjustmentId: string) {
     if (!adjustment) return { success: false, error: "Adjustment not found" };
     if (adjustment.approvalStatus === "approved") return { success: false, error: "Already approved" };
 
+    const locked = await checkPeriodLocked(new Date(adjustment.adjustmentDate));
+    if (locked) return { success: false, error: "Cannot approve adjustment in a locked fiscal period" };
+
     const lines = await db
       .select()
       .from(stockAdjustmentLines)
@@ -370,7 +374,7 @@ export async function approveStockAdjustment(adjustmentId: string) {
         const [je] = await tx.insert(journalEntries).values({
           orgId,
           entryNumber: `SA-${Date.now()}`,
-          entryDate: new Date(),
+          entryDate: new Date(adjustment.adjustmentDate),
           description: `Stock adjustment (loss): ${adjustment.adjustmentNumber}`,
           referenceType: "stock_adjustment",
           referenceId: adjustmentId,
@@ -401,7 +405,7 @@ export async function approveStockAdjustment(adjustmentId: string) {
         const [je] = await tx.insert(journalEntries).values({
           orgId,
           entryNumber: `SA-${Date.now() + 1}`,
-          entryDate: new Date(),
+          entryDate: new Date(adjustment.adjustmentDate),
           description: `Stock adjustment (gain): ${adjustment.adjustmentNumber}`,
           referenceType: "stock_adjustment",
           referenceId: adjustmentId,

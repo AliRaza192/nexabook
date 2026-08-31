@@ -14,6 +14,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
 import { validateJournalBalance } from "../accounting";
+import { checkPeriodLocked } from "./fiscal-periods";
 
 // ==========================================
 // FIXED ASSETS
@@ -527,6 +528,9 @@ export async function postDepreciation(
 
     // Generate journal entry number
     const depreciationDate = new Date(year, month - 1, 1);
+
+    const locked = await checkPeriodLocked(depreciationDate);
+    if (locked) return { success: false, error: "Cannot post depreciation in a locked fiscal period" };
 
     const result = await db.transaction(async (tx) => {
       const entryCount = await tx

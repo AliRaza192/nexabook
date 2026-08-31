@@ -16,6 +16,7 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentOrgId } from "./shared";
 import { validateJournalBalance } from "../accounting";
+import { checkPeriodLocked } from "./fiscal-periods";
 
 // ============= BOM Server Actions =============
 
@@ -469,6 +470,9 @@ export async function completeJobOrder(jobOrderId: string) {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
+    const locked = await checkPeriodLocked(new Date());
+    if (locked) return { success: false, error: "Cannot complete job order in a locked fiscal period" };
+
     // Get job order
     const [jobOrder] = await db
       .select()
@@ -730,6 +734,9 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
+
+    const locked = await checkPeriodLocked(new Date());
+    if (locked) return { success: false, error: "Cannot disassemble in a locked fiscal period" };
 
     // Find active BOM for this finished good
     const [bom] = await db

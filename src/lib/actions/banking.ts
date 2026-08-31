@@ -25,6 +25,7 @@ export interface BankAccountFormData {
   bankName?: string;
   accountType: string;
   openingBalance: string;
+  openingBalanceDate?: string;
   currency?: string;
   notes?: string;
 }
@@ -132,7 +133,7 @@ export async function addBankAccount(data: BankAccountFormData) {
           .values({
             orgId,
             entryNumber,
-            entryDate: new Date(),
+            entryDate: new Date(data.openingBalanceDate || new Date()),
             referenceType: "bank_opening_balance",
             referenceId: newAccount.id,
             description: `Opening balance for ${data.accountName}`,

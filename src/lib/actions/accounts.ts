@@ -145,6 +145,7 @@ export async function seedInitialCOA() {
       { code: "4700", name: "Gain on Asset Sale", type: "income", description: "Profit from selling assets" },
       { code: "4800", name: "Export Revenue", type: "income", description: "Revenue from export sales" },
       { code: "4900", name: "Sales Returns & Allowances", type: "income", description: "Contra account for returns" },
+      { code: "4950", name: "Unrealized FX Gain/Loss", type: "income", subType: "unrealized_fx", description: "Unrealized foreign exchange gain or loss" },
 
       // Expenses (5000-5999)
       { code: "5000", name: "Cost of Goods Sold", type: "expense", description: "Direct cost of goods sold" },
@@ -384,6 +385,9 @@ export async function postOpeningBalance(data: {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
+    const locked = await checkPeriodLocked(new Date(data.date));
+    if (locked) return { success: false, error: "Cannot post opening balance in a locked fiscal period" };
+
     // Find Opening Balance Equity account
     const obeAccount = await findOpeningBalanceEquityAccount(orgId);
     if (!obeAccount) {
@@ -490,11 +494,15 @@ export async function postOpeningBalance(data: {
 }
 
 export async function bulkImportOpeningBalances(
-  rows: Array<{ accountCode: string; debit: string; credit: string }>
+  rows: Array<{ accountCode: string; debit: string; credit: string }>,
+  date?: string
 ) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
+
+    const locked = await checkPeriodLocked(new Date());
+    if (locked) return { success: false, error: "Cannot import opening balances in a locked fiscal period" };
 
     const obeAccount = await findOpeningBalanceEquityAccount(orgId);
     if (!obeAccount) {
@@ -578,7 +586,7 @@ export async function bulkImportOpeningBalances(
         .values({
           orgId,
           entryNumber,
-          entryDate: new Date(),
+          entryDate: new Date(date || new Date()),
           referenceType: "opening_balance",
           description: "Bulk Opening Balance Import",
           status: "posted",

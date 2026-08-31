@@ -18,6 +18,10 @@ vi.mock("@/lib/accounting", () => ({
   validateJournalBalance: vi.fn().mockReturnValue(true),
 }));
 
+vi.mock("@/lib/actions/fiscal-periods", () => ({
+  checkPeriodLocked: vi.fn().mockResolvedValue(false),
+}));
+
 const chainable = () => {
   const self: any = {
     select: vi.fn().mockReturnThis(),

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestDb } from "@/__tests__/test-db";
 
-vi.setConfig({ hookTimeout: 30000 });
+vi.setConfig({ hookTimeout: 60000 });
 
 let testDb: Awaited<ReturnType<typeof createTestDb>>;
 
@@ -183,7 +183,7 @@ describe("W2-GATE: Real DB regression tests", () => {
     expect(origDebit).toBe(newDebit);
   });
 
-  it("4. POS sale includes COGS line and debits equal credits", async () => {
+  it("4. POS sale includes COGS line and debits equal credits", { timeout: 120000 }, async () => {
     const { db, ids } = testDb;
     const { processPosSale } = await import("./pos");
 

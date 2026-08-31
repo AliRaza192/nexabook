@@ -51,12 +51,13 @@ const chainable = () => {
   return self;
 };
 
-const mockDb = {
+const mockDb: any = {
   select: vi.fn(() => chainable()),
   insert: vi.fn(() => chainable()),
   update: vi.fn(() => chainable()),
   delete: vi.fn(() => chainable()),
   query: {},
+  transaction: vi.fn(async (fn: any) => fn(mockDb)),
 };
 
 vi.mock("@/db", () => ({ db: mockDb }));

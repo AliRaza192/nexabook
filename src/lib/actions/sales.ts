@@ -995,6 +995,10 @@ export async function approveInvoice(invoiceId: string) {
           referenceNumber: invoice.invoiceNumber,
           runningBalance: newStock,
         });
+
+        await tx.update(invoiceItems)
+          .set({ unitCost: String(unitCost) })
+          .where(eq(invoiceItems.id, item.id));
       }
 
       if (stockMovementsData.length > 0) {
@@ -1424,7 +1428,7 @@ export async function deleteInvoice(invoiceId: string) {
             const [revEntry] = await tx.insert(journalEntries).values({
               orgId,
               entryNumber,
-              entryDate: new Date(),
+              entryDate: new Date(invoice.issueDate),
               description: `Reversal of Invoice ${invoice.invoiceNumber}`,
               referenceType: "reversal",
               referenceId: invoiceId,
@@ -3116,7 +3120,7 @@ export async function approveSalesReturn(returnId: string) {
           .values({
             orgId,
             entryNumber,
-            entryDate: new Date(),
+            entryDate: new Date(salesReturn.returnDate),
             referenceType: "sales_return",
             referenceId: returnId,
             description: `Sales Return ${salesReturn.returnNumber} - Stock Reversal & Refund`,
@@ -3645,63 +3649,69 @@ export async function duplicateInvoice(invoiceId: string) {
     // Get current date
     const currentDate = new Date();
 
-    // Create new invoice (draft) with reset fields
-    const [newInvoice] = await db
-      .insert(invoices)
-      .values({
-        orgId,
-        invoiceNumber: newInvoiceNumber,
-        customerId: originalInvoice.customerId,
-        orderBooker: originalInvoice.orderBooker,
-        subject: originalInvoice.subject
-          ? `[Copy] ${originalInvoice.subject}`
-          : null,
-        reference: originalInvoice.reference,
-        issueDate: currentDate,
-        dueDate: originalInvoice.dueDate ? currentDate : null,
-        status: "draft", // Always create as draft
-        grossAmount: originalInvoice.grossAmount,
-        discountPercentage: originalInvoice.discountPercentage,
-        discountAmount: originalInvoice.discountAmount,
-        taxAmount: originalInvoice.taxAmount,
-        shippingCharges: originalInvoice.shippingCharges,
-        roundOff: originalInvoice.roundOff,
-        netAmount: originalInvoice.netAmount,
-        receivedAmount: "0", // Reset to 0
-        balanceAmount: originalInvoice.netAmount, // Set to net amount
-        cashBankAccountId: originalInvoice.cashBankAccountId,
-        notes: originalInvoice.notes,
-        terms: originalInvoice.terms,
-      })
-      .returning();
+    const { userId } = await auth();
 
-    // Create invoice items (copy from original)
-    for (const item of originalItems) {
-      await db.insert(invoiceItems).values({
+    const [newInvoice] = await db.transaction(async (tx) => {
+      // Create new invoice (draft) with reset fields
+      const [invoice] = await tx
+        .insert(invoices)
+        .values({
+          orgId,
+          invoiceNumber: newInvoiceNumber,
+          customerId: originalInvoice.customerId,
+          orderBooker: originalInvoice.orderBooker,
+          subject: originalInvoice.subject
+            ? `[Copy] ${originalInvoice.subject}`
+            : null,
+          reference: originalInvoice.reference,
+          issueDate: currentDate,
+          dueDate: originalInvoice.dueDate ? currentDate : null,
+          status: "draft", // Always create as draft
+          grossAmount: originalInvoice.grossAmount,
+          discountPercentage: originalInvoice.discountPercentage,
+          discountAmount: originalInvoice.discountAmount,
+          taxAmount: originalInvoice.taxAmount,
+          shippingCharges: originalInvoice.shippingCharges,
+          roundOff: originalInvoice.roundOff,
+          netAmount: originalInvoice.netAmount,
+          receivedAmount: "0", // Reset to 0
+          balanceAmount: originalInvoice.netAmount, // Set to net amount
+          cashBankAccountId: originalInvoice.cashBankAccountId,
+          notes: originalInvoice.notes,
+          terms: originalInvoice.terms,
+        })
+        .returning();
+
+      // Create invoice items (copy from original)
+      for (const item of originalItems) {
+        await tx.insert(invoiceItems).values({
+          orgId,
+          invoiceId: invoice.id,
+          productId: item.productId,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountPercentage: item.discountPercentage,
+          taxRate: item.taxRate,
+          lineTotal: item.lineTotal,
+        });
+      }
+
+      // Create audit log
+      await tx.insert(auditLogs).values({
         orgId,
-        invoiceId: newInvoice.id,
-        productId: item.productId,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercentage: item.discountPercentage,
-        taxRate: item.taxRate,
-        lineTotal: item.lineTotal,
+        userId: userId || "system",
+        action: "INVOICE_DUPLICATED",
+        entityType: "invoice",
+        entityId: invoice.id,
+        changes: JSON.stringify({
+          originalInvoiceNumber: originalInvoice.invoiceNumber,
+          newInvoiceNumber: newInvoiceNumber,
+          duplicatedFrom: invoiceId,
+        }),
       });
-    }
 
-    // Create audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || "system",
-      action: "INVOICE_DUPLICATED",
-      entityType: "invoice",
-      entityId: newInvoice.id,
-      changes: JSON.stringify({
-        originalInvoiceNumber: originalInvoice.invoiceNumber,
-        newInvoiceNumber: newInvoice.invoiceNumber,
-        duplicatedFrom: invoiceId,
-      }),
+      return [invoice];
     });
 
     revalidatePath("/sales/invoices");

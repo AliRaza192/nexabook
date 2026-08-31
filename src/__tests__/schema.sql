@@ -576,7 +576,8 @@ CREATE TABLE "invoice_items" (
 	"discount_percentage" numeric(5, 2) DEFAULT '0' NOT NULL,
 	"tax_rate" numeric(5, 2) DEFAULT '0' NOT NULL,
 	"tax_type" varchar(10) DEFAULT 'GST' NOT NULL,
-	"line_total" numeric(12, 2) DEFAULT '0' NOT NULL
+	"line_total" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"unit_cost" numeric(12, 2)
 );
 
 CREATE TABLE "invoices" (
@@ -655,6 +656,8 @@ CREATE TABLE "journal_entries" (
 	"source_type" varchar(30) DEFAULT '',
 	"created_by" varchar(255),
 	"posted_at" timestamp,
+	"currency" varchar(10) DEFAULT 'PKR',
+	"exchange_rate" decimal(10,4) DEFAULT '1',
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "uq_journal_entries_entry_number" UNIQUE("org_id","entry_number")
@@ -668,7 +671,9 @@ CREATE TABLE "journal_entry_lines" (
 	"cost_center_id" uuid,
 	"description" text DEFAULT '',
 	"debit_amount" numeric(12, 2) DEFAULT '0' NOT NULL,
-	"credit_amount" numeric(12, 2) DEFAULT '0' NOT NULL
+	"credit_amount" numeric(12, 2) DEFAULT '0' NOT NULL,
+	"original_amount" numeric(14,2),
+	"original_currency" varchar(10)
 );
 
 CREATE TABLE "leads" (

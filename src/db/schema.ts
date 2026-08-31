@@ -629,6 +629,7 @@ export const invoiceItems = pgTable('invoice_items', {
   taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).notNull().default('0'),
   taxType: varchar('tax_type', { length: 10 }).notNull().default('GST'),
   lineTotal: decimal('line_total', { precision: 12, scale: 2 }).notNull().default('0'),
+  unitCost: decimal('unit_cost', { precision: 12, scale: 2 }),
 });
 
 
@@ -904,6 +905,8 @@ export const journalEntries = pgTable('journal_entries', {
   // invoice | payment | purchase | payroll | manual | expense
   createdBy: varchar('created_by', { length: 255 }),
   postedAt: timestamp('posted_at'),
+  currency: varchar('currency', { length: 10 }).default('PKR'),
+  exchangeRate: decimal('exchange_rate', { precision: 10, scale: 4 }).default('1'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
@@ -1180,6 +1183,8 @@ export const journalEntryLines = pgTable('journal_entry_lines', {
   description: text('description').default(''),
   debitAmount: decimal('debit_amount', { precision: 12, scale: 2 }).notNull().default('0'),
   creditAmount: decimal('credit_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  originalAmount: decimal('original_amount', { precision: 14, scale: 2 }),
+  originalCurrency: varchar('original_currency', { length: 10 }),
 });
 
 // Vendors (Suppliers)

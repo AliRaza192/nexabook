@@ -2288,7 +2288,8 @@ export async function getProductSalesReport(
         unitPrice: invoiceItems.unitPrice,
         discountPct: invoiceItems.discountPercentage,
         lineTotal: invoiceItems.lineTotal,
-        costPrice: products.costPrice,
+        costPrice: invoiceItems.unitCost,
+        fallbackCostPrice: products.costPrice,
       })
       .from(invoiceItems)
       .innerJoin(invoices, eq(invoiceItems.invoiceId, invoices.id))
@@ -2336,7 +2337,7 @@ export async function getProductSalesReport(
       }
       const qty = parseFloat(r.quantity);
       const lineTotal = parseFloat(r.lineTotal || "0");
-      const cost = qty * parseFloat(r.costPrice || "0");
+      const cost = qty * parseFloat(r.costPrice || r.fallbackCostPrice || "0");
       productMap[key].totalQty += qty;
       productMap[key].totalRevenue += lineTotal;
       productMap[key].totalCost += cost;

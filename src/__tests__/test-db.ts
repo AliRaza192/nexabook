@@ -9,11 +9,11 @@ const schemaSql = fs.readFileSync(
   "utf8"
 );
 const triggerSql = fs.readFileSync(
-  path.join(__dirname, "../../drizzle/0001_journal_entry_balance_constraint.sql"),
+  path.join(__dirname, "../../migrations/0001_journal_entry_balance_constraint.sql"),
   "utf8"
 );
 const deferredTriggerSql = fs.readFileSync(
-  path.join(__dirname, "../../drizzle/0002_deferred_journal_balance_trigger.sql"),
+  path.join(__dirname, "../../migrations/0002_deferred_journal_balance_trigger.sql"),
   "utf8"
 );
 

@@ -702,7 +702,7 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
         .values({
           orgId,
           entryNumber,
-          entryDate: new Date(),
+          entryDate: new Date(year, month - 1, 1),
           referenceType: 'payroll',
           referenceId: payrollRunId,
           description: `Payroll for ${monthNames[month - 1]} ${year} - Total: PKR ${totalNet.toFixed(2)}`,

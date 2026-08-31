@@ -18,6 +18,10 @@ vi.mock("@/lib/accounting", () => ({
   validateJournalBalance: vi.fn().mockReturnValue(true),
 }));
 
+vi.mock("@/lib/actions/fiscal-periods", () => ({
+  checkPeriodLocked: vi.fn().mockResolvedValue(false),
+}));
+
 const chainable = () => {
   const self: any = {
     select: vi.fn().mockReturnThis(),
@@ -40,12 +44,13 @@ const chainable = () => {
   return self;
 };
 
-const mockDb = {
+const mockDb: any = {
   select: vi.fn(() => chainable()),
   insert: vi.fn(() => chainable()),
   update: vi.fn(() => chainable()),
   delete: vi.fn(() => chainable()),
   query: {},
+  transaction: vi.fn(async (fn: any) => fn(mockDb)),
 };
 
 vi.mock("@/db", () => ({ db: mockDb }));

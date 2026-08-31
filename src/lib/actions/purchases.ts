@@ -670,7 +670,7 @@ export async function revisePurchaseInvoice(invoiceId: string) {
         .values({
           orgId,
           entryNumber,
-          entryDate: new Date(),
+          entryDate: new Date(invoice.date),
           referenceType: 'purchase_invoice_revision',
           referenceId: invoiceId,
           description: `Purchase Invoice ${invoice.billNumber} revision - reversal`,
@@ -1325,6 +1325,10 @@ export async function createGRN(data: GRNFormData) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
+
+    const locked = await checkPeriodLocked(new Date(data.receivingDate));
+    if (locked) return { success: false, error: "Cannot create GRN in a locked fiscal period" };
+
     if (!data.vendorId || !data.items.length) return { success: false, error: "Vendor and at least one item are required" };
 
     const grnNumber = await generateDocumentNumber('grn', orgId);
@@ -1405,43 +1409,49 @@ export async function updateGRN(id: string, data: Partial<GRNFormData>) {
     if (data.purchaseOrderId !== undefined) updateData.purchaseOrderId = data.purchaseOrderId;
     if (data.purchaseInvoiceId !== undefined) updateData.purchaseInvoiceId = data.purchaseInvoiceId;
 
-    const [updated] = await db.update(goodReceivingNotes).set(updateData).where(and(eq(goodReceivingNotes.id, id), eq(goodReceivingNotes.orgId, orgId))).returning();
-    if (!updated) return { success: false, error: "GRN not found" };
+    const result = await db.transaction(async (tx) => {
+      const [updated] = await tx.update(goodReceivingNotes).set(updateData).where(and(eq(goodReceivingNotes.id, id), eq(goodReceivingNotes.orgId, orgId))).returning();
+      if (!updated) return { success: false, error: "GRN not found" };
 
-    if (data.items) {
-      // Reverse old stock, add new stock
-      const oldItems = await db.select().from(grnItems).where(eq(grnItems.grnId, id));
-      for (const oldItem of oldItems) {
-        if (oldItem.acceptedQty && parseFloat(oldItem.acceptedQty) > 0) {
-          await db.update(products)
-            .set({ currentStock: sql`${products.currentStock} - ${parseFloat(oldItem.acceptedQty)}` })
-            .where(and(eq(products.id, oldItem.productId), eq(products.orgId, orgId)));
+      if (data.items) {
+        // Reverse old stock, add new stock
+        const oldItems = await tx.select().from(grnItems).where(eq(grnItems.grnId, id));
+        for (const oldItem of oldItems) {
+          if (oldItem.acceptedQty && parseFloat(oldItem.acceptedQty) > 0) {
+            await tx.update(products)
+              .set({ currentStock: sql`${products.currentStock} - ${parseFloat(oldItem.acceptedQty)}` })
+              .where(and(eq(products.id, oldItem.productId), eq(products.orgId, orgId)));
+          }
+        }
+        await tx.delete(grnItems).where(eq(grnItems.grnId, id));
+
+        for (const item of data.items) {
+          await tx.insert(grnItems).values({
+            orgId,
+            grnId: id,
+            productId: item.productId,
+            orderedQty: item.orderedQty,
+            receivedQty: item.receivedQty,
+            acceptedQty: item.acceptedQty,
+            rejectedQty: item.rejectedQty || '0',
+          });
+
+          if (item.acceptedQty && parseFloat(item.acceptedQty) > 0) {
+            await tx.update(products)
+              .set({ currentStock: sql`${products.currentStock} + ${parseFloat(item.acceptedQty)}` })
+              .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)));
+          }
         }
       }
-      await db.delete(grnItems).where(eq(grnItems.grnId, id));
 
-      for (const item of data.items) {
-        await db.insert(grnItems).values({
-          orgId,
-          grnId: id,
-          productId: item.productId,
-          orderedQty: item.orderedQty,
-          receivedQty: item.receivedQty,
-          acceptedQty: item.acceptedQty,
-          rejectedQty: item.rejectedQty || '0',
-        });
+      return { success: true, data: updated };
+    });
 
-        if (item.acceptedQty && parseFloat(item.acceptedQty) > 0) {
-          await db.update(products)
-            .set({ currentStock: sql`${products.currentStock} + ${parseFloat(item.acceptedQty)}` })
-            .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)));
-        }
-      }
-    }
+    if (!result.success) return result;
 
     revalidatePath('/purchases/grn');
     revalidatePath('/inventory');
-    return { success: true, data: updated, message: "GRN updated successfully" };
+    return { success: true, data: result.data, message: "GRN updated successfully" };
   } catch (error) {
     console.error("Error in purchases.ts:", error);
     return { success: false, error: "Failed to update GRN" };
@@ -1571,33 +1581,37 @@ export async function createPurchaseReturn(data: PurchaseReturnFormData) {
     const returnNumber = await generatePurchaseReturnNumber(orgId);
     const grossAmount = data.items.reduce((sum, item) => sum + (parseFloat(item.quantity || '0') * parseFloat(item.unitPrice || '0')), 0);
 
-    const [newReturn] = await db.insert(purchaseReturns).values({
-      orgId,
-      returnNumber,
-      purchaseInvoiceId: data.purchaseInvoiceId || null,
-      vendorId: data.vendorId,
-      returnDate: new Date(data.returnDate),
-      reason: data.reason,
-      reasonDetails: data.reasonDetails || null,
-      grossAmount: grossAmount.toFixed(2),
-      netAmount: grossAmount.toFixed(2),
-      refundAmount: grossAmount.toFixed(2),
-      status: 'pending',
-      notes: data.notes || null,
-    }).returning();
-
-    for (const item of data.items) {
-      const lineTotal = parseFloat(item.quantity || '0') * parseFloat(item.unitPrice || '0');
-      await db.insert(purchaseReturnItems).values({
+    const newReturn = await db.transaction(async (tx) => {
+      const [newReturn] = await tx.insert(purchaseReturns).values({
         orgId,
-        purchaseReturnId: newReturn.id,
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        lineTotal: lineTotal.toFixed(2),
-      });
-    }
+        returnNumber,
+        purchaseInvoiceId: data.purchaseInvoiceId || null,
+        vendorId: data.vendorId,
+        returnDate: new Date(data.returnDate),
+        reason: data.reason,
+        reasonDetails: data.reasonDetails || null,
+        grossAmount: grossAmount.toFixed(2),
+        netAmount: grossAmount.toFixed(2),
+        refundAmount: grossAmount.toFixed(2),
+        status: 'pending',
+        notes: data.notes || null,
+      }).returning();
+
+      for (const item of data.items) {
+        const lineTotal = parseFloat(item.quantity || '0') * parseFloat(item.unitPrice || '0');
+        await tx.insert(purchaseReturnItems).values({
+          orgId,
+          purchaseReturnId: newReturn.id,
+          productId: item.productId || null,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          lineTotal: lineTotal.toFixed(2),
+        });
+      }
+
+      return newReturn;
+    });
 
     revalidatePath('/purchases/returns');
     return { success: true, data: newReturn, message: "Purchase return created (pending approval)" };
@@ -1663,7 +1677,7 @@ export async function approvePurchaseReturn(id: string) {
       const [journalEntry] = await tx.insert(journalEntries).values({
         orgId,
         entryNumber,
-        entryDate: new Date(),
+        entryDate: new Date(purchaseReturn.returnDate),
         referenceType: 'purchase_return',
         referenceId: id,
         description: `Purchase Return ${purchaseReturn.returnNumber} - Debit Note`,
@@ -2018,47 +2032,51 @@ export async function createVendorSettlement(data: {
     const totalDiscount = data.documents.reduce((sum, doc) => sum + parseFloat(doc.discountAmount || '0'), 0);
     const totalSettlement = data.documents.reduce((sum, doc) => sum + parseFloat(doc.settlementAmount || '0'), 0);
 
-    const [newSettlement] = await db.insert(settlements).values({
-      orgId,
-      settlementNumber,
-      entityType: 'vendor',
-      entityId: data.vendorId,
-      settlementDate: new Date(data.settlementDate),
-      totalOutstanding: totalOutstanding.toFixed(2),
-      discountAmount: totalDiscount.toFixed(2),
-      paidAmount: totalSettlement.toFixed(2),
-      status: totalSettlement >= totalOutstanding - totalDiscount ? 'settled' : 'partial',
-      paymentMethod: data.paymentMethod,
-      reference: data.reference || '',
-      notes: data.notes || null,
-    }).returning();
-
-    for (const doc of data.documents) {
-      await db.insert(settlementLines).values({
+    const newSettlement = await db.transaction(async (tx) => {
+      const [newSettlement] = await tx.insert(settlements).values({
         orgId,
-        settlementId: newSettlement.id,
-        documentType: doc.documentType,
-        documentId: doc.documentId,
-        originalAmount: doc.originalAmount,
-        paidAmount: doc.paidAmount,
-        adjustedAmount: doc.settlementAmount,
-        discountAmount: doc.discountAmount,
-        balanceAmount: '0',
-      });
+        settlementNumber,
+        entityType: 'vendor',
+        entityId: data.vendorId,
+        settlementDate: new Date(data.settlementDate),
+        totalOutstanding: totalOutstanding.toFixed(2),
+        discountAmount: totalDiscount.toFixed(2),
+        paidAmount: totalSettlement.toFixed(2),
+        status: totalSettlement >= totalOutstanding - totalDiscount ? 'settled' : 'partial',
+        paymentMethod: data.paymentMethod,
+        reference: data.reference || '',
+        notes: data.notes || null,
+      }).returning();
 
-      // Update purchase invoice balances if applicable
-      if (doc.documentType === 'invoice') {
-        await db.update(purchaseInvoices).set({
-          status: 'paid',
-        }).where(and(eq(purchaseInvoices.id, doc.documentId), eq(purchaseInvoices.orgId, orgId)));
+      for (const doc of data.documents) {
+        await tx.insert(settlementLines).values({
+          orgId,
+          settlementId: newSettlement.id,
+          documentType: doc.documentType,
+          documentId: doc.documentId,
+          originalAmount: doc.originalAmount,
+          paidAmount: doc.paidAmount,
+          adjustedAmount: doc.settlementAmount,
+          discountAmount: doc.discountAmount,
+          balanceAmount: '0',
+        });
+
+        // Update purchase invoice balances if applicable
+        if (doc.documentType === 'invoice') {
+          await tx.update(purchaseInvoices).set({
+            status: 'paid',
+          }).where(and(eq(purchaseInvoices.id, doc.documentId), eq(purchaseInvoices.orgId, orgId)));
+        }
       }
-    }
 
-    // Update vendor balance (reduce payable)
-    const [vendor] = await db.select().from(vendors).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId))).limit(1);
-    if (vendor) {
-      await db.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${totalSettlement}, 0)` }).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId)));
-    }
+      // Update vendor balance (reduce payable)
+      const [vendor] = await tx.select().from(vendors).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId))).limit(1);
+      if (vendor) {
+        await tx.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${totalSettlement}, 0)` }).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId)));
+      }
+
+      return newSettlement;
+    });
 
     revalidatePath('/purchases/settlement');
     return { success: true, data: newSettlement, message: "Vendor settlement completed successfully" };
