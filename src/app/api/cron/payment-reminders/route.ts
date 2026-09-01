@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { invoices, customers, organizations, reminderSettings } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { sendTextMessage, isWhatsAppConfigured } from "@/lib/utils/whatsapp";
+import { captureException } from "@/lib/error-handler";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
           const result = await sendTextMessage(inv.customerPhone, message);
           sent = result.success;
           if (!result.success) {
-            console.error(`WhatsApp send failed for ${inv.customerPhone}: ${result.error}`);
+            captureException(result.error, { module: "payment-reminders", function: "GET", customerPhone: inv.customerPhone });
           }
         }
 
@@ -90,7 +91,7 @@ export async function GET(request: NextRequest) {
       messages: results,
     });
   } catch (err) {
-    console.error("Reminder cron error:", err);
+    captureException(err, { module: "payment-reminders", function: "GET" });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -499,7 +499,7 @@ export default function RunPayrollPage() {
             <Calculator className="h-16 w-16 text-slate-300 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-slate-900 mb-2">No Payroll Generated</h3>
             <p className="text-slate-600 mb-4">
-              Select a month and year, then click "Generate Payroll" to calculate salaries
+              Select a month and year, then click &quot;Generate Payroll&quot; to calculate salaries
             </p>
           </CardContent>
         </Card>

@@ -44,6 +44,7 @@ import {
   updateWarehouseStock,
   updateBatchStock,
 } from "./inventory";
+import { captureException } from "@/lib/error-handler";
 
 // ==================== CUSTOMER ACTIONS ====================
 
@@ -126,7 +127,7 @@ export async function getCustomers(searchQuery?: string, pagination?: Pagination
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getCustomers" });
     return { success: false, error: "Failed to fetch customers" };
   }
 }
@@ -151,7 +152,7 @@ export async function getCustomerById(customerId: string) {
 
     return { success: true, data: customer };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getCustomerById" });
     return { success: false, error: "Failed to fetch customer" };
   }
 }
@@ -195,7 +196,7 @@ export async function createCustomer(data: CustomerFormData) {
       message: "Customer created successfully",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createCustomer" });
     return { success: false, error: `Failed to create customer: ${error instanceof Error ? error.message : "Unknown error"}` };
   }
 }
@@ -242,7 +243,7 @@ export async function updateCustomer(
       message: "Customer updated successfully",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "updateCustomer" });
     return { success: false, error: "Failed to update customer" };
   }
 }
@@ -264,7 +265,7 @@ export async function deleteCustomer(customerId: string) {
 
     return { success: true, message: "Customer deleted successfully" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "deleteCustomer" });
     return { success: false, error: "Failed to delete customer" };
   }
 }
@@ -296,7 +297,7 @@ export async function getSalesTeam() {
 
     return { success: true, data: team };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getSalesTeam" });
     return { success: false, error: "Failed to load sales team" };
   }
 }
@@ -317,7 +318,7 @@ export async function updateSalesTeamMember(
     revalidatePath("/sales/team");
     return { success: true, message: "Team member updated" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "updateSalesTeamMember" });
     return { success: false, error: "Failed to update team member" };
   }
 }
@@ -381,7 +382,7 @@ export async function getGeographySalesReport(filters: {
 
     return { success: true, data: grouped };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getGeographySalesReport" });
     return { success: false, error: "Failed to load geography report" };
   }
 }
@@ -501,7 +502,7 @@ export async function getInvoices(
     const result = await baseQuery;
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getInvoices" });
     return { success: false, error: "Failed to fetch invoices" };
   }
 }
@@ -531,7 +532,7 @@ export async function getInvoiceById(invoiceId: string) {
 
     return { success: true, data: { ...invoice, items } };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getInvoiceById" });
     return { success: false, error: "Failed to fetch invoice" };
   }
 }
@@ -709,7 +710,7 @@ export async function getInvoiceWithDetails(
       },
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getInvoiceWithDetails" });
     return { success: false, error: "Failed to fetch invoice details" };
   }
 }
@@ -842,7 +843,7 @@ export async function createInvoice(data: InvoiceFormData) {
       invoiceNumber,
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createInvoice" });
     return { success: false, error: "Failed to create invoice" };
   }
 }
@@ -1267,13 +1268,13 @@ export async function approveInvoice(invoiceId: string) {
       }
     } catch (fbrError) {
       // Log but don't fail — invoice is already approved
-      console.error("FBR submission failed (non-blocking):", fbrError);
+      captureException(fbrError, { module: "sales", function: "approveInvoice", fbr: true });
     }
 
     revalidatePath("/sales/invoices");
     return { success: true, message: "Invoice approved successfully" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "approveInvoice" });
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to approve",
@@ -1323,7 +1324,7 @@ export async function updateInvoiceStatus(
       message: "Invoice status updated",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "updateInvoiceStatus" });
     return { success: false, error: "Failed to update invoice status" };
   }
 }
@@ -1464,7 +1465,7 @@ export async function deleteInvoice(invoiceId: string) {
 
     return { success: true, message: "Invoice deleted successfully" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "deleteInvoice" });
     return { success: false, error: "Failed to delete invoice" };
   }
 }
@@ -1514,7 +1515,7 @@ export async function getInvoiceStats() {
       },
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getInvoiceStats" });
     return { success: false, error: "Failed to fetch invoice stats" };
   }
 }
@@ -1593,7 +1594,7 @@ export async function createInvoiceJournalEntry(invoiceId: string) {
 
     return { success: true, message: "Journal entry created for invoice" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createInvoiceJournalEntry" });
     return { success: false, error: "Failed to create journal entry" };
   }
 }
@@ -1633,7 +1634,7 @@ export async function getCashBankAccounts() {
 
     return { success: true, data: cashBankAccounts };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getCashBankAccounts" });
     return { success: false, error: "Failed to fetch cash/bank accounts" };
   }
 }
@@ -1652,7 +1653,7 @@ export async function getNextInvoiceNumber() {
     }
     return { success: true, data: invoiceNumber };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getNextInvoiceNumber" });
     return { success: false, error: "Failed to generate invoice number" };
   }
 }
@@ -1694,7 +1695,7 @@ export async function getNextSaleOrderNumber() {
     }
     return { success: true, data: orderNumber };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getNextSaleOrderNumber" });
     return { success: false, error: "Failed to generate sale order number" };
   }
 }
@@ -1784,7 +1785,7 @@ export async function createSaleOrder(data: SaleOrderFormData) {
       orderNumber,
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createSaleOrder" });
     return { success: false, error: "Failed to create sale order" };
   }
 }
@@ -1840,7 +1841,7 @@ export async function approveSaleOrder(orderId: string) {
       message: "Sale order approved",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "approveSaleOrder" });
     return { success: false, error: "Failed to approve sale order" };
   }
 }
@@ -1894,7 +1895,7 @@ export async function getSaleOrders(
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getSaleOrders" });
     return { success: false, error: "Failed to fetch sale orders" };
   }
 }
@@ -1924,7 +1925,7 @@ export async function getSaleOrderById(orderId: string) {
 
     return { success: true, data: { ...order, items } };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getSaleOrderById" });
     return { success: false, error: "Failed to fetch sale order" };
   }
 }
@@ -2067,7 +2068,7 @@ export async function getNextQuotationNumber() {
     }
     return { success: true, data: number };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getNextQuotationNumber" });
     return { success: false, error: "Failed to generate quotation number" };
   }
 }
@@ -2108,7 +2109,7 @@ export async function getQuotations(
     }
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getQuotations" });
     return { success: false, error: "Failed to fetch quotations" };
   }
 }
@@ -2129,7 +2130,7 @@ export async function getQuotationById(quotationId: string) {
       .where(eq(quotationItems.quotationId, quotationId));
     return { success: true, data: { ...quotation, items } };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getQuotationById" });
     return { success: false, error: "Failed to fetch quotation" };
   }
 }
@@ -2216,7 +2217,7 @@ export async function createQuotation(data: QuotationFormData) {
       quotationNumber,
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createQuotation" });
     return { success: false, error: "Failed to create quotation" };
   }
 }
@@ -2295,7 +2296,7 @@ export async function updateQuotation(
       message: "Quotation updated successfully",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "updateQuotation" });
     return { success: false, error: "Failed to update quotation" };
   }
 }
@@ -2313,7 +2314,7 @@ export async function deleteQuotation(quotationId: string) {
     revalidatePath("/sales/quotations");
     return { success: true, message: "Quotation deleted successfully" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "deleteQuotation" });
     return { success: false, error: "Failed to delete quotation" };
   }
 }
@@ -2385,7 +2386,7 @@ export async function convertQuotationToOrder(quotationId: string) {
       message: "Quotation converted to sale order",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "convertQuotationToOrder" });
     return { success: false, error: "Failed to convert quotation to order" };
   }
 }
@@ -2422,7 +2423,7 @@ export async function getNextDeliveryNumber() {
     const number = await generateDeliveryNumber(orgId);
     return { success: true, data: number };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getNextDeliveryNumber" });
     return { success: false, error: "Failed to generate delivery number" };
   }
 }
@@ -2461,7 +2462,7 @@ export async function getDeliveryNotes(
     }
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getDeliveryNotes" });
     return { success: false, error: "Failed to fetch delivery notes" };
   }
 }
@@ -2519,7 +2520,7 @@ export async function createDeliveryNote(data: DeliveryNoteFormData) {
       message: "Delivery note created successfully",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createDeliveryNote" });
     return { success: false, error: "Failed to create delivery note" };
   }
 }
@@ -2545,7 +2546,7 @@ export async function updateDeliveryStatus(
     revalidatePath("/sales/delivery");
     return { success: true, data: updated, message: "Delivery status updated" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "updateDeliveryStatus" });
     return { success: false, error: "Failed to update delivery status" };
   }
 }
@@ -2581,7 +2582,7 @@ export async function getNextRecurringInvoiceNumber() {
     if (!orgId) return { success: false, error: "No organization found" };
     return { success: true, data: await generateRecurringInvoiceNumber(orgId) };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getNextRecurringInvoiceNumber" });
     return { success: false, error: "Failed to generate number" };
   }
 }
@@ -2610,7 +2611,7 @@ export async function getRecurringInvoices(statusFilter?: string) {
       .orderBy(desc(recurringInvoices.createdAt));
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getRecurringInvoices" });
     return { success: false, error: "Failed to fetch recurring invoices" };
   }
 }
@@ -2668,7 +2669,7 @@ export async function createRecurringInvoice(data: RecurringInvoiceFormData) {
       message: "Recurring invoice created",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createRecurringInvoice" });
     return { success: false, error: "Failed to create recurring invoice" };
   }
 }
@@ -2735,7 +2736,7 @@ export async function updateRecurringInvoice(
       message: "Recurring invoice updated",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "updateRecurringInvoice" });
     return { success: false, error: "Failed to update recurring invoice" };
   }
 }
@@ -2755,7 +2756,7 @@ export async function deleteRecurringInvoice(id: string) {
     revalidatePath("/sales/recurring");
     return { success: true, message: "Recurring invoice deleted" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "deleteRecurringInvoice" });
     return { success: false, error: "Failed to delete recurring invoice" };
   }
 }
@@ -2865,7 +2866,7 @@ export async function generateRecurringInvoices() {
       message: `Generated ${generated} invoices`,
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "generateRecurringInvoices" });
     return { success: false, error: "Failed to generate recurring invoices" };
   }
 }
@@ -2901,7 +2902,7 @@ export async function getNextSalesReturnNumber() {
     if (!orgId) return { success: false, error: "No organization found" };
     return { success: true, data: await generateSalesReturnNumber(orgId) };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getNextSalesReturnNumber" });
     return { success: false, error: "Failed to generate return number" };
   }
 }
@@ -2940,7 +2941,7 @@ export async function getSalesReturns(
     }
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getSalesReturns" });
     return { success: false, error: "Failed to fetch sales returns" };
   }
 }
@@ -2998,7 +2999,7 @@ export async function createSalesReturn(data: SalesReturnFormData) {
       message: "Sales return created (pending approval)",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createSalesReturn" });
     return { success: false, error: "Failed to create sales return" };
   }
 }
@@ -3170,7 +3171,7 @@ export async function approveSalesReturn(returnId: string) {
       message: "Sales return approved - stock reversed and refund recorded",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "approveSalesReturn" });
     return { success: false, error: "Failed to approve sales return" };
   }
 }
@@ -3228,7 +3229,7 @@ export async function getCustomerPayments(searchQuery?: string) {
     }
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getCustomerPayments" });
     return { success: false, error: "Failed to fetch payments" };
   }
 }
@@ -3385,7 +3386,7 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
       message: "Payment recorded successfully",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createCustomerPayment" });
     return { success: false, error: "Failed to record payment" };
   }
 }
@@ -3452,7 +3453,7 @@ export async function allocatePayment(
     revalidatePath("/sales/invoices");
     return { success: true, message: "Payment allocated successfully" };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "allocatePayment" });
     return { success: false, error: "Failed to allocate payment" };
   }
 }
@@ -3480,7 +3481,7 @@ export async function getCustomerOutstandingInvoices(customerId: string) {
       data: result.filter((inv) => parseFloat(inv.balanceAmount || "0") > 0),
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getCustomerOutstandingInvoices" });
     return { success: false, error: "Failed to fetch outstanding invoices" };
   }
 }
@@ -3528,7 +3529,7 @@ export async function getSettlements(
       .orderBy(desc(settlements.createdAt));
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "getSettlements" });
     return { success: false, error: "Failed to fetch settlements" };
   }
 }
@@ -3613,7 +3614,7 @@ export async function createCustomerSettlement(data: SettlementFormData) {
       message: "Settlement recorded successfully",
     };
   } catch (error) {
-    console.error("Error in sales.ts:", error);
+    captureException(error, { module: "sales", function: "createCustomerSettlement" });
     return { success: false, error: "Failed to create settlement" };
   }
 }
@@ -3730,7 +3731,7 @@ export async function duplicateInvoice(invoiceId: string) {
       message: `Invoice duplicated as ${newInvoiceNumber}`,
     };
   } catch (error) {
-    console.error("Failed to duplicate invoice:", error);
+    captureException(error, { module: "sales", function: "duplicateInvoice" });
     return { success: false, error: "Failed to duplicate invoice" };
   }
 }
@@ -3836,7 +3837,7 @@ export async function duplicateSaleOrder(orderId: string) {
       message: `Sale order duplicated as ${newOrderNumber}`,
     };
   } catch (error) {
-    console.error("Failed to duplicate sale order:", error);
+    captureException(error, { module: "sales", function: "duplicateSaleOrder" });
     return { success: false, error: "Failed to duplicate sale order" };
   }
 }

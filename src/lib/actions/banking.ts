@@ -12,6 +12,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { validateJournalBalance } from "../accounting";
+import { captureException } from "@/lib/error-handler";
 
 // ==========================================
 // BANK ACCOUNTS
@@ -55,7 +56,7 @@ export async function getBankCOAAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "getBankCOAAccounts" });
     return { success: false, error: "Failed to fetch bank accounts from COA" };
   }
 }
@@ -84,7 +85,7 @@ export async function getBankAccounts(searchQuery?: string) {
 
     return { success: true, data: accounts };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "getBankAccounts" });
     return { success: false, error: "Failed to fetch bank accounts" };
   }
 }
@@ -168,7 +169,7 @@ export async function addBankAccount(data: BankAccountFormData) {
     revalidatePath("/accounts/banking");
     return { success: true, data: newAccount, message: "Bank account added successfully" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "addBankAccount" });
     return { success: false, error: "Failed to add bank account" };
   }
 }
@@ -198,7 +199,7 @@ export async function updateBankAccount(accountId: string, data: Partial<BankAcc
     revalidatePath("/accounts/banking");
     return { success: true, data: updated, message: "Bank account updated successfully" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "updateBankAccount" });
     return { success: false, error: "Failed to update bank account" };
   }
 }
@@ -220,7 +221,7 @@ export async function approveBankAccount(accountId: string) {
     revalidatePath("/accounts/banking");
     return { success: true, message: "Bank account approved" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "approveBankAccount" });
     return { success: false, error: "Failed to approve bank account" };
   }
 }
@@ -265,7 +266,7 @@ export async function getBankDeposits(searchQuery?: string) {
 
     return { success: true, data: deposits };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "getBankDeposits" });
     return { success: false, error: "Failed to fetch bank deposits" };
   }
 }
@@ -320,7 +321,7 @@ export async function addBankDeposit(data: BankDepositFormData) {
     revalidatePath("/accounts/banking");
     return { success: true, data: deposit, message: "Bank deposit recorded successfully" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "addBankDeposit" });
     return { success: false, error: "Failed to record bank deposit" };
   }
 }
@@ -401,7 +402,7 @@ export async function approveBankDeposit(depositId: string) {
     revalidatePath("/accounts/banking");
     return { success: true, message: "Bank deposit approved and posted" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "approveBankDeposit" });
     return { success: false, error: "Failed to approve bank deposit" };
   }
 }
@@ -443,7 +444,7 @@ export async function getFundsTransfers(searchQuery?: string) {
 
     return { success: true, data: transfers };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "getFundsTransfers" });
     return { success: false, error: "Failed to fetch funds transfers" };
   }
 }
@@ -505,7 +506,7 @@ export async function addFundsTransfer(data: FundsTransferFormData) {
     revalidatePath("/accounts/banking");
     return { success: true, data: transfer, message: "Funds transfer recorded successfully" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "addFundsTransfer" });
     return { success: false, error: "Failed to record funds transfer" };
   }
 }
@@ -579,7 +580,7 @@ export async function approveFundsTransfer(transferId: string) {
     revalidatePath("/accounts/banking");
     return { success: true, message: "Funds transfer approved and posted" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "approveFundsTransfer" });
     return { success: false, error: "Failed to approve funds transfer" };
   }
 }
@@ -623,7 +624,7 @@ export async function getMiscContacts(searchQuery?: string) {
 
     return { success: true, data: contacts };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "getMiscContacts" });
     return { success: false, error: "Failed to fetch misc contacts" };
   }
 }
@@ -660,7 +661,7 @@ export async function addMiscContact(data: MiscContactFormData) {
     revalidatePath("/accounts/banking");
     return { success: true, data: contact, message: "Transaction recorded successfully" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "addMiscContact" });
     return { success: false, error: "Failed to record transaction" };
   }
 }
@@ -710,7 +711,7 @@ export async function approveMiscContact(contactId: string) {
     revalidatePath("/accounts/banking");
     return { success: true, message: "Transaction approved" };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "approveMiscContact" });
     return { success: false, error: "Failed to approve transaction" };
   }
 }
@@ -858,7 +859,7 @@ export async function getBankReconciliation(
       },
     };
   } catch (error) {
-    console.error("Error in banking.ts:", error);
+    captureException(error, { module: "banking", function: "getBankReconciliation" });
     return { success: false, error: "Failed to fetch bank reconciliation data" };
   }
 }
@@ -1034,7 +1035,7 @@ export async function createContraEntry(data: ContraEntryFormData) {
       message: `Contra entry ${entryNumber} created successfully`,
     };
   } catch (error) {
-    console.error('Failed to create contra entry:', error);
+    captureException(error, { module: "banking", function: "createContraEntry" });
     return { success: false, error: "Failed to create contra entry" };
   }
 }

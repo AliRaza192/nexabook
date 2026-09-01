@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { customers, invoices, paymentTransactions } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
+import { captureException } from "@/lib/error-handler";
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,8 +52,8 @@ export async function POST(request: NextRequest) {
     const cInfo = { name: customer.name };
 
     const loadModule = gateway === "jazzcash" ? import("@/lib/payments/jazzcash") : import("@/lib/payments/easypaisa");
-    const module = await loadModule;
-    const result = await module.initiatePayment(amount, orderRef, cInfo);
+    const paymentModule = await loadModule;
+    const result = await paymentModule.initiatePayment(amount, orderRef, cInfo);
 
     if (result.success) {
       await db.update(paymentTransactions)
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: false, error: result.message || "Payment initiation failed" }, { status: 500 });
   } catch (err) {
-    console.error("Portal payment error:", err);
+    captureException(err, { module: "portal-pay", function: "POST" });
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

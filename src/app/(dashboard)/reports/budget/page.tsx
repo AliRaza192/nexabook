@@ -123,7 +123,7 @@ export default function BudgetPage() {
             <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-nexabook-400" /></div>
           ) : data.length === 0 ? (
             <div className="text-center py-10 text-nexabook-400 text-sm">
-              No budgets set for {fiscalYear}. Click "Add Budget" to start.
+              No budgets set for {fiscalYear}. Click &quot;Add Budget&quot; to start.
             </div>
           ) : (
             <div className="overflow-x-auto">

@@ -1,50 +1,38 @@
-type LogLevel = "info" | "warn" | "error" | "debug";
+type LogLevel = "error" | "warn" | "info";
 
 interface LogEntry {
+  timestamp: string;
   level: LogLevel;
   message: string;
-  context?: string;
-  data?: unknown;
-  timestamp: string;
+  module?: string;
+  orgId?: string;
+  userId?: string;
+  [key: string]: unknown;
 }
 
-function formatEntry(entry: LogEntry): string {
-  const base = `[${entry.timestamp}] [${entry.level.toUpperCase()}]`;
-  const ctx = entry.context ? ` [${entry.context}]` : "";
-  return `${base}${ctx} ${entry.message}`;
-}
-
-function log(level: LogLevel, message: string, context?: string, data?: unknown) {
+function emit(level: LogLevel, message: string, meta: Record<string, unknown> = {}) {
   const entry: LogEntry = {
+    timestamp: new Date().toISOString(),
     level,
     message,
-    context,
-    data,
-    timestamp: new Date().toISOString(),
+    ...meta,
   };
-
-  const formatted = formatEntry(entry);
-
-  switch (level) {
-    case "error":
-      console.error(formatted, data ?? "");
-      break;
-    case "warn":
-      console.warn(formatted, data ?? "");
-      break;
-    case "debug":
-      if (process.env.NODE_ENV === "development") {
-        console.debug(formatted, data ?? "");
-      }
-      break;
-    default:
-      console.log(formatted, data ?? "");
+  const line = JSON.stringify(entry);
+  if (level === "error") {
+    process.stderr.write(line + "\n");
+  } else {
+    process.stdout.write(line + "\n");
   }
 }
 
 export const logger = {
-  info: (message: string, context?: string, data?: unknown) => log("info", message, context, data),
-  warn: (message: string, context?: string, data?: unknown) => log("warn", message, context, data),
-  error: (message: string, context?: string, data?: unknown) => log("error", message, context, data),
-  debug: (message: string, context?: string, data?: unknown) => log("debug", message, context, data),
+  error(message: string, meta?: Record<string, unknown>) {
+    emit("error", message, meta);
+  },
+  warn(message: string, meta?: Record<string, unknown>) {
+    emit("warn", message, meta);
+  },
+  info(message: string, meta?: Record<string, unknown>) {
+    emit("info", message, meta);
+  },
 };

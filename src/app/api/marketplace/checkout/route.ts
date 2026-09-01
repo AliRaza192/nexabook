@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { profiles, digitalFteProducts, organizations } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import Stripe from "stripe";
+import { captureException } from "@/lib/error-handler";
 
 const stripeKey = process.env.STRIPE_SECRET_KEY;
 if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not configured");
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, url: session.url });
   } catch (error) {
-    console.error("[Marketplace Checkout]", error);
+    captureException(error, { module: "marketplace/checkout", function: "POST" });
     return NextResponse.json(
       { success: false, error: "Checkout failed" },
       { status: 500 }

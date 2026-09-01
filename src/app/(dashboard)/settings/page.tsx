@@ -517,7 +517,7 @@ export default function SettingsPage() {
           </Card>
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-            <strong>Note:</strong> To invite new users, share your Clerk-based signup link. New users who sign up will automatically be assigned to your organization with "staff" role. Admin can then change their role from here.
+            <strong>Note:</strong> To invite new users, share your Clerk-based signup link. New users who sign up will automatically be assigned to your organization with &quot;staff&quot; role. Admin can then change their role from here.
           </div>
         </motion.div>
       )}

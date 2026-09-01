@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { products } from "@/db/schema";
 import { sql } from "drizzle-orm";
+import { captureException } from "@/lib/error-handler";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
         : "All stock levels are healthy",
     });
   } catch (err) {
-    console.error("Low stock cron error:", err);
+    captureException(err, { module: "low-stock", function: "GET" });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

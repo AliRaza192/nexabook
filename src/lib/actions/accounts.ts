@@ -9,6 +9,7 @@ import { getCurrentOrgId } from "./shared";
 import { requireRole } from "./shared";
 import { validateJournalBalance } from "../accounting";
 import { checkPeriodLocked } from "./fiscal-periods";
+import { captureException } from "@/lib/error-handler";
 
 export interface JournalEntryLine {
   accountId: string;
@@ -41,7 +42,7 @@ export async function getAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "getAccounts" });
     return { success: false, error: "Failed to fetch accounts" };
   }
 }
@@ -223,8 +224,8 @@ export async function seedInitialCOA() {
       count: accountsToInsert.length
     };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
-    return { success: false, error: "Failed to seed chart of accounts" };
+    captureException(error, { module: "accounts.ts", function: "getAllAccounts" });
+    return { success: false, error: "Failed to fetch accounts" };
   }
 }
 
@@ -332,7 +333,7 @@ export async function createJournalEntry(data: JournalEntryData) {
       entryNumber
     };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "createJournalEntry" });
     return { success: false, error: "Failed to create journal entry" };
   }
 }
@@ -355,7 +356,7 @@ export async function getAccountById(accountId: string) {
 
     return { success: true, data: account };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "getAccountById" });
     return { success: false, error: "Failed to fetch account" };
   }
 }
@@ -488,7 +489,7 @@ export async function postOpeningBalance(data: {
       entryNumber,
     };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "postOpeningBalance" });
     return { success: false, error: "Failed to post opening balance" };
   }
 }
@@ -616,7 +617,7 @@ export async function bulkImportOpeningBalances(
       entryNumber,
     };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "bulkImportOpeningBalances" });
     return { success: false, error: "Failed to import opening balances" };
   }
 }
@@ -642,7 +643,7 @@ export async function getCompanySettings() {
 
     return { success: true, data: org };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "getCompanySettings" });
     return { success: false, error: "Failed to fetch company settings" };
   }
 }
@@ -707,7 +708,7 @@ export async function updateCompanySettings(data: {
 
     return { success: true, message: "Settings saved successfully" };
   } catch (error) {
-    console.error("Failed to update company settings:", error);
+    captureException(error, { module: "accounts.ts", function: "updateCompanySettings" });
     return { success: false, error: "Failed to update company settings" };
   }
 }
@@ -736,7 +737,7 @@ export async function getAllAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "getAllAccounts" });
     return { success: false, error: "Failed to fetch accounts" };
   }
 }
@@ -850,7 +851,7 @@ export async function getLedgerReport(
       },
     };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "getLedgerReport" });
     return { success: false, error: "Failed to generate ledger report" };
   }
 }
@@ -1035,7 +1036,7 @@ export async function getTaxSummary(
       },
     };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "getTaxSummary" });
     return { success: false, error: "Failed to generate tax summary" };
   }
 }
@@ -1298,7 +1299,7 @@ const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
       entryId: journalEntry.id,
     };
   } catch (error) {
-    console.error('Failed to create voucher:', error);
+    captureException(error, { module: "accounts.ts", function: "createVoucher" });
     return { success: false, error: "Failed to create voucher" };
   }
 }
@@ -1329,7 +1330,7 @@ export async function getVouchersByType(voucherType: VoucherType, limit: number 
 
     return { success: true, data: vouchers };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "getVouchersByType" });
     return { success: false, error: "Failed to fetch vouchers" };
   }
 }
@@ -1374,7 +1375,7 @@ export async function getVoucherWithLines(entryId: string) {
 
     return { success: true, data: { entry, lines } };
   } catch (error) {
-    console.error("Error in accounts.ts:", error);
+    captureException(error, { module: "accounts.ts", function: "getVoucherWithLines" });
     return { success: false, error: "Failed to fetch voucher" };
   }
 }
@@ -1433,7 +1434,7 @@ export async function deleteJournalEntry(id: string) {
     revalidatePath("/dashboard/accounts/journal-entries");
     return { success: true, message: "Journal entry deleted successfully" };
   } catch (error) {
-    console.error("Delete Journal Error:", error);
+    captureException(error, { module: "accounts.ts", function: "deleteJournalEntry" });
     return { 
       success: false, 
       error: error instanceof Error ? error.message : "Failed to delete journal entry" 

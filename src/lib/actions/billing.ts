@@ -5,6 +5,7 @@ import { organizations } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentOrgId } from "./shared";
 import { stripe, PLANS } from "@/lib/stripe";
+import { captureException } from "@/lib/error-handler";
 
 export async function createCheckoutSession(priceId: string, planType: string) {
   try {
@@ -43,7 +44,7 @@ export async function createCheckoutSession(priceId: string, planType: string) {
 
     return { success: true, data: { url: session.url } };
   } catch (error) {
-    console.error("Error in billing.ts:", error);
+    captureException(error, { module: "billing.ts", function: "createCheckoutSession" });
     return { success: false, error: "Failed to create checkout session" };
   }
 }
@@ -76,7 +77,7 @@ export async function getSubscription() {
       },
     };
   } catch (error) {
-    console.error("Error in billing.ts:", error);
+    captureException(error, { module: "billing.ts", function: "getSubscription" });
     return { success: false, error: "Failed to get subscription" };
   }
 }
@@ -101,7 +102,7 @@ export async function createPortalSession() {
 
     return { success: true, data: { url: session.url } };
   } catch (error) {
-    console.error("Error in billing.ts:", error);
+    captureException(error, { module: "billing.ts", function: "createPortalSession" });
     return { success: false, error: "Failed to create portal session" };
   }
 }

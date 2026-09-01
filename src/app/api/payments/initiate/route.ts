@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { paymentTransactions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentOrgId } from "@/lib/actions/shared";
+import { captureException } from "@/lib/error-handler";
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,8 +44,8 @@ export async function POST(request: NextRequest) {
       loadModule = import("@/lib/payments/easypaisa");
     }
 
-    const module = await loadModule;
-    initiatePayment = module.initiatePayment;
+    const paymentModule = await loadModule;
+    initiatePayment = paymentModule.initiatePayment;
 
     const cInfo = customerInfo || { name: "Customer" };
     const result = await initiatePayment(amount, orderRef, cInfo);
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: false, error: result.message || "Payment initiation failed" }, { status: 500 });
   } catch (err) {
-    console.error("Payment initiation error:", err);
+    captureException(err, { module: "payments/initiate", function: "POST" });
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

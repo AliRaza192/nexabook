@@ -137,7 +137,7 @@ export default function OnboardingPage() {
             <CardHeader>
               <CardTitle className="text-2xl">Welcome to NexaBook! 🎉</CardTitle>
               <CardDescription className="text-base">
-                Let's set up your business in under 2 minutes. Start by telling us about your company.
+                Let&apos;s set up your business in under 2 minutes. Start by telling us about your company.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -275,7 +275,7 @@ export default function OnboardingPage() {
             <CardHeader>
               <CardTitle className="text-2xl">Create Your First Invoice</CardTitle>
               <CardDescription className="text-base">
-                You're almost done! Create your first invoice to see how everything works, or skip to the dashboard.
+                You&apos;re almost done! Create your first invoice to see how everything works, or skip to the dashboard.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -305,9 +305,9 @@ export default function OnboardingPage() {
               <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
                 <CheckCircle className="h-8 w-8 text-green-600" />
               </div>
-              <CardTitle className="text-2xl">You're All Set! 🚀</CardTitle>
+              <CardTitle className="text-2xl">You&apos;re All Set! 🚀</CardTitle>
               <CardDescription className="text-base">
-                Your business is ready to go. Here's what you've accomplished:
+                Your business is ready to go. Here&apos;s what you&apos;ve accomplished:
               </CardDescription>
             </CardHeader>
             <CardContent>

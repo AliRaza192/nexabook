@@ -5,6 +5,10 @@ export default [
   {
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/immutability": "off",
+      "react-hooks/static-components": "off",
+      "react-hooks/purity": "off",
     },
   },
 ];

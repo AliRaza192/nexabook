@@ -731,7 +731,7 @@ export default function BOMPage() {
                 No BOMs found
               </h3>
               <p className="text-nexabook-600 mb-6 max-w-xs mx-auto text-sm">
-                You haven't created any recipes yet. Define your production process to start manufacturing.
+                You haven&apos;t created any recipes yet. Define your production process to start manufacturing.
               </p>
               <Button
                 onClick={() => setAddDialogOpen(true)}

@@ -21,6 +21,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
 import { validateJournalBalance } from "../accounting";
 import { checkPeriodLocked } from "./fiscal-periods";
+import { captureException } from "@/lib/error-handler";
 
 // POS Shift interfaces
 export interface PosShift {
@@ -94,7 +95,7 @@ export async function getCurrentPosShift() {
 
     return { success: true, data: shift[0] };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "getCurrentPosShift" });
     return { success: false, error: "Failed to fetch shift" };
   }
 }
@@ -232,7 +233,7 @@ export async function startShift(openingAmount: number) {
     revalidatePath('/pos');
     return { success: true, data: shift, message: "Shift started successfully" };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "startShift" });
     return { success: false, error: "Failed to start shift" };
   }
 }
@@ -332,7 +333,7 @@ export async function endShift(actualCash: number, expectedCash: number) {
       data: { expectedCash, actualCash, variance }
     };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "endShift" });
     return { success: false, error: "Failed to end shift" };
   }
 }
@@ -630,7 +631,7 @@ export async function processPosSale(saleData: PosSaleData) {
       netAmount
     };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "processPosSale" });
     return { success: false, error: "Failed to process sale" };
   }
 }
@@ -690,7 +691,7 @@ export async function getPosCustomers(searchQuery?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "getPosCustomers" });
     return { success: false, error: "Failed to fetch customers" };
   }
 }
@@ -733,7 +734,7 @@ export async function getPosProducts(searchQuery?: string, categoryId?: string) 
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "getPosProducts" });
     return { success: false, error: "Failed to fetch products" };
   }
 }
@@ -755,7 +756,7 @@ export async function getPosCategories() {
 
     return { success: true, data: categories };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "getPosCategories" });
     return { success: false, error: "Failed to fetch categories" };
   }
 }
@@ -1044,7 +1045,7 @@ export async function generatePOSReport(
 
     return { success: true, data: reportData, message: `${reportType}-Report generated successfully` };
   } catch (error) {
-    console.error("Error generating POS report:", error);
+    captureException(error, { module: "pos", function: "generatePOSReport" });
     return { success: false, error: "Failed to generate POS report" };
   }
 }
@@ -1082,7 +1083,7 @@ export async function getPosShiftHistory() {
 
     return { success: true, data: shifts };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "getPosShiftHistory" });
     return { success: false, error: "Failed to fetch shift history" };
   }
 }
@@ -1173,7 +1174,7 @@ export async function getCurrentShiftDetails() {
       },
     };
   } catch (error) {
-    console.error("Error in pos.ts:", error);
+    captureException(error, { module: "pos", function: "getCurrentShiftDetails" });
     return { success: false, error: "Failed to fetch shift details" };
   }
 }

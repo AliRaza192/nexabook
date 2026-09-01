@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { webhookEndpoints, webhookDeliveries } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getCurrentOrgId } from "@/lib/actions/shared";
+import { captureException } from "@/lib/error-handler";
 
 export async function GET(request: NextRequest) {
   try {
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: endpoints });
   } catch (err) {
-    console.error("Webhook API error:", err);
+    captureException(err, { module: "webhooks", function: "GET" });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -73,7 +74,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: endpoint }, { status: 201 });
   } catch (err) {
-    console.error("Webhook API error:", err);
+    captureException(err, { module: "webhooks", function: "POST" });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

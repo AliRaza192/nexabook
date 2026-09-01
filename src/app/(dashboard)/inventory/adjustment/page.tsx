@@ -108,7 +108,7 @@ export default function StockAdjustmentPage() {
               {lines.length === 0 && (
                 <div className="text-center py-8 border-2 border-dashed rounded-lg">
                   <Package className="h-8 w-8 mx-auto mb-2 text-nexabook-300" />
-                  <p className="text-nexabook-500">No products added. Click "Add Product" to begin.</p>
+                  <p className="text-nexabook-500">No products added. Click &quot;Add Product&quot; to begin.</p>
                 </div>
               )}
 

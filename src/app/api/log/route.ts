@@ -1,23 +1,23 @@
 import { NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 export async function POST(request: Request) {
   try {
     const entry = await request.json();
+    const level = entry.level || "info";
+    const message = entry.message || "Client log";
+    const meta = entry.context || {};
 
-    // In production, this would forward to Sentry/DataDog/etc.
-    if (process.env.SENTRY_DSN) {
-      const { initSentry } = await import("@/lib/sentry");
-      const sentry = initSentry();
-      if (sentry && entry.level === "error") {
-        sentry.captureException(new Error(entry.message), {
-          extra: entry.context || {},
-        });
-      }
+    if (level === "error") {
+      logger.error(message, meta);
+    } else if (level === "warn") {
+      logger.warn(message, meta);
+    } else {
+      logger.info(message, meta);
     }
 
     return NextResponse.json({ ok: true });
-  } catch (error) {
-    console.error("Log API error:", error);
+  } catch {
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { recurringInvoices, recurringInvoiceItems, invoices, invoiceItems, customers } from "@/db/schema";
 import { eq, and, lte, sql } from "drizzle-orm";
+import { captureException } from "@/lib/error-handler";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -111,7 +112,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ success: true, generated: generated.length, details: generated });
   } catch (err) {
-    console.error("Recurring invoice cron error:", err);
+    captureException(err, { module: "recurring-invoices", function: "GET" });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

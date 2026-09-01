@@ -103,7 +103,7 @@ Execution order (each phase a separate command/file):
 | **W3-GATE** | Transaction tests: simulate partial failure mid-payment/payroll/POS → assert no partial rows (explicit rollback assertions) | Wave 4 starts |
 | **W4-GATE** | Every write path in a locked period rejects · FX JE applies exchangeRate (multi-currency test) · easypaisa callback rejects unsigned payload (fail-closed) | Wave 5 starts |
 | **W5-GATE** | Perf sanity: approveInvoice does ≤3 SQL COUNT/SUM queries not N+1 (assert via query log) | Wave 6 starts |
-| **W6-GATE** | `npm run lint` zero errors · coverage ≥ 40% baseline captured · `npm run build` + `npm run test` green | Part A gate |
+| **W6-GATE** | `npm run lint` zero errors · coverage ≥ 40% baseline captured · `npm run build` + `npm run test` green | Part A gate ✅ PASSED (2026-09-01) |
 
 ---
 
@@ -120,9 +120,9 @@ Execution order (each phase a separate command/file):
 
 ## 5. PART A DONE-GATE (explicit boundary — nothing in Part B starts before this)
 
-> **Waves 0-2 complete · `npm run build` green (exit 0) · all 9 P0 findings closed · JE-balance DB constraint (ACC-03) ACTIVE and verified · isolation tests (W1) + balance regression tests (W2) passing · `npm run test` full green.**
+> **Waves 0-6 complete · `npm run build` green (exit 0) · all 9 P0 findings closed · JE-balance DB constraint (ACC-03) ACTIVE and verified · isolation tests (W1) + balance regression tests (W2) passing · `npm run test` full green · `npm run lint` zero errors · coverage baseline captured.**
 >
-> A single gate record in `docs/plan/MASTER_PLAN.md` checklist must be signed off (dated + `npm run build` + `npm run test` outputs appended) before Part B Phase 1 is scheduled.
+> ✅ **PASSED 2026-09-01.** Gate record in `docs/plan/MASTER_PLAN.md` signed off. Part B Phase 1 is now scheduled.
 
 ---
 

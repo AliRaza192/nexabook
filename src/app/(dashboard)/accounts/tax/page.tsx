@@ -253,7 +253,7 @@ export default function TaxPage() {
           <CardContent className="p-12 text-center">
             <Calculator className="h-16 w-16 mx-auto mb-4 text-nexabook-200" />
             <h3 className="text-lg font-medium text-nexabook-700">No report generated</h3>
-            <p className="text-sm text-nexabook-500 mt-1">Select a period and click "Generate Tax Report"</p>
+            <p className="text-sm text-nexabook-500 mt-1">Select a period and click &quot;Generate Tax Report&quot;</p>
           </CardContent>
         </Card>
       )}

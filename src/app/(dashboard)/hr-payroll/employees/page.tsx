@@ -255,7 +255,7 @@ export default function EmployeesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Employee Management</h1>
-          <p className="text-slate-600 mt-1">Manage your organization's employees</p>
+          <p className="text-slate-600 mt-1">Manage your organization&apos;s employees</p>
         </div>
         <Button onClick={handleAddEmployee} className="bg-blue-600 hover:bg-blue-700">
           <Plus className="h-4 w-4 mr-2" />

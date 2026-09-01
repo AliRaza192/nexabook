@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { organizations, orgFteSubscriptions, digitalFteProducts } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { stripe } from "@/lib/stripe";
+import { captureException } from "@/lib/error-handler";
 
 type PlanType = "free" | "professional" | "enterprise";
 
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("Stripe webhook error:", error);
+    captureException(error, { module: "stripe/webhook", function: "POST" });
     return NextResponse.json({ error: "Webhook error" }, { status: 400 });
   }
 }

@@ -31,6 +31,7 @@ import { validateJournalBalance } from "../accounting";
 import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, requireRole } from "./shared";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { convertToBaseUnit, updateWarehouseStock, updateBatchStock } from "./inventory";
+import { captureException } from "@/lib/error-handler";
 
 
 // Generate journal entry number
@@ -73,7 +74,7 @@ export async function getVendors(searchQuery?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getVendors" });
     return { success: false, error: "Failed to fetch vendors" };
   }
 }
@@ -102,7 +103,7 @@ export async function createVendor(data: VendorFormData) {
     revalidatePath('/purchases/vendors');
     return { success: true, data: newVendor, message: "Vendor created successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "createVendor" });
     return { success: false, error: `Failed to create vendor: ${error instanceof Error ? error.message : "Please check all required fields and try again."}` };
   }
 }
@@ -131,7 +132,7 @@ export async function updateVendor(vendorId: string, data: Partial<VendorFormDat
     revalidatePath('/purchases/vendors');
     return { success: true, data: updatedVendor, message: "Vendor updated successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "updateVendor" });
     return { success: false, error: "Failed to update vendor" };
   }
 }
@@ -149,7 +150,7 @@ export async function deleteVendor(vendorId: string) {
     revalidatePath('/purchases/vendors');
     return { success: true, message: "Vendor deleted successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "deleteVendor" });
     return { success: false, error: "Failed to delete vendor" };
   }
 }
@@ -229,7 +230,7 @@ export async function getPurchaseInvoices(searchQuery?: string, statusFilter?: s
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getPurchaseInvoices" });
     return { success: false, error: "Failed to fetch purchase invoices" };
   }
 }
@@ -245,7 +246,7 @@ export async function getNextBillNumber() {
     }
     return { success: true, data: billNumber };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getNextBillNumber" });
     return { success: false, error: "Failed to generate bill number" };
   }
 }
@@ -328,7 +329,7 @@ export async function createPurchaseInvoice(data: PurchaseInvoiceFormData) {
       billNumber
     };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "createPurchaseInvoice" });
     return { success: false, error: "Failed to create purchase invoice" };
   }
 }
@@ -590,7 +591,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
 
     return result;
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "approvePurchaseInvoice" });
     return { success: false, error: error instanceof Error ? error.message : "Failed to approve invoice" };
   }
 }
@@ -751,7 +752,7 @@ export async function revisePurchaseInvoice(invoiceId: string) {
 
     return result;
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "revisePurchaseInvoice" });
     return { success: false, error: error instanceof Error ? error.message : "Failed to revise invoice" };
   }
 }
@@ -776,7 +777,7 @@ export async function getPurchaseInvoiceById(invoiceId: string) {
 
     return { success: true, data: { ...invoice, items } };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getPurchaseInvoiceById" });
     return { success: false, error: "Failed to fetch invoice" };
   }
 }
@@ -874,7 +875,7 @@ export async function recordExpense(data: ExpenseFormData) {
 
     return { success: true, data: newExpense, message: "Expense recorded successfully", entryNumber };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "recordExpense" });
     return { success: false, error: "Failed to record expense" };
   }
 }
@@ -912,7 +913,7 @@ export async function getExpenses(limit?: number) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getExpenses" });
     return { success: false, error: "Failed to fetch expenses" };
   }
 }
@@ -939,7 +940,7 @@ export async function getExpenseAccounts() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getExpenseAccounts" });
     return { success: false, error: "Failed to fetch expense accounts" };
   }
 }
@@ -966,7 +967,7 @@ export async function getCashBankAccounts() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getCashBankAccounts" });
     return { success: false, error: "Failed to fetch cash/bank accounts" };
   }
 }
@@ -998,7 +999,7 @@ export async function getNextPurchaseOrderNumber() {
     }
     return { success: true, data: number };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getNextPurchaseOrderNumber" });
     return { success: false, error: "Failed to generate purchase order number" };
   }
 }
@@ -1036,7 +1037,7 @@ export async function getPurchaseOrders(searchQuery?: string, statusFilter?: str
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getPurchaseOrders" });
     return { success: false, error: "Failed to fetch purchase orders" };
   }
 }
@@ -1052,7 +1053,7 @@ export async function getPurchaseOrderById(id: string) {
     const items = await db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, id));
     return { success: true, data: { ...po, items } };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getPurchaseOrderById" });
     return { success: false, error: "Failed to fetch purchase order" };
   }
 }
@@ -1136,7 +1137,7 @@ export async function createPurchaseOrder(data: PurchaseOrderFormData) {
     revalidatePath('/purchases/orders');
     return { success: true, data: newPO, message: "Purchase order created successfully", orderNumber };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "createPurchaseOrder" });
     return { success: false, error: "Failed to create purchase order" };
   }
 }
@@ -1202,7 +1203,7 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
     revalidatePath('/purchases/orders');
     return { success: true, data: updated, message: "Purchase order updated successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "updatePurchaseOrder" });
     return { success: false, error: "Failed to update purchase order" };
   }
 }
@@ -1230,7 +1231,7 @@ export async function approvePurchaseOrder(id: string) {
     revalidatePath('/purchases/orders');
     return { success: true, message: "Purchase order approved successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "approvePurchaseOrder" });
     return { success: false, error: "Failed to approve purchase order" };
   }
 }
@@ -1252,7 +1253,7 @@ export async function deletePurchaseOrder(id: string) {
     revalidatePath('/purchases/orders');
     return { success: true, message: "Purchase order deleted successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "deletePurchaseOrder" });
     return { success: false, error: "Failed to delete purchase order" };
   }
 }
@@ -1280,7 +1281,7 @@ export async function getNextGRNNumber() {
     }
     return { success: true, data: number };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getNextGRNNumber" });
     return { success: false, error: "Failed to generate GRN number" };
   }
 }
@@ -1316,7 +1317,7 @@ export async function getGoodReceivingNotes(searchQuery?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getGoodReceivingNotes" });
     return { success: false, error: "Failed to fetch GRNs" };
   }
 }
@@ -1391,7 +1392,7 @@ export async function createGRN(data: GRNFormData) {
     revalidatePath('/inventory');
     return { success: true, data: result, message: "GRN created and stock updated successfully", grnNumber };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "createGRN" });
     return { success: false, error: "Failed to create GRN" };
   }
 }
@@ -1453,7 +1454,7 @@ export async function updateGRN(id: string, data: Partial<GRNFormData>) {
     revalidatePath('/inventory');
     return { success: true, data: result.data, message: "GRN updated successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "updateGRN" });
     return { success: false, error: "Failed to update GRN" };
   }
 }
@@ -1487,7 +1488,7 @@ export async function deleteGRN(id: string) {
     revalidatePath('/inventory');
     return { success: true, message: "GRN deleted and stock reversed successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "deleteGRN" });
     return { success: false, error: "Failed to delete GRN" };
   }
 }
@@ -1529,7 +1530,7 @@ export async function getNextPurchaseReturnNumber() {
     const number = await generatePurchaseReturnNumber(orgId);
     return { success: true, data: number };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getNextPurchaseReturnNumber" });
     return { success: false, error: "Failed to generate purchase return number" };
   }
 }
@@ -1567,7 +1568,7 @@ export async function getPurchaseReturns(searchQuery?: string, statusFilter?: st
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getPurchaseReturns" });
     return { success: false, error: "Failed to fetch purchase returns" };
   }
 }
@@ -1616,7 +1617,7 @@ export async function createPurchaseReturn(data: PurchaseReturnFormData) {
     revalidatePath('/purchases/returns');
     return { success: true, data: newReturn, message: "Purchase return created (pending approval)" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "createPurchaseReturn" });
     return { success: false, error: "Failed to create purchase return" };
   }
 }
@@ -1723,7 +1724,7 @@ export async function approvePurchaseReturn(id: string) {
     revalidatePath('/inventory');
     return { success: true, message: "Purchase return approved - stock reduced and debit note created" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "approvePurchaseReturn" });
     return { success: false, error: "Failed to approve purchase return" };
   }
 }
@@ -1788,7 +1789,7 @@ export async function getVendorPayments(searchQuery?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getVendorPayments" });
     return { success: false, error: "Failed to fetch vendor payments" };
   }
 }
@@ -1925,7 +1926,7 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
     revalidatePath('/purchases/invoices');
     return { success: true, data: newPayment, message: "Vendor payment recorded successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "createVendorPayment" });
     return { success: false, error: "Failed to record vendor payment" };
   }
 }
@@ -1952,7 +1953,7 @@ export async function allocateVendorPayment(paymentId: string, allocations: Arra
     revalidatePath('/purchases/payments');
     return { success: true, message: "Payment allocated successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "allocateVendorPayment" });
     return { success: false, error: "Failed to allocate payment" };
   }
 }
@@ -1997,7 +1998,7 @@ export async function getVendorOutstandingInvoices(vendorId: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "getVendorOutstandingInvoices" });
     return { success: false, error: "Failed to fetch outstanding invoices" };
   }
 }
@@ -2081,7 +2082,7 @@ export async function createVendorSettlement(data: {
     revalidatePath('/purchases/settlement');
     return { success: true, data: newSettlement, message: "Vendor settlement completed successfully" };
   } catch (error) {
-    console.error("Error in purchases.ts:", error);
+    captureException(error, { module: "purchases.ts", function: "createVendorSettlement" });
     return { success: false, error: "Failed to create vendor settlement" };
   }
 }
@@ -2182,7 +2183,7 @@ export async function duplicatePurchaseInvoice(invoiceId: string) {
       message: `Purchase invoice duplicated as ${newBillNumber}`,
     };
   } catch (error) {
-    console.error('Failed to duplicate purchase invoice:', error);
+    captureException(error, { module: "purchases.ts", function: "duplicatePurchaseInvoice" });
     return { success: false, error: "Failed to duplicate purchase invoice" };
   }
 }

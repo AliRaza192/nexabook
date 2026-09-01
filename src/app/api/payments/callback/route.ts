@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { paymentTransactions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { computeSecureHash } from "@/lib/payments/hash";
+import { captureException } from "@/lib/error-handler";
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,10 +30,7 @@ export async function POST(request: NextRequest) {
       const computedHash = computeSecureHash(jazzcashSalt, paramsForVerification);
 
       if (computedHash.toLowerCase() !== receivedHash.toLowerCase()) {
-        console.error("[Payment Callback] Signature mismatch — possible forged callback", {
-          orderRef,
-          gateway,
-        });
+        captureException(new Error("Payment callback signature mismatch"), { module: "payments/callback", function: "POST", orderRef, gateway });
         return NextResponse.redirect(new URL("/dashboard?payment=failed&reason=invalid_signature", request.url));
       }
     } else if (gateway === "jazzcash" && !jazzcashSalt) {
@@ -45,10 +43,7 @@ export async function POST(request: NextRequest) {
       const computedHash = computeSecureHash(easypaisaSalt, paramsForVerification);
 
       if (computedHash.toLowerCase() !== receivedHash.toLowerCase()) {
-        console.error("[Payment Callback] Easypaisa signature mismatch — possible forged callback", {
-          orderRef,
-          gateway,
-        });
+        captureException(new Error("Easypaisa payment callback signature mismatch"), { module: "payments/callback", function: "POST", orderRef, gateway });
         return NextResponse.redirect(new URL("/dashboard?payment=failed&reason=invalid_signature", request.url));
       }
     } else if (gateway === "easypaisa" && !easypaisaSalt) {
@@ -87,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.redirect(redirectUrl);
   } catch (err) {
-    console.error("Payment callback error:", err);
+    captureException(err, { module: "payments/callback", function: "POST" });
     return NextResponse.redirect(new URL("/dashboard?payment=error", request.url));
   }
 }

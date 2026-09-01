@@ -224,7 +224,7 @@ export default function GeneralLedgerReportPage() {
         <Card className="enterprise-card">
           <CardContent className="py-16 text-center">
             <BookOpen className="h-14 w-14 text-nexabook-300 mx-auto mb-4" />
-            <p className="text-nexabook-600">Select an account and click "Show Ledger"</p>
+            <p className="text-nexabook-600">Select an account and click &quot;Show Ledger&quot;</p>
           </CardContent>
         </Card>
       )}

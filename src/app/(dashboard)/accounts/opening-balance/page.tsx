@@ -249,8 +249,8 @@ export default function OpeningBalancePage() {
             <CardTitle className="text-lg">Manual Entry</CardTitle>
             <CardDescription>
               Enter account-wise opening balances. Debits (assets) and credits
-              (liabilities/equity) are auto-balanced with "Opening Balance
-              Equity" account.
+              (liabilities/equity) are auto-balanced with &quot;Opening Balance
+              Equity&quot; account.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -439,7 +439,7 @@ export default function OpeningBalancePage() {
                   <strong>How it works:</strong> Enter debit balances for assets
                   (Cash, Bank, AR, Inventory, etc.) and credit balances for
                   liabilities/equity (AP, Loans, etc.). The system automatically
-                  adds the balancing line to "Opening Balance Equity" account.
+                  adds the balancing line to &quot;Opening Balance Equity&quot; account.
                 </p>
                 <p>
                   For customer/vendor opening balances, set them directly in

@@ -5,6 +5,7 @@ import { webhookEndpoints, webhookDeliveries } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { validateCsrf } from "@/lib/csrf";
 import { getCurrentOrgId } from "@/lib/actions/shared";
+import { captureException } from "@/lib/error-handler";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -41,7 +42,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({ success: true, data: updated });
   } catch (err) {
-    console.error("Webhook API error:", err);
+    captureException(err, { module: "webhooks/[id]", function: "PUT" });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -69,7 +70,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("Webhook API error:", err);
+    captureException(err, { module: "webhooks/[id]", function: "DELETE" });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
