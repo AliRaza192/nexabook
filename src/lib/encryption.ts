@@ -5,7 +5,13 @@ const ALGORITHM = "aes-256-gcm";
 function getEncryptionKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
   if (!key) {
-    // Fallback: derive from a default (for dev only — set ENCRYPTION_KEY in production)
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "ENCRYPTION_KEY environment variable is required in production. " +
+        "Set it to a 64-character hex string (32 bytes)."
+      );
+    }
+    // Dev-only fallback — never use in production
     return crypto.scryptSync("nexabook-default-dev-key", "salt", 32);
   }
   return Buffer.from(key, "hex");

@@ -53,7 +53,7 @@ No `Dr Cash/Bank, Cr AR` is created for the received portion. A separate `create
 - `approveInvoice` reads `invoice.receivedAmount` at `sales.ts:862` but never uses it in JE construction
 - `createCustomerPayment` (correct pattern) exists at `sales.ts:3350-3375` but is never called from invoice flow
 
-**Dependencies:** None — standalone fix in `approveInvoice`.
+**Dependencies:** Requires centralized posting engine (Wave 7b). The cash line must be added atomically with the rest of the invoice JE.
 
 ---
 
@@ -129,9 +129,7 @@ No `Dr Cash/Bank, Cr AR` is created for the received portion. A separate `create
 - No guard: `approvePurchaseInvoice` never queries `goodReceivingNotes` or checks if GRN already received stock
 - GRN stores `purchaseInvoiceId`: `purchases.ts:1345` — but this link is never checked by invoice approval
 
-**Dependencies:** Architecture decision needed — either:
-  - (A) GRN does NOT increment stock; only invoice approval does (simpler, recommended)
-  - (B) Invoice approval checks if GRN already received and skips stock increment (three-way match)
+**Dependencies:** Architecture decision — **Option A chosen** (GRN does NOT increment stock; only invoice approval does). No live tenants exist yet, keep simple. Revisit three-way-match (Option B) later when enterprise customers need it. Fix: remove stock mutation from `createGRN` (`purchases.ts:1364-1369`).
 
 ---
 
@@ -268,22 +266,23 @@ NB-P0-05  purchase return inventory reversal ─────┘
 **Critical path:**
 
 ```
-Posting engine foundation (new)
-  ├─ NB-P0-01  invoice received-amount
-  ├─ NB-P0-03  settlement JE
-  ├─ NB-P0-04  sales return COGS
-  ├─ NB-P0-05  purchase return inventory
-  └─ NB-P0-02  customer balance derivation
-
-In parallel with posting engine:
-  ├─ NB-P0-06  GRN/invoice dedup
-  ├─ NB-P0-07  stock count JE
+Wave 7a (standalone, parallel) ────────────────────────────── all ⚡
+  ├─ NB-P0-13  encryption key fail-closed          [FIRST - safety net]
+  ├─ NB-P0-09  posted JE immutability              [FIRST - safety net]
+  ├─ NB-P0-11  account tenant ownership
+  ├─ NB-P0-12  wire Zod validation
   ├─ NB-P0-08  stock adjustment approval
-  ├─ NB-P0-09  JE immutability
-  ├─ NB-P0-10  invoice void lifecycle
-  ├─ NB-P0-11  account tenant check
-  ├─ NB-P0-12  wire Zod schemas
-  └─ NB-P0-13  encryption key
+  ├─ NB-P0-07  stock count JE
+  ├─ NB-P0-06  GRN/invoice dedup (Option A)
+  └─ NB-P0-10  invoice void lifecycle
+
+Wave 7b (serial, after 7a) ────────────────────────────────── 🔗
+  Posting engine foundation (new)
+    ├─ NB-P0-01  invoice received-amount JE
+    ├─ NB-P0-03  settlement JE
+    ├─ NB-P0-04  sales return COGS reversal
+    ├─ NB-P0-05  purchase return inventory reversal
+    └─ NB-P0-02  customer balance derivation
 ```
 
 ---
@@ -292,20 +291,24 @@ In parallel with posting engine:
 
 ### Wave 7a — Standalone fixes (parallel, no shared dependency)
 
-| Fix | Scope | Est. |
-|---|---|---|
-| NB-P0-13 | `encryption.ts` — throw if key missing in prod | 0.5h |
-| NB-P0-09 | `accounts.ts:deleteJournalEntry` — reject if status = "posted" | 0.5h |
-| NB-P0-11 | `accounts.ts:createJournalEntry` — add org ownership check per line | 1h |
-| NB-P0-12 | Wire `validations.ts` schemas into all action entry points | 2h |
-| NB-P0-08 | `inventory-depth.ts` — move stock mutation from create to approve | 1.5h |
-| NB-P0-07 | `stock-count.ts` — actually insert the JE (with account lookup) | 1.5h |
-| NB-P0-06 | `purchases.ts` — GRN/invoice stock dedup guard | 1.5h |
-| NB-P0-10 | `sales.ts` — void lifecycle instead of physical delete | 2h |
+**Execution order:** Safety nets first (NB-P0-13, NB-P0-09), then remaining 6 in any order.
+
+| Order | Fix | Scope | Est. |
+|---|---|---|---|
+| 1 | NB-P0-13 | `encryption.ts` — throw if key missing in prod | 0.5h |
+| 2 | NB-P0-09 | `accounts.ts:deleteJournalEntry` — reject if status = "posted" | 0.5h |
+| 3 | NB-P0-11 | `accounts.ts:createJournalEntry` — add org ownership check per line | 1h |
+| 4 | NB-P0-12 | Wire `validations.ts` schemas into all action entry points | 2h |
+| 5 | NB-P0-08 | `inventory-depth.ts` — move stock mutation from create to approve | 1.5h |
+| 6 | NB-P0-07 | `stock-count.ts` — actually insert the JE (with account lookup) | 1.5h |
+| 7 | NB-P0-06 | `purchases.ts` — remove GRN stock increment (Option A) | 1.5h |
+| 8 | NB-P0-10 | `sales.ts` — void lifecycle instead of physical delete | 2h |
 
 **Parallel batch total: ~10.5h**
 
 ### Wave 7b — Posting engine + dependent fixes (serial)
+
+**Extra scrutiny:** After building `posting-engine.ts`, write a test proving it produces IDENTICAL journal entries to the current `approveInvoice`/`approvePurchaseInvoice` logic for a plain invoice with no received amount. This isolates "did I preserve existing behavior" from "did I add new behavior" as two separate, separately-verifiable steps.
 
 | Fix | Scope | Est. |
 |---|---|---|
@@ -323,7 +326,7 @@ In parallel with posting engine:
 | Test | Scope | Est. |
 |---|---|---|
 | Financial invariant tests | Invoice JE balance, payment JE balance, return JE balance, settlement JE balance | 3h |
-| GRN/invoice dedup test | GRN→Invoice workflow produces correct stock | 1h |
+| GRN/invoice dedup test | GRN→Invoice workflow: GRN does NOT add stock, only invoice approval does | 1h |
 | Stock adjustment lifecycle | Create(pending)→Approve→JE posted | 1h |
 | Void lifecycle | Posted invoice → voided → reversal JE exists | 1h |
 | Tenant isolation | Account IDs from other org rejected | 1h |
