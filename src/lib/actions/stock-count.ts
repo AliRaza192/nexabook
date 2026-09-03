@@ -8,11 +8,13 @@ import {
   products,
   journalEntries,
   journalEntryLines,
+  chartOfAccounts,
 } from "@/db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
+import { validateJournalBalance } from "../accounting";
 
 // ==========================================
 // TYPES
@@ -383,9 +385,55 @@ export async function completeStockCount(stockCountId: string) {
     }
 
     // Create journal entry if there are variances
-    // Note: In a real implementation, you'd look up actual account IDs from the chart of accounts
-    // For now, we'll skip journal entry creation and note it in the response
-    const journalEntryCreated = journalLineItems.length > 0;
+    let journalEntryCreated = false;
+    if (journalLineItems.length > 0) {
+      const [invAccount] = await db
+        .select()
+        .from(chartOfAccounts)
+        .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, "inventory")))
+        .limit(1);
+      const [adjAccount] = await db
+        .select()
+        .from(chartOfAccounts)
+        .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, "inventory_adjustment_income")))
+        .limit(1);
+
+      if (invAccount && adjAccount) {
+        const resolvedLines = journalLineItems.map((l) => ({
+          ...l,
+          accountId: l.accountId === "inventory_asset" ? invAccount.id : adjAccount.id,
+        }));
+
+        if (validateJournalBalance(resolvedLines.map((l) => ({
+          debitAmount: l.debit || "0",
+          creditAmount: l.credit || "0",
+        })))) {
+          const [je] = await db.insert(journalEntries).values({
+            orgId,
+            entryNumber: `SC-${Date.now()}`,
+            entryDate: new Date(),
+            description: `Stock count adjustment: ${count.countNumber}`,
+            referenceType: "stock_count",
+            referenceId: stockCountId,
+            status: "posted",
+            postedAt: new Date(),
+            sourceType: "inventory",
+          }).returning();
+
+          for (const line of resolvedLines) {
+            await db.insert(journalEntryLines).values({
+              orgId,
+              journalEntryId: je.id,
+              accountId: line.accountId,
+              description: line.description,
+              debitAmount: line.debit || "0",
+              creditAmount: line.credit || "0",
+            });
+          }
+          journalEntryCreated = true;
+        }
+      }
+    }
 
     // Update stock count status to completed
     await db
