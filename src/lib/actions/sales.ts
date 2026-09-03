@@ -45,6 +45,7 @@ import {
   updateBatchStock,
 } from "./inventory";
 import { captureException } from "@/lib/error-handler";
+import { validate, createCustomerSchema, createInvoiceSchema } from "@/lib/validations";
 
 // ==================== CUSTOMER ACTIONS ====================
 
@@ -165,9 +166,8 @@ export async function createCustomer(data: CustomerFormData) {
       return { success: false, error: "No organization found" };
     }
 
-    if (!data.name) {
-      return { success: false, error: "Customer name is required" };
-    }
+    const validation = validate(createCustomerSchema, data);
+    if (!validation.success) return { success: false, error: validation.error };
 
     const [newCustomer] = await db
       .insert(customers)
@@ -722,6 +722,9 @@ export async function createInvoice(data: InvoiceFormData) {
     if (!orgId) {
       return { success: false, error: "No organization found" };
     }
+
+    const validation = validate(createInvoiceSchema, data);
+    if (!validation.success) return { success: false, error: validation.error };
 
     if (!data.customerId || !data.items.length) {
       return {

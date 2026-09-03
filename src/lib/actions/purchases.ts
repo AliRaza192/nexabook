@@ -32,6 +32,7 @@ import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, re
 import { checkPeriodLocked } from "./fiscal-periods";
 import { convertToBaseUnit, updateWarehouseStock, updateBatchStock } from "./inventory";
 import { captureException } from "@/lib/error-handler";
+import { validate, createVendorSchema } from "@/lib/validations";
 
 
 // Generate journal entry number
@@ -83,7 +84,9 @@ export async function createVendor(data: VendorFormData) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    if (!data.name) return { success: false, error: "Vendor name is required" };
+
+    const validation = validate(createVendorSchema, data);
+    if (!validation.success) return { success: false, error: validation.error };
 
     const [newVendor] = await db
       .insert(vendors)

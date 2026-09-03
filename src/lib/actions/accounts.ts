@@ -2,6 +2,8 @@
 
 import { db } from "@/db";
 import { chartOfAccounts, organizations, profiles, journalEntries, journalEntryLines, auditLogs, invoices, invoiceItems, purchaseInvoices, purchaseItems } from "@/db/schema";
+import { validate, createInvoiceSchema, createCustomerSchema, createVendorSchema } from "@/lib/validations";
+import { z } from "zod";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
@@ -237,6 +239,22 @@ export async function createJournalEntry(data: JournalEntryData) {
   if (!orgId) {
     return { success: false, error: "No organization found" };
   }
+
+  // Validate input shape
+  const validation = validate(
+    z.object({
+      date: z.string().min(1, "Date is required"),
+      description: z.string().optional(),
+      lines: z.array(z.object({
+        accountId: z.string().uuid("Invalid account ID"),
+        description: z.string().optional(),
+        debit: z.string().optional(),
+        credit: z.string().optional(),
+      })).min(2, "At least two journal entry lines required"),
+    }),
+    data
+  );
+  if (!validation.success) return { success: false, error: validation.error };
 
   if (data.date) {
     const locked = await checkPeriodLocked(new Date(data.date));
