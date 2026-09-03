@@ -36,7 +36,19 @@ export default function StockAdjustmentPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      const [prodRes, adjRes] = await Promise.all([
+        getProductsForStockAdjustment(),
+        getStockAdjustments(),
+      ]);
+      if (prodRes.success) setProducts(prodRes.data || []);
+      if (adjRes.success) setAdjustments(adjRes.data || []);
+      setLoading(false);
+    };
+    loadData();
+  }, []);
 
   const addLine = () => setLines([...lines, { productId: "", adjustedQuantity: "", notes: "" }]);
   const removeLine = (idx: number) => setLines(lines.filter((_, i) => i !== idx));

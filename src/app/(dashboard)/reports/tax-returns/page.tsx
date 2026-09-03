@@ -43,7 +43,13 @@ export default function TaxReturnsPage() {
   };
 
   useEffect(() => {
-    loadReturns();
+    const loadInitial = async () => {
+      setLoading(true);
+      const result = await getTaxReturns();
+      if (result.success) setReturns(result.data || []);
+      setLoading(false);
+    };
+    loadInitial();
   }, []);
 
   const handleGenerate = async () => {

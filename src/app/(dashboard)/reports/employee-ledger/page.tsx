@@ -22,20 +22,6 @@ export default function EmployeeLedgerPage() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
-  const loadEmployees = async () => {
-    try {
-      const result = await getEmployees();
-      if (result.success && result.data) {
-        setEmployees(result.data);
-        if (result.data.length > 0) {
-          setSelectedEmployee(result.data[0].id);
-        }
-      }
-    } catch (error) {
-      // silently handle
-    }
-  };
-
   const loadReport = async () => {
     if (!selectedEmployee) return;
     setLoading(true);
@@ -51,12 +37,38 @@ export default function EmployeeLedgerPage() {
   };
 
   useEffect(() => {
+    const loadEmployees = async () => {
+      try {
+        const result = await getEmployees();
+        if (result.success && result.data) {
+          setEmployees(result.data);
+          if (result.data.length > 0) {
+            setSelectedEmployee(result.data[0].id);
+          }
+        }
+      } catch (error) {
+        // silently handle
+      }
+    };
     loadEmployees();
   }, []);
 
   useEffect(() => {
+    const loadReportData = async () => {
+      if (!selectedEmployee) return;
+      setLoading(true);
+      try {
+        const result = await getEmployeeLedgerReport(selectedEmployee, selectedMonth, selectedYear);
+        if (result.success && result.data) {
+          setReportData(result.data);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     if (selectedEmployee) {
-      loadReport();
+      loadReportData();
     }
   }, [selectedEmployee, selectedMonth, selectedYear]);
 

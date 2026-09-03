@@ -77,7 +77,24 @@ export default function GRNPage() {
     } catch (error) {} finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(); }, [searchQuery]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const res = await getGoodReceivingNotes(searchQuery);
+        if (res.success && res.data) {
+          const data = res.data as GRN[];
+          setGRNs(data);
+          const today = new Date().toDateString();
+          const grnsToday = data.filter(g => new Date(g.receivingDate).toDateString() === today).length;
+          const pendingInspection = data.filter(g => g.status === 'received' || g.status === 'inspected').length;
+          const accepted = data.filter(g => g.status === 'accepted').length;
+          setStats({ grnsToday, pendingInspection, accepted });
+        }
+      } catch (error) {} finally { setLoading(false); }
+    };
+    loadData();
+  }, [searchQuery]);
 
   const formatCurrency = (v: string | null) => v ? formatPKR(parseFloat(v), 'south-asian') : formatPKR(0, 'south-asian');
   const formatDate = (d: Date | null) => d ? new Date(d).toLocaleDateString("en-PK", { year: "numeric", month: "short", day: "numeric" }) : "N/A";

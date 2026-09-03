@@ -108,6 +108,31 @@ export default function TicketsPage() {
   };
 
   useEffect(() => {
+    const loadTickets = async () => {
+      setLoading(true);
+      try {
+        const result = await getTickets(searchQuery, statusFilter, priorityFilter);
+        if (result.success && result.data) {
+          setTickets(result.data as TicketData[]);
+        }
+      } catch (error) {
+        // silently fail
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const loadStats = async () => {
+      try {
+        const result = await getTicketStats();
+        if (result.success && result.data) {
+          setStats(result.data);
+        }
+      } catch (error) {
+        // silently fail
+      }
+    };
+
     loadTickets();
     loadStats();
   }, [searchQuery, statusFilter, priorityFilter]);

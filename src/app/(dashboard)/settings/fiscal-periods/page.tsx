@@ -25,7 +25,9 @@ export default function FiscalPeriodsPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadPeriods(); }, []);
+  useEffect(() => {
+    loadPeriods();
+  }, []);
 
   const handleCreate = async () => {
     if (!form.name || !form.startDate || !form.endDate) return;

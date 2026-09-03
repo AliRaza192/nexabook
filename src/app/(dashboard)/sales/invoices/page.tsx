@@ -180,33 +180,32 @@ export default function InvoicesPage() {
   const [whatsappDialogOpen, setWhatsappDialogOpen] = useState(false);
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
 
-  // Load invoices and stats
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [invoicesRes, statsRes] = await Promise.all([
-        getInvoices(searchQuery, statusFilter === "all" ? undefined : statusFilter, { page, pageSize }),
-        getInvoiceStats(),
-      ]);
-
-      if (invoicesRes.success && invoicesRes.data) {
-        setInvoices(invoicesRes.data as Invoice[]);
-      }
-      if (invoicesRes.pagination) {
-        setTotalPages(invoicesRes.pagination.totalPages);
-        setTotalItems(invoicesRes.pagination.total);
-      }
-
-      if (statsRes.success && statsRes.data) {
-        setStats(statsRes.data);
-      }
-    } catch (error) {
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const [invoicesRes, statsRes] = await Promise.all([
+          getInvoices(searchQuery, statusFilter === "all" ? undefined : statusFilter, { page, pageSize }),
+          getInvoiceStats(),
+        ]);
+
+        if (invoicesRes.success && invoicesRes.data) {
+          setInvoices(invoicesRes.data as Invoice[]);
+        }
+        if (invoicesRes.pagination) {
+          setTotalPages(invoicesRes.pagination.totalPages);
+          setTotalItems(invoicesRes.pagination.total);
+        }
+
+        if (statsRes.success && statsRes.data) {
+          setStats(statsRes.data);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadData();
   }, [searchQuery, statusFilter, page]);
 

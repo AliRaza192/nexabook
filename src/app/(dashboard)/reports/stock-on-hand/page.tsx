@@ -13,22 +13,21 @@ export default function StockOnHandReportPage() {
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<any>(null);
 
-  const loadReport = async () => {
-    setLoading(true);
-    try {
-      const result = await getStockOnHandReport();
-      if (result.success && result.data) {
-        setReportData(result.data);
-      } else {
-        // Error handled silently
-      }
-    } catch (error) {
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const loadReport = async () => {
+      setLoading(true);
+      try {
+        const result = await getStockOnHandReport();
+        if (result.success && result.data) {
+          setReportData(result.data);
+        } else {
+          // Error handled silently
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadReport();
   }, []);
 

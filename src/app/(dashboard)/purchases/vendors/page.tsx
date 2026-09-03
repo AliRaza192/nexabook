@@ -272,6 +272,25 @@ export default function VendorsPage() {
   };
 
   useEffect(() => {
+    const loadVendors = async () => {
+      setLoading(true);
+      try {
+        const vendorsRes = await getVendors(searchQuery);
+        if (vendorsRes.success && vendorsRes.data) {
+          const vendorData = vendorsRes.data as Vendor[];
+          setVendors(vendorData);
+
+          const totalVendors = vendorData.length;
+          const activeVendors = vendorData.filter(v => v.isActive).length;
+          const totalPayable = vendorData.reduce((sum, v) => sum + parseFloat(v.balance || '0'), 0);
+
+          setStats({ totalVendors, activeVendors, totalPayable });
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadVendors();
   }, [searchQuery]);
 

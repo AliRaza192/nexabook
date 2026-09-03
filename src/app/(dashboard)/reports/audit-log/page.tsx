@@ -44,22 +44,21 @@ export default function AuditTrailPage() {
   const [selectedLog, setSelectedLog] = useState<any>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const loadAuditTrail = async () => {
-    setLoading(true);
-    try {
-      const result = await getAuditTrail(undefined, undefined, entityFilter === "all" ? undefined : entityFilter);
-      if (result.success && result.data) {
-        setAuditLogs(result.data);
-      } else {
-        // Error handled silently
-      }
-    } catch (error) {
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const loadAuditTrail = async () => {
+      setLoading(true);
+      try {
+        const result = await getAuditTrail(undefined, undefined, entityFilter === "all" ? undefined : entityFilter);
+        if (result.success && result.data) {
+          setAuditLogs(result.data);
+        } else {
+          // Error handled silently
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadAuditTrail();
   }, [entityFilter]);
 

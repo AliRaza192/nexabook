@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -74,7 +74,7 @@ export default function LeaveManagementPage() {
   const [formNotes, setFormNotes] = useState("");
 
   // Load data
-  const loadData = useCallback(async () => {
+  const loadData = async () => {
     setLoading(true);
     
     const [appsRes, typesRes, employeesRes] = await Promise.all([
@@ -94,11 +94,11 @@ export default function LeaveManagementPage() {
     }
     
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, []);
 
   // Load leave balance when employee is selected
   useEffect(() => {

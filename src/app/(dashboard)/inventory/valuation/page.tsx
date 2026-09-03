@@ -28,7 +28,19 @@ export default function StockValuationPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      const [valRes, currRes] = await Promise.all([
+        getStockValuations(),
+        getCurrentInventoryValue(),
+      ]);
+      if (valRes.success) setValuations(valRes.data || []);
+      if (currRes.success) setCurrentValue(currRes.data || {});
+      setLoading(false);
+    };
+    loadData();
+  }, []);
 
   const handleRunValuation = async (method: "fifo" | "weighted_average") => {
     setRunning(true);

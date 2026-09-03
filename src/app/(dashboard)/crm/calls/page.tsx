@@ -127,6 +127,31 @@ export default function CallsPage() {
   };
 
   useEffect(() => {
+    const loadCalls = async () => {
+      setLoading(true);
+      try {
+        const result = await getCrmCalls(searchQuery, typeFilter, outcomeFilter);
+        if (result.success && result.data) {
+          setCalls(result.data as CrmCallData[]);
+        }
+      } catch (error) {
+        // silently fail
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const loadStats = async () => {
+      try {
+        const result = await getCallStats();
+        if (result.success && result.data) {
+          setStats(result.data);
+        }
+      } catch (error) {
+        // silently fail
+      }
+    };
+
     loadCalls();
     loadStats();
   }, [searchQuery, typeFilter, outcomeFilter]);

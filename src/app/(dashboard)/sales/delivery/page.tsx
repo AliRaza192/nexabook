@@ -58,7 +58,20 @@ export default function DeliveryPage() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(); }, [searchQuery, statusFilter]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const res = await getDeliveryNotes(searchQuery, statusFilter === "all" ? undefined : statusFilter);
+        if (res.success && res.data) {
+          setDeliveries(res.data as Delivery[]);
+          const d = res.data as Delivery[];
+          setStats({ pending: d.filter(x => x.status === 'pending').length, delivered: d.filter(x => x.status === 'delivered').length, inTransit: d.filter(x => x.status === 'in_transit' || x.status === 'dispatched').length });
+        }
+      } finally { setLoading(false); }
+    };
+    loadData();
+  }, [searchQuery, statusFilter]);
 
   const handleStatusChange = async (id: string, status: string) => {
     const res = await updateDeliveryStatus(id, status as Parameters<typeof updateDeliveryStatus>[1]);

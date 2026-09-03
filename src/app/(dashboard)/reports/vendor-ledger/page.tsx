@@ -24,20 +24,6 @@ export default function VendorLedgerPage() {
     dateTo: new Date().toISOString().split("T")[0],
   });
 
-  const loadVendors = async () => {
-    try {
-      const result = await getVendors();
-      if (result.success && result.data) {
-        setVendors(result.data);
-        if (result.data.length > 0) {
-          setSelectedVendor(result.data[0].id);
-        }
-      }
-    } catch (error) {
-      // silently handle
-    }
-  };
-
   const loadReport = async (reportFilters: ReportFilters) => {
     if (!selectedVendor) return;
     setLoading(true);
@@ -54,12 +40,38 @@ export default function VendorLedgerPage() {
   };
 
   useEffect(() => {
-    loadVendors();
+    const loadInitial = async () => {
+      try {
+        const result = await getVendors();
+        if (result.success && result.data) {
+          setVendors(result.data);
+          if (result.data.length > 0) {
+            setSelectedVendor(result.data[0].id);
+          }
+        }
+      } catch (error) {
+        // silently handle
+      }
+    };
+    loadInitial();
   }, []);
 
   useEffect(() => {
+    const loadInitialReport = async () => {
+      if (!selectedVendor) return;
+      setLoading(true);
+      try {
+        const result = await getVendorLedgerReport(selectedVendor, filters.dateFrom, filters.dateTo);
+        if (result.success && result.data) {
+          setReportData(result.data);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     if (selectedVendor) {
-      loadReport(filters);
+      loadInitialReport();
     }
   }, [selectedVendor]);
 

@@ -55,7 +55,28 @@ export default function BankingPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, [searchQuery]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      const [accRes, depRes, transRes, miscRes, cashRes] = await Promise.all([
+        getBankAccounts(searchQuery),
+        getBankDeposits(searchQuery),
+        getFundsTransfers(searchQuery),
+        getMiscContacts(searchQuery),
+        getAccountsForDropdown(searchQuery),
+      ]);
+      if (accRes.success) setBankAccounts(accRes.data || []);
+      if (depRes.success) setDeposits(depRes.data || []);
+      if (transRes.success) setTransfers(transRes.data || []);
+      if (miscRes.success) setMiscContacts(miscRes.data || []);
+      if (cashRes.success) {
+        // Filter to get only cash accounts
+        setCashAccounts((cashRes.data || []).filter((a: any) => a.accountType === 'cash'));
+      }
+      setLoading(false);
+    };
+    loadData();
+  }, [searchQuery]);
 
   const openDialog = (key: string) => setDialogOpen(prev => ({ ...prev, [key]: true }));
   const closeDialog = (key: string) => setDialogOpen(prev => ({ ...prev, [key]: false }));

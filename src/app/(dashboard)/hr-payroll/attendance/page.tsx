@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Calendar,
@@ -59,36 +59,40 @@ export default function AttendancePage() {
 
   // Load employees
   useEffect(() => {
+    const loadEmployees = async () => {
+      setLoading(true);
+      try {
+        const result = await getEmployees("Active");
+        if (result.success && result.data) {
+          setEmployees(result.data as Employee[]);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadEmployees();
   }, []);
 
   // Initialize attendance data when employees load
-  useEffect(() => {
-    if (employees.length > 0) {
-      const initialData: Record<string, AttendanceRecord> = {};
-      employees.forEach((emp) => {
-        initialData[emp.id] = {
-          employeeId: emp.id,
-          date: selectedDate,
-          status: 'Present',
-        };
-      });
-      setAttendanceData(initialData);
-    }
+  const initialAttendanceData = useMemo(() => {
+    if (employees.length === 0) return {};
+    const data: Record<string, AttendanceRecord> = {};
+    employees.forEach((emp) => {
+      data[emp.id] = {
+        employeeId: emp.id,
+        date: selectedDate,
+        status: 'Present',
+      };
+    });
+    return data;
   }, [employees, selectedDate]);
 
-  const loadEmployees = async () => {
-    setLoading(true);
-    try {
-      const result = await getEmployees("Active");
-      if (result.success && result.data) {
-        setEmployees(result.data as Employee[]);
-      }
-    } catch (error) {
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (employees.length > 0 && Object.keys(attendanceData).length === 0) {
+      setAttendanceData(initialAttendanceData);
     }
-  };
+  }, [employees, initialAttendanceData]);
 
   // Update attendance record
   const updateAttendance = (employeeId: string, field: keyof AttendanceRecord, value: any) => {

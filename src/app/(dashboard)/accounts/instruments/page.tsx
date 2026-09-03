@@ -52,7 +52,26 @@ export default function PdcInstrumentsPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      const [dashRes, custRes, vendRes, bankRes] = await Promise.all([
+        getPdcInstrumentsDashboard(),
+        getCustomersForDropdown(),
+        getVendorsForDropdown(),
+        getBankAccounts(),
+      ]);
+      if (dashRes.success && dashRes.data) {
+        setInstruments(dashRes.data.instruments || []);
+        setStats(dashRes.data.stats || {});
+      }
+      if (custRes.success) setCustomers(custRes.data || []);
+      if (vendRes.success) setVendors(vendRes.data || []);
+      if (bankRes.success) setBankAccounts(bankRes.data || []);
+      setLoading(false);
+    };
+    loadData();
+  }, []);
 
   const handleSubmit = async (formData: FormData) => {
     setSubmitting(true);

@@ -124,7 +124,33 @@ export default function PurchaseOrdersPage() {
     }
   };
 
-  useEffect(() => { loadData(); }, [searchQuery, statusFilter]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const ordersRes = await getPurchaseOrders(
+          searchQuery,
+          statusFilter === "all" ? undefined : statusFilter
+        );
+        if (ordersRes.success && ordersRes.data) {
+          const orderData = ordersRes.data as PurchaseOrder[];
+          setOrders(orderData);
+
+          const totalPOs = orderData.length;
+          const pendingApproval = orderData.filter(o => o.status === 'draft' || o.status === 'pending').length;
+          const now = new Date();
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          const approvedThisMonth = orderData.filter(o => o.status === 'approved' && new Date(o.createdAt) >= monthStart).length;
+
+          setStats({ totalPOs, pendingApproval, approvedThisMonth });
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, [searchQuery, statusFilter]);
 
   const formatCurrency = (value: string | null) => {
     if (!value) return formatPKR(0, 'south-asian');

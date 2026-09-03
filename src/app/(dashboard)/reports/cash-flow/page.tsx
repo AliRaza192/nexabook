@@ -31,7 +31,21 @@ export default function CashFlowStatementPage() {
   };
 
   useEffect(() => {
-    loadReport({ dateFrom: monthStart, dateTo: today });
+    const loadInitial = async () => {
+      setLoading(true);
+      const dateFrom = monthStart;
+      const dateTo = today;
+      try {
+        const result = await getCashFlowStatement(dateFrom, dateTo);
+        if (result.success && result.data) {
+          setData(result.data);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadInitial();
   }, []);
 
   const fmt = (v: number) => formatPKR(v, 'south-asian');

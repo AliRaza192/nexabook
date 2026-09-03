@@ -32,7 +32,19 @@ export default function JobOrderProductionPage() {
   };
 
   useEffect(() => {
-    loadReport(selectedStatus);
+    const loadInitial = async () => {
+      setLoading(true);
+      try {
+        const result = await getJobOrderProductionReport(selectedStatus === "all" ? undefined : selectedStatus);
+        if (result.success && result.data) {
+          setReportData(result.data);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadInitial();
   }, []);
 
   const handleApply = () => {

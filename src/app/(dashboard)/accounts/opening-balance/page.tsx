@@ -72,10 +72,6 @@ export default function OpeningBalancePage() {
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
 
-  useEffect(() => {
-    loadAccounts();
-  }, []);
-
   const loadAccounts = async () => {
     setLoading(true);
     const res = await getAccounts();
@@ -84,6 +80,10 @@ export default function OpeningBalancePage() {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    loadAccounts();
+  }, []);
 
   const addLine = () => {
     setLines([...lines, { accountId: "", debit: "", credit: "" }]);

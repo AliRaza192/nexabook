@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   ClipboardList,
@@ -127,7 +127,6 @@ export default function JobOrdersPage() {
   });
 
   const [orderNumber, setOrderNumber] = useState("");
-  const [componentGrid, setComponentGrid] = useState<ComponentGridItem[]>([]);
 
   // Scrap state
   const [scrapData, setScrapData] = useState({
@@ -135,7 +134,6 @@ export default function JobOrdersPage() {
     accountId: "",
   });
 
-  // Load data
   const loadData = async () => {
     setLoading(true);
     try {
@@ -154,7 +152,6 @@ export default function JobOrdersPage() {
       }
 
       if (accountsRes.success && accountsRes.data) {
-        // Filter expense accounts for scrap
         setAccounts(accountsRes.data.filter((a: any) => a.type === "expense"));
       }
     } catch (error) {
@@ -181,21 +178,14 @@ export default function JobOrdersPage() {
     }
   };
 
-  // Update component grid when BOM or quantity changes
-  useEffect(() => {
-    if (!formData.bomId) {
-      setComponentGrid([]);
-      return;
-    }
-
+  const componentGrid = useMemo(() => {
+    if (!formData.bomId) return [];
     const selectedBom = boms.find((b) => b.id === formData.bomId);
-    if (!selectedBom) return;
-
+    if (!selectedBom) return [];
     const multiplier = formData.quantityToProduce / selectedBom.quantity;
-    const gridItems: ComponentGridItem[] = selectedBom.bomItems.map((item) => {
+    return selectedBom.bomItems.map((item) => {
       const requiredQty = parseFloat(item.quantityRequired) * multiplier;
       const availableStock = item.component?.currentStock || 0;
-
       return {
         componentId: item.componentId,
         componentName: item.component?.name || "Unknown",
@@ -206,8 +196,6 @@ export default function JobOrdersPage() {
         isSufficient: availableStock >= requiredQty,
       };
     });
-
-    setComponentGrid(gridItems);
   }, [formData.bomId, formData.quantityToProduce, boms]);
 
   // Handle open completion dialog
@@ -246,7 +234,6 @@ export default function JobOrdersPage() {
           quantityToProduce: 1,
           instructions: "",
         });
-        setComponentGrid([]);
         await loadData();
         alert(result.message || "Job order created successfully");
       } else {

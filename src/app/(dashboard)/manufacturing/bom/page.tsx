@@ -151,7 +151,6 @@ export default function BOMPage() {
     unit: "Pcs",
   });
 
-  // Load data
   const loadData = async () => {
     setLoading(true);
     try {

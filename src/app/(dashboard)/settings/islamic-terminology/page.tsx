@@ -44,18 +44,20 @@ const DEFAULT_MAPPINGS: TerminologyMapping[] = [
 ];
 
 export default function IslamicTerminologyPage() {
-  const [mappings, setMappings] = useState<TerminologyMapping[]>(DEFAULT_MAPPINGS);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  useEffect(() => {
-    const saved = localStorage.getItem("islamicTerminologyMappings");
-    if (saved) {
-      try {
-        setMappings(JSON.parse(saved));
-      } catch {}
+  const [mappings, setMappings] = useState<TerminologyMapping[]>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("islamicTerminologyMappings");
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {}
+      }
     }
-  }, []);
+    return DEFAULT_MAPPINGS;
+  });
 
   const updateMapping = (index: number, field: keyof TerminologyMapping, value: string) => {
     const updated = [...mappings];

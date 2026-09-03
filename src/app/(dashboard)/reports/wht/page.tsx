@@ -35,7 +35,20 @@ export default function WHTPage() {
     }
   };
 
-  useEffect(() => { loadReport(filters); }, []);
+  useEffect(() => {
+    const loadInitial = async () => {
+      setLoading(true);
+      setFilters(filters);
+      try {
+        const result = await getWithholdingTaxReport(filters.dateFrom, filters.dateTo);
+        if (result.success && result.data) setReportData(result.data);
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadInitial();
+  }, []);
 
   const formatCurrency = (value: number) => formatPKR(value, 'south-asian');
 

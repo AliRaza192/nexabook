@@ -33,7 +33,23 @@ export default function BalanceSheetReportPage() {
   };
 
   useEffect(() => {
-    loadReport({ dateFrom: today, dateTo: today });
+    const loadInitial = async () => {
+      setLoading(true);
+      const dateToUse = today;
+      setAsOfDate(dateToUse);
+      try {
+        const result = await getBalanceSheetReport(dateToUse);
+        if (result.success && result.data) {
+          setReportData(result.data);
+        } else {
+          // Error handled silently
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadInitial();
   }, []);
 
   const formatCurrency = (value: number) => {

@@ -60,7 +60,26 @@ export default function RecurringPage() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(); }, [statusFilter]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const res = await getRecurringInvoices(statusFilter === "all" ? undefined : statusFilter);
+        if (res.success && res.data) {
+          const data = res.data as Recurring[];
+          setRecurring(data);
+          const now = new Date(); const next7 = new Date(now); next7.setDate(next7.getDate() + 7);
+          const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          setStats({
+            active: data.filter(r => r.status === 'active').length,
+            next7: data.filter(r => r.nextInvoiceDate && r.nextInvoiceDate <= next7).length,
+            thisMonth: data.filter(r => r.nextInvoiceDate && r.nextInvoiceDate <= endOfMonth).length,
+          });
+        }
+      } finally { setLoading(false); }
+    };
+    loadData();
+  }, [statusFilter]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this recurring invoice?")) return;

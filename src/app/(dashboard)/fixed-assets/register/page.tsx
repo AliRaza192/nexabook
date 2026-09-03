@@ -133,10 +133,6 @@ function AssetForm({
 }) {
   const [form, setForm] = useState<FixedAssetFormData>(initial);
 
-  useEffect(() => {
-    setForm(initial);
-  }, [initial]);
-
   const set = (key: keyof FixedAssetFormData, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -340,11 +336,6 @@ export default function FixedAssetsRegisterPage() {
 
   useEffect(() => {
     loadAssets();
-  }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => loadAssets(), 400);
-    return () => clearTimeout(t);
   }, [searchQuery]);
 
   const showMsg = (type: "success" | "error", text: string) => {
@@ -667,6 +658,7 @@ export default function FixedAssetsRegisterPage() {
           </DialogHeader>
           {editAsset && (
             <AssetForm
+              key={editAsset.id}
               initial={{
                 name: editAsset.name,
                 category: editAsset.category,

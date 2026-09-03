@@ -66,6 +66,16 @@ export default function ChartOfAccountsPage() {
   };
 
   useEffect(() => {
+    const fetchAccounts = async () => {
+      setLoading(true);
+      const result = await getAccounts();
+
+      if (result.success && result.data) {
+        setAccounts(result.data as ChartOfAccount[]);
+      }
+
+      setLoading(false);
+    };
     fetchAccounts();
   }, []);
 

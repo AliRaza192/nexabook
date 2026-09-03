@@ -154,45 +154,43 @@ export default function BIDashboard() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [selectedRange, setSelectedRange] = useState("month");
 
-  // Load dashboard data
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      // Calculate date range based on selection
-      const now = new Date();
-      let from: Date;
-      let to: Date = now;
-
-      switch (selectedRange) {
-        case "today":
-          from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          break;
-        case "7d":
-          from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          break;
-        case "month":
-          from = new Date(now.getFullYear(), now.getMonth(), 1);
-          break;
-        case "3m":
-          from = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-          break;
-        default:
-          from = new Date(now.getFullYear(), now.getMonth(), 1);
-      }
-
-      const result = await getDashboardData({ from, to });
-      if (result.success && result.data) {
-        setDashboardData(result.data);
-      } else {
-        // Error handled silently
-      }
-    } catch (error) {
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        // Calculate date range based on selection
+        const now = new Date();
+        let from: Date;
+        let to: Date = now;
+
+        switch (selectedRange) {
+          case "today":
+            from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            break;
+          case "7d":
+            from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            break;
+          case "month":
+            from = new Date(now.getFullYear(), now.getMonth(), 1);
+            break;
+          case "3m":
+            from = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+            break;
+          default:
+            from = new Date(now.getFullYear(), now.getMonth(), 1);
+        }
+
+        const result = await getDashboardData({ from, to });
+        if (result.success && result.data) {
+          setDashboardData(result.data);
+        } else {
+          // Error handled silently
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadData();
   }, [selectedRange]);
 

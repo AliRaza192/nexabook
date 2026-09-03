@@ -14,20 +14,19 @@ export default function AgedReceivablesPage() {
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<any>(null);
 
-  const loadReport = async () => {
-    setLoading(true);
-    try {
-      const result = await getAgedReceivablesReport();
-      if (result.success && result.data) {
-        setReportData(result.data);
-      }
-    } catch (error) {
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const loadReport = async () => {
+      setLoading(true);
+      try {
+        const result = await getAgedReceivablesReport();
+        if (result.success && result.data) {
+          setReportData(result.data);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadReport();
   }, []);
 

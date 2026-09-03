@@ -14,20 +14,19 @@ export default function BomCostPage() {
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<any>(null);
 
-  const loadReport = async () => {
-    setLoading(true);
-    try {
-      const result = await getBomCostReport();
-      if (result.success && result.data) {
-        setReportData(result.data);
-      }
-    } catch (error) {
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const loadReport = async () => {
+      setLoading(true);
+      try {
+        const result = await getBomCostReport();
+        if (result.success && result.data) {
+          setReportData(result.data);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadReport();
   }, []);
 

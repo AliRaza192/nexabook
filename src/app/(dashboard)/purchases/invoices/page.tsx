@@ -150,6 +150,32 @@ export default function PurchaseInvoicesPage() {
   };
 
   useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const invoicesRes = await getPurchaseInvoices(
+          searchQuery,
+          statusFilter === "all" ? undefined : statusFilter
+        );
+
+        if (invoicesRes.success && invoicesRes.data) {
+          const invoiceData = invoicesRes.data as PurchaseInvoice[];
+          setInvoices(invoiceData);
+
+          const totalInvoices = invoiceData.length;
+          const approvedInvoices = invoiceData.filter(inv => inv.status === 'Approved').length;
+          const draftInvoices = invoiceData.filter(inv => inv.status === 'Draft').length;
+          const totalPurchases = invoiceData.reduce((sum, inv) => {
+            return sum + (inv.netAmount ? parseFloat(inv.netAmount) : 0);
+          }, 0);
+
+          setStats({ totalInvoices, totalPurchases, approvedInvoices, draftInvoices });
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadData();
   }, [searchQuery, statusFilter]);
 

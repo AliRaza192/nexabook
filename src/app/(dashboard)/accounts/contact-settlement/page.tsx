@@ -36,7 +36,19 @@ export default function ContactSettlementPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, [searchQuery]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      const [setRes, bankRes] = await Promise.all([
+        getMiscContactSettlements(searchQuery),
+        getBankAccounts(),
+      ]);
+      if (setRes.success) setSettlements(setRes.data || []);
+      if (bankRes.success) setBankAccounts(bankRes.data || []);
+      setLoading(false);
+    };
+    loadData();
+  }, [searchQuery]);
 
   const handleSubmit = async (formData: FormData) => {
     setSubmitting(true);

@@ -58,7 +58,22 @@ export default function PurchaseReturnsPage() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(); }, [searchQuery, statusFilter]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const res = await getPurchaseReturns(searchQuery, statusFilter === "all" ? undefined : statusFilter);
+        if (res.success && res.data) {
+          const data = res.data as PurchaseReturn[];
+          setReturns(data);
+          const now = new Date(); const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          const totalRefund = data.filter(r => r.status === 'approved' || r.status === 'refunded').reduce((s, r) => s + parseFloat(r.refundAmount || '0'), 0);
+          setStats({ thisMonth: data.filter(r => new Date(r.returnDate) >= monthStart).length, totalRefund: totalRefund.toFixed(2), pending: data.filter(r => r.status === 'pending').length });
+        }
+      } finally { setLoading(false); }
+    };
+    loadData();
+  }, [searchQuery, statusFilter]);
 
   const handleApprove = async (id: string) => {
     if (!confirm("Approve this return? This will reduce stock and create a debit note.")) return;

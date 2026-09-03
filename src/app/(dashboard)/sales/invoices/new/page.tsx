@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -134,6 +134,7 @@ function LineItemRow({
 }) {
   const [availableBatches, setAvailableBatches] = useState<any[]>([]);
   const [fetchingBatches, setFetchingBatches] = useState(false);
+  const batchEffectRan = useRef(false);
 
   const handleProductSelect = (productId: string) => {
     const product = products.find((p) => p.id === productId);
@@ -153,17 +154,25 @@ function LineItemRow({
   };
 
   useEffect(() => {
+    if (!batchEffectRan.current) {
+      batchEffectRan.current = true;
+      return;
+    }
     if (item.productId && warehouseId && products.find(p => p.id === item.productId)?.isBatchTracked) {
-      setFetchingBatches(true);
-      getAvailableBatches(item.productId, warehouseId)
-        .then(res => {
+      const fetchBatches = async () => {
+        setFetchingBatches(true);
+        try {
+          const res = await getAvailableBatches(item.productId!, warehouseId);
           if (res.success && res.data) {
             setAvailableBatches(res.data);
           }
-        })
-        .finally(() => setFetchingBatches(false));
+        } finally {
+          setFetchingBatches(false);
+        }
+      };
+      fetchBatches();
     } else {
-      setAvailableBatches([]);
+      Promise.resolve().then(() => setAvailableBatches([]));
     }
   }, [item.productId, warehouseId, products]);
 
@@ -322,6 +331,7 @@ export default function NewInvoicePage() {
   const [orgData, setOrgData] = useState<{ ntn: string | null; strn: string | null }>({ ntn: null, strn: null });
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
   const [qrLoading, setQrLoading] = useState(false);
+  const qrEffectRan = useRef(false);
 
   // Line items
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
@@ -438,26 +448,32 @@ export default function NewInvoicePage() {
 
   // Generate QR code when org data or invoice details change
   useEffect(() => {
+    if (!qrEffectRan.current) {
+      qrEffectRan.current = true;
+      return;
+    }
     if (isFBREligible(orgData) && netAmount > 0) {
-      setQrLoading(true);
-      generateFBRQRCode({
-        ntn: orgData.ntn!,
-        strn: orgData.strn!,
-        invoiceNumber: invoiceNumber || "PENDING",
-        invoiceDate: new Date(issueDate),
-        totalAmount: netAmount,
-        taxAmount: totalTax,
-      }, { size: 120 })
-        .then((dataUrl) => {
+      const generateQR = async () => {
+        setQrLoading(true);
+        try {
+          const dataUrl = await generateFBRQRCode({
+            ntn: orgData.ntn!,
+            strn: orgData.strn!,
+            invoiceNumber: invoiceNumber || "PENDING",
+            invoiceDate: new Date(issueDate),
+            totalAmount: netAmount,
+            taxAmount: totalTax,
+          }, { size: 120 });
           setQrCodeDataUrl(dataUrl);
-          setQrLoading(false);
-        })
-        .catch((error) => {
+        } catch (error) {
           console.error("Failed to generate QR code:", error);
+        } finally {
           setQrLoading(false);
-        });
+        }
+      };
+      generateQR();
     } else {
-      setQrCodeDataUrl("");
+      Promise.resolve().then(() => setQrCodeDataUrl(""));
     }
   }, [orgData, invoiceNumber, issueDate, netAmount, totalTax]);
 

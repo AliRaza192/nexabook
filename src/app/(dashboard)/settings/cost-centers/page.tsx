@@ -42,7 +42,9 @@ export default function CostCentersPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   async function handleSave() {
     if (!form.name || !form.code) {

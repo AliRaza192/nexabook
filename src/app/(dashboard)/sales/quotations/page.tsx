@@ -92,7 +92,25 @@ export default function QuotationsPage() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(); }, [searchQuery, statusFilter]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const res = await getQuotations(searchQuery, statusFilter === "all" ? undefined : statusFilter);
+        if (res.success && res.data) {
+          setQuotations(res.data as Quotation[]);
+          const data = res.data as Quotation[];
+          setStats({
+            total: data.length,
+            accepted: data.filter(q => q.status === 'accepted').length,
+            pending: data.filter(q => q.status === 'draft' || q.status === 'sent').length,
+            converted: data.filter(q => q.status === 'converted').length,
+          });
+        }
+      } finally { setLoading(false); }
+    };
+    loadData();
+  }, [searchQuery, statusFilter]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this quotation?")) return;

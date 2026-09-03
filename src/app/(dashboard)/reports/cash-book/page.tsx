@@ -37,7 +37,22 @@ export default function CashBookPage() {
   };
 
   useEffect(() => {
-    loadReport(filters);
+    const loadInitial = async () => {
+      setLoading(true);
+      setFilters(filters);
+      try {
+        const result = await getCashBookReport(filters.dateFrom, filters.dateTo);
+        if (result.success && result.data) {
+          setReportData(result.data);
+        } else {
+          // Error handled silently
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadInitial();
   }, []);
 
   const formatCurrency = (value: number) => {

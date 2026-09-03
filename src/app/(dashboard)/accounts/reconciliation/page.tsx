@@ -79,23 +79,25 @@ export default function BankReconciliationPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
-    async function loadBanks() {
+    const loadBanks = async () => {
       const res = await getBankCOAAccounts();
       if (res.success && res.data) {
         setBankAccounts(res.data as any);
       }
-    }
+    };
     loadBanks();
   }, []);
 
   // Load history when bank changes
   useEffect(() => {
-    if (!selectedBank) { setHistory([]); return; }
-    setHistoryLoading(true);
-    getReconciliationHistory(selectedBank).then((res) => {
+    if (!selectedBank) return;
+    const loadHistory = async () => {
+      setHistoryLoading(true);
+      const res = await getReconciliationHistory(selectedBank);
       if (res.success && res.data) setHistory(res.data);
       setHistoryLoading(false);
-    });
+    };
+    loadHistory();
   }, [selectedBank]);
 
   const handleGenerate = async () => {

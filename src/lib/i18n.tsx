@@ -50,18 +50,16 @@ export function t(key: string, fallback?: string): string {
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>("en");
+  const [locale, setLocaleState] = useState<Locale>(() => getCookie());
   const [messages, setMessages] = useState<Messages>({});
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const saved = getCookie();
-    setLocaleState(saved);
-    loadMessages(saved).then((m) => {
+    loadMessages(locale).then((m) => {
       setMessages(m);
       setReady(true);
     });
-  }, []);
+  }, [locale]);
 
   const setLocale = useCallback((newLocale: Locale) => {
     setLocaleState(newLocale);

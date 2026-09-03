@@ -44,7 +44,23 @@ export default function CreditDebitNotesPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, [searchQuery]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      const [notesRes, custRes, vendRes, prodRes] = await Promise.all([
+        getCreditDebitNotes(searchQuery),
+        getCustomersForDropdown(),
+        getVendorsForDropdown(),
+        getProductsForDropdown(),
+      ]);
+      if (notesRes.success) setNotes(notesRes.data || []);
+      if (custRes.success) setCustomers(custRes.data || []);
+      if (vendRes.success) setVendors(vendRes.data || []);
+      if (prodRes.success) setProducts(prodRes.data || []);
+      setLoading(false);
+    };
+    loadData();
+  }, [searchQuery]);
 
   const addLine = () => setLines([...lines, { productId: "", description: "", quantity: "1", unitPrice: "0", taxRate: "0" }]);
   const removeLine = (idx: number) => setLines(lines.filter((_, i) => i !== idx));

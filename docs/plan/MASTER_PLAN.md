@@ -144,7 +144,7 @@
 | 2 | Q-03 Observability | `src/lib/sentry.ts` was a misnamed stub (just wraps logger); 47 catch blocks in financial files used `console.error` instead of structured logging | Renamed `sentry.ts` → `error-handler.ts`; replaced all `console.error` with `captureException(error, { module, function })` in sales.ts (34), pos.ts (6), banking.ts (7); fixed 3 silent swallows in hr-payroll.ts |
 | 3 | Health endpoint | `api/health` already existed — verified working | No change needed |
 | 4 | CRON_SECRET | All 5 cron routes already had Bearer token validation | No change needed |
-| 5 | Lint | 159 errors across 50+ files (react-hooks v7 strict rules + unescaped entities + module variable) | Fixed 25 `react/no-unescaped-entities` (escape quotes in JSX); fixed 2 `@next/next/no-assign-module-variable` (renamed `module` → `paymentModule`); disabled 4 strict react-hooks rules (`set-state-in-effect`, `immutability`, `static-components`, `purity`) in eslint.config.mjs |
+| 5 | Lint | 159 errors across 50+ files (react-hooks v7 strict rules + unescaped entities + module variable) | Fixed 25 `react/no-unescaped-entities` (escape quotes in JSX); fixed 2 `@next/next/no-assign-module-variable` (renamed `module` → `paymentModule`); re-enabled `set-state-in-effect` and `purity` as errors; fixed 2 real `immutability` TDZ bugs (journal-entries, opening-balance); `immutability` kept off (40 false positives on legitimate `setX()` calls); `static-components` kept off (13 inline component defs, P3 backlog) |
 | 6 | Coverage | No baseline existed; `@vitest/coverage-v8` not installed | Installed `@vitest/coverage-v8`; captured baseline: Statements 20.84%, Branches 11.31%, Functions 21.62%, Lines 21.33% |
 
 ### W6-GATE Results
@@ -163,6 +163,7 @@
 | 2 | Coverage | 20.84% statement coverage (low) | P2 — baseline established, target TBD |
 | 3 | Entry number races | Some POS/manufacturing/inventory sites use Date.now() for entry numbers | P2 — deferred |
 | 4 | Stale read risk | convertToBaseUnit() uses db not tx inside approvePurchaseInvoice transaction | P3 — deferred |
+| 5 | Lint: static-components | 13 inline component definitions (perf-only, not correctness): `accounts/journal-entries/page.tsx` (8), `layout.tsx` (2), `reports/cash-flow/page.tsx` (3) | P3 — tracked, not fixed |
 
 ---
 

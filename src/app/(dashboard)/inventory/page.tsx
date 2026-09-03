@@ -699,6 +699,47 @@ export default function InventoryPage() {
   };
 
   useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+
+      try {
+        const [productsRes, categoriesRes, statsRes, uomsRes, attrNamesRes] = await Promise.all([
+          getProducts(searchQuery, selectedCategory === "all" ? undefined : selectedCategory),
+          getCategories(),
+          getInventoryStats(),
+          getUoms(),
+          getAllAttributeNames(),
+        ]);
+
+        if (productsRes.success && productsRes.data) {
+          setProducts(productsRes.data as ProductTableRow[]);
+        }
+
+        if (categoriesRes.success && categoriesRes.data) {
+          setCategories(
+            categoriesRes.data.map((cat: any) => ({
+              id: cat.id,
+              name: cat.name,
+            }))
+          );
+        }
+
+        if (statsRes.success && statsRes.data) {
+          setStats(statsRes.data);
+        }
+
+        if (uomsRes.success && uomsRes.data) {
+          setUoms(uomsRes.data as { id: string; name: string }[]);
+        }
+
+        if (attrNamesRes.success && attrNamesRes.data) {
+          setAttributeNames(attrNamesRes.data);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadData();
   }, [searchQuery, selectedCategory]);
 

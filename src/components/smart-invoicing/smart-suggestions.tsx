@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -58,25 +58,36 @@ export default function SmartSuggestions({
   const [loading, setLoading] = useState(false);
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(null);
+  const defaultsEffectRan = useRef(false);
 
-  // Get orgId on mount
   useEffect(() => {
-    getCurrentOrgId().then(setOrgId);
+    const getOrg = async () => {
+      const id = await getCurrentOrgId();
+      setOrgId(id);
+    };
+    getOrg();
   }, []);
 
   // Fetch smart defaults when customer changes
   useEffect(() => {
+    if (!defaultsEffectRan.current) {
+      defaultsEffectRan.current = true;
+      return;
+    }
     if (!customerId || !orgId) {
-      setSmartDefaults(null);
-      setPaymentPrediction(null);
+      Promise.resolve().then(() => {
+        setSmartDefaults(null);
+        setPaymentPrediction(null);
+      });
       return;
     }
 
-    setLoading(true);
-    Promise.all([
-      getSmartDefaults(customerId, orgId),
-      getPaymentPrediction(customerId, orgId),
-    ]).then(([defaults, prediction]) => {
+    const fetchDefaults = async () => {
+      setLoading(true);
+      const [defaults, prediction] = await Promise.all([
+        getSmartDefaults(customerId, orgId),
+        getPaymentPrediction(customerId, orgId),
+      ]);
       if (defaults.success && defaults.data) {
         setSmartDefaults(defaults.data);
         onApplyDefaults(defaults.data);
@@ -85,7 +96,8 @@ export default function SmartSuggestions({
         setPaymentPrediction(prediction.data);
       }
       setLoading(false);
-    });
+    };
+    fetchDefaults();
   }, [customerId, orgId, onApplyDefaults]);
 
   // Fetch pricing suggestions when products change

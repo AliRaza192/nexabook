@@ -51,8 +51,18 @@ export default function SalesByGeographyPage() {
   }, []);
 
   useEffect(() => {
-    loadReport(filters, groupBy);
-  }, [filters, groupBy, loadReport]);
+    const loadInitial = async () => {
+      setLoading(true);
+      const res = await getGeographySalesReport({ ...filters, groupBy });
+      if (res.success && res.data) {
+        setReportData(res.data as Record<string, GeographyGroup>);
+      } else {
+        setReportData(null);
+      }
+      setLoading(false);
+    };
+    loadInitial();
+  }, [filters, groupBy]);
 
   const handleFilterChange = (newFilters: { dateFrom?: string; dateTo?: string }) => {
     setFilters(newFilters);

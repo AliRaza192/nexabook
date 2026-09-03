@@ -244,6 +244,18 @@ export default function CustomersPage() {
   };
 
   useEffect(() => {
+    const loadCustomers = async () => {
+      setLoading(true);
+      try {
+        const result = await getCustomers(searchQuery);
+        if (result.success && result.data) {
+          setCustomers(result.data as Customer[]);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadCustomers();
   }, [searchQuery]);
 

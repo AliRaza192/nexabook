@@ -60,10 +60,26 @@ export default function CustomerLedgerReportPage() {
   };
 
   useEffect(() => {
-    // Load with default filters if customer selected
-    if (filters.customerId) {
-      loadReport(filters);
-    }
+    const loadInitial = async () => {
+      if (!filters.customerId) return;
+      setLoading(true);
+      try {
+        const result = await getCustomerLedgerReport(
+          filters.customerId,
+          filters.dateFrom,
+          filters.dateTo
+        );
+        if (result.success && result.data) {
+          setReportData(result.data);
+        } else {
+          // Error handled silently
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadInitial();
   }, []);
 
   const formatCurrency = (value: number) => {

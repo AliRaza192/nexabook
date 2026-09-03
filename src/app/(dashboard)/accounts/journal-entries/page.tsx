@@ -153,19 +153,6 @@ export default function JournalEntriesPage() {
   const [toAccountId, setToAccountId] = useState("");
   const [amount, setAmount] = useState("");
 
-  useEffect(() => {
-    const fetchAccounts = async () => {
-      setLoading(true);
-      const result = await getAccounts();
-      if (result.success && result.data) {
-        setAccounts(result.data as ChartOfAccount[]);
-      }
-      setLoading(false);
-    };
-    fetchAccounts();
-    fetchAllVouchers();
-  }, []);
-
   const fetchAllVouchers = async () => {
     setVoucherListLoading(true);
     const allVouchers: VoucherRecord[] = [];
@@ -183,6 +170,19 @@ export default function JournalEntriesPage() {
     setVouchers(allVouchers.slice(0, 50));
     setVoucherListLoading(false);
   };
+
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      setLoading(true);
+      const result = await getAccounts();
+      if (result.success && result.data) {
+        setAccounts(result.data as ChartOfAccount[]);
+      }
+      setLoading(false);
+    };
+    fetchAccounts();
+    fetchAllVouchers();
+  }, []);
 
   const resetAllForms = () => {
     setVoucherDate(new Date().toISOString().split("T")[0]);

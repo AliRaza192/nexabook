@@ -167,6 +167,41 @@ export default function ExpensesPage() {
   };
 
   useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const [accountsRes, cashBankRes, expensesRes] = await Promise.all([
+          getExpenseAccounts(),
+          getCashBankAccounts(),
+          getExpenses(50),
+        ]);
+
+        if (accountsRes.success && accountsRes.data) {
+          setExpenseAccounts(accountsRes.data as Account[]);
+        }
+        if (cashBankRes.success && cashBankRes.data) {
+          setCashBankAccounts(cashBankRes.data as Account[]);
+        }
+        if (expensesRes.success && expensesRes.data) {
+          const expenseData = expensesRes.data as ExpenseRecord[];
+          setRecentExpenses(expenseData);
+
+          // Calculate stats
+          const totalExpenses = expenseData.length;
+          const totalAmount = expenseData.reduce((sum, exp) => sum + parseFloat(exp.amount || '0'), 0);
+          const thisMonth = expenseData.filter(exp => {
+            const expDate = new Date(exp.date);
+            const now = new Date();
+            return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
+          }).length;
+
+          setStats({ totalExpenses, totalAmount, thisMonth });
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadData();
   }, []);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Package,
@@ -82,10 +82,6 @@ export default function DisassemblePage() {
   const [selectedBomId, setSelectedBomId] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [instructions, setInstructions] = useState("");
-  const [componentGrid, setComponentGrid] = useState<DisassemblyComponent[]>([]);
-  const [selectedFinishedGood, setSelectedFinishedGood] = useState<Product | null>(null);
-
-  // Load data
   const loadData = async () => {
     setLoading(true);
     try {
@@ -112,28 +108,21 @@ export default function DisassemblePage() {
     loadData();
   }, []);
 
-  // Update component grid when BOM or quantity changes
-  useEffect(() => {
-    if (!selectedBomId) {
-      setComponentGrid([]);
-      setSelectedFinishedGood(null);
-      return;
-    }
-
+  const selectedFinishedGood = useMemo(() => {
+    if (!selectedBomId) return null;
     const selectedBom = boms.find((b) => b.id === selectedBomId);
-    if (!selectedBom) return;
+    if (!selectedBom?.finishedGood) return null;
+    return products.find((p) => p.id === selectedBom.finishedGood!.id) || null;
+  }, [selectedBomId, boms, products]);
 
-    // Set finished good
-    if (selectedBom.finishedGood) {
-      const fg = products.find((p) => p.id === selectedBom.finishedGood!.id);
-      setSelectedFinishedGood(fg || null);
-    }
-
+  const componentGrid = useMemo(() => {
+    if (!selectedBomId) return [];
+    const selectedBom = boms.find((b) => b.id === selectedBomId);
+    if (!selectedBom) return [];
     const multiplier = quantity / selectedBom.quantity;
-    const gridItems: DisassemblyComponent[] = selectedBom.bomItems.map((item) => {
+    return selectedBom.bomItems.map((item) => {
       const qtyToAdd = parseFloat(item.quantityRequired) * multiplier;
       const currentStock = item.component?.currentStock || 0;
-
       return {
         componentId: item.componentId,
         componentName: item.component?.name || "Unknown",
@@ -143,8 +132,6 @@ export default function DisassemblePage() {
         unit: item.unit || item.component?.unit || "Pcs",
       };
     });
-
-    setComponentGrid(gridItems);
   }, [selectedBomId, quantity, boms, products]);
 
   // Handle disassembly
@@ -181,7 +168,6 @@ export default function DisassemblePage() {
         setQuantity(1);
         setInstructions("");
         setSelectedBomId("");
-        setComponentGrid([]);
         await loadData();
         alert(result.message || "Disassembly completed successfully");
       } else {

@@ -317,6 +317,31 @@ export default function LeadsPage() {
   };
 
   useEffect(() => {
+    const loadLeads = async () => {
+      setLoading(true);
+      try {
+        const result = await getLeads(searchQuery, statusFilter);
+        if (result.success && result.data) {
+          setLeads(result.data as LeadWithCustomer[]);
+        }
+      } catch (error) {
+        // silently fail
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const loadStats = async () => {
+      try {
+        const result = await getLeadStats();
+        if (result.success && result.data) {
+          setStats(result.data);
+        }
+      } catch (error) {
+        // silently fail
+      }
+    };
+
     loadLeads();
     loadStats();
   }, [searchQuery, statusFilter]);

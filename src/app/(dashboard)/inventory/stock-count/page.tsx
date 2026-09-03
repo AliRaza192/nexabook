@@ -773,6 +773,28 @@ export default function StockCountPage() {
   };
 
   useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+
+      try {
+        const [countsRes, productsRes] = await Promise.all([
+          getStockCounts(),
+          getProductsForStockCount(),
+        ]);
+
+        if (countsRes.success && countsRes.data) {
+          setStockCounts(countsRes.data as StockCount[]);
+        }
+
+        if (productsRes.success && productsRes.data) {
+          setProducts(productsRes.data as ProductOption[]);
+        }
+      } catch (error) {
+        console.error("Error loading stock counts:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
     loadData();
   }, []);
 

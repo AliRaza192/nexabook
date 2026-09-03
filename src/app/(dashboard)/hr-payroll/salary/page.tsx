@@ -18,14 +18,15 @@ export default function SalaryProcessingPage() {
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
 
-  const loadData = async () => {
-    setLoading(true);
-    const res = await getPayrollSummaryReportFull(month, year);
-    if (res.success) setPayrollData(res.data);
-    setLoading(false);
-  };
-
-  useEffect(() => { loadData(); }, [month, year]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      const res = await getPayrollSummaryReportFull(month, year);
+      if (res.success) setPayrollData(res.data);
+      setLoading(false);
+    };
+    loadData();
+  }, [month, year]);
 
   if (loading) {
     return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="h-12 w-12 animate-spin text-nexabook-400" /></div>;

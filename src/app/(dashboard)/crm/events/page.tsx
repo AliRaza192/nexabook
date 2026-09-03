@@ -121,6 +121,19 @@ export default function EventsPage() {
   };
 
   useEffect(() => {
+    const loadEvents = async () => {
+      setLoading(true);
+      try {
+        const result = await getCrmEvents(searchQuery, typeFilter, statusFilter);
+        if (result.success && result.data) {
+          setEvents(result.data as CrmEventData[]);
+        }
+      } catch (error) {
+        // silently fail
+      } finally {
+        setLoading(false);
+      }
+    };
     loadEvents();
   }, [searchQuery, typeFilter, statusFilter]);
 

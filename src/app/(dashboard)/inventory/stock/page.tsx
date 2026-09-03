@@ -41,7 +41,21 @@ export default function StockMovementPage() {
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, [searchQuery, selectedProduct]);
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      const [movRes, prodRes, adjRes] = await Promise.all([
+        getStockMovements(selectedProduct || undefined),
+        getProducts(),
+        getStockAdjustments(),
+      ]);
+      if (movRes.success) setMovements(movRes.data || []);
+      if (prodRes.success) setProducts(prodRes.data || []);
+      if (adjRes.success) setAdjustments(adjRes.data || []);
+      setLoading(false);
+    };
+    loadData();
+  }, [searchQuery, selectedProduct]);
 
   const handleSubmit = async (formData: FormData) => {
     setSubmitting(true);

@@ -116,20 +116,19 @@ export default function SaleOrdersPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const ordersRes = await getSaleOrders(searchQuery, statusFilter === "all" ? undefined : statusFilter);
-      if (ordersRes.success && ordersRes.data) {
-        setOrders(ordersRes.data as SaleOrder[]);
-      }
-    } catch (error) {
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const ordersRes = await getSaleOrders(searchQuery, statusFilter === "all" ? undefined : statusFilter);
+        if (ordersRes.success && ordersRes.data) {
+          setOrders(ordersRes.data as SaleOrder[]);
+        }
+      } catch (error) {
+      } finally {
+        setLoading(false);
+      }
+    };
     loadData();
   }, [searchQuery, statusFilter]);
 
