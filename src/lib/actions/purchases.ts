@@ -1363,13 +1363,6 @@ export async function createGRN(data: GRNFormData) {
           acceptedQty: item.acceptedQty,
           rejectedQty: item.rejectedQty || '0',
         });
-
-        // Update stock: add accepted quantity to product current stock
-        if (item.acceptedQty && parseFloat(item.acceptedQty) > 0) {
-          await tx.update(products)
-            .set({ currentStock: sql`${products.currentStock} + ${parseFloat(item.acceptedQty)}` })
-            .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)));
-        }
       }
 
       // Update linked PO status to delivered if all items received
@@ -1418,15 +1411,6 @@ export async function updateGRN(id: string, data: Partial<GRNFormData>) {
       if (!updated) return { success: false, error: "GRN not found" };
 
       if (data.items) {
-        // Reverse old stock, add new stock
-        const oldItems = await tx.select().from(grnItems).where(eq(grnItems.grnId, id));
-        for (const oldItem of oldItems) {
-          if (oldItem.acceptedQty && parseFloat(oldItem.acceptedQty) > 0) {
-            await tx.update(products)
-              .set({ currentStock: sql`${products.currentStock} - ${parseFloat(oldItem.acceptedQty)}` })
-              .where(and(eq(products.id, oldItem.productId), eq(products.orgId, orgId)));
-          }
-        }
         await tx.delete(grnItems).where(eq(grnItems.grnId, id));
 
         for (const item of data.items) {
@@ -1439,12 +1423,6 @@ export async function updateGRN(id: string, data: Partial<GRNFormData>) {
             acceptedQty: item.acceptedQty,
             rejectedQty: item.rejectedQty || '0',
           });
-
-          if (item.acceptedQty && parseFloat(item.acceptedQty) > 0) {
-            await tx.update(products)
-              .set({ currentStock: sql`${products.currentStock} + ${parseFloat(item.acceptedQty)}` })
-              .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)));
-          }
         }
       }
 
