@@ -1450,14 +1450,14 @@ export async function deleteInvoice(invoiceId: string) {
           }
         }
 
-        // Delete invoice items and invoice
-        await tx.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+        // Mark invoice as cancelled instead of deleting — preserves audit trail
         await tx
-          .delete(invoices)
+          .update(invoices)
+          .set({ status: "cancelled" })
           .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
       });
     } else {
-      // Draft or pending: just delete items + invoice
+      // Draft or pending: safe to delete
       await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
       await db
         .delete(invoices)
@@ -1466,7 +1466,7 @@ export async function deleteInvoice(invoiceId: string) {
 
     revalidatePath("/sales/invoices");
 
-    return { success: true, message: "Invoice deleted successfully" };
+    return { success: true, message: "Invoice voided successfully" };
   } catch (error) {
     captureException(error, { module: "sales", function: "deleteInvoice" });
     return { success: false, error: "Failed to delete invoice" };
