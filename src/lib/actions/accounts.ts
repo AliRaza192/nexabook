@@ -1398,6 +1398,14 @@ export async function deleteJournalEntry(id: string) {
 
     if (!entry) return { success: false, error: "Journal entry not found" };
 
+    // Posted and reversed entries are immutable — only draft entries can be deleted
+    if (entry.status === "posted" || entry.status === "reversed") {
+      return {
+        success: false,
+        error: `Cannot delete a ${entry.status} journal entry. Use void/reverse instead.`,
+      };
+    }
+
     // Check if fiscal period is locked
     const locked = await checkPeriodLocked(entry.entryDate);
     if (locked) {
