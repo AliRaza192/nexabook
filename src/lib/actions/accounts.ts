@@ -268,6 +268,16 @@ export async function createJournalEntry(data: JournalEntryData) {
       if ((!line.debit || parseFloat(line.debit) === 0) && (!line.credit || parseFloat(line.credit) === 0)) {
         return { success: false, error: "Each line must have either a debit or credit amount" };
       }
+
+      // Validate account belongs to this organization
+      const [account] = await db
+        .select({ id: chartOfAccounts.id })
+        .from(chartOfAccounts)
+        .where(and(eq(chartOfAccounts.id, line.accountId), eq(chartOfAccounts.orgId, orgId)))
+        .limit(1);
+      if (!account) {
+        return { success: false, error: `Account ${line.accountId} does not belong to this organization` };
+      }
     }
 
     // Generate entry number using SQL COUNT (not loading all rows)
