@@ -283,29 +283,6 @@ export async function addStockAdjustment(data: StockAdjustmentFormData) {
         totalValue: totalValue.toString(),
         notes: line.notes,
       });
-
-      // Update product stock
-      await db
-        .update(products)
-        .set({ currentStock: String(newStock) })
-        .where(eq(products.id, line.productId));
-
-      // Record stock movement
-      if (difference !== 0) {
-        await db.insert(stockMovements).values({
-          orgId,
-          productId: line.productId,
-          movementType: difference > 0 ? "in" : "out",
-          reason: "adjustment",
-          quantity: Math.abs(difference).toString(),
-          unitCost: unitCost.toString(),
-          totalValue: totalValue.toString(),
-          referenceType: "stock_adjustment",
-          referenceNumber: adjustmentNumber,
-          runningBalance: newStock.toString(),
-          notes: line.notes || `Stock adjustment: ${data.reason}`,
-        });
-      }
     }
 
     revalidatePath("/inventory/stock");
@@ -423,6 +400,32 @@ export async function approveStockAdjustment(adjustmentId: string) {
           { orgId, journalEntryId: je.id, accountId: invAccount.id, description: "Inventory increase", debitAmount: totalPositive.toFixed(2), creditAmount: "0" },
           { orgId, journalEntryId: je.id, accountId: incomeAccount.id, description: "Inventory Adjustment Income", debitAmount: "0", creditAmount: totalPositive.toFixed(2) },
         ]);
+      }
+
+      // Update product stock and create stock movements (now deferred to approval)
+      for (const line of lines) {
+        const diff = parseFloat(line.difference || "0");
+        if (diff === 0) continue;
+
+        const newStock = Number(line.currentStock || "0") + diff;
+        await tx
+          .update(products)
+          .set({ currentStock: String(newStock) })
+          .where(eq(products.id, line.productId));
+
+        await tx.insert(stockMovements).values({
+          orgId,
+          productId: line.productId,
+          movementType: diff > 0 ? "in" : "out",
+          reason: "adjustment",
+          quantity: Math.abs(diff).toString(),
+          unitCost: line.unitCost || "0",
+          totalValue: line.totalValue || "0",
+          referenceType: "stock_adjustment",
+          referenceNumber: adjustment.adjustmentNumber,
+          runningBalance: String(newStock),
+          notes: `Stock adjustment approved: ${adjustment.adjustmentNumber}`,
+        });
       }
     });
 
