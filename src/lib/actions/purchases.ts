@@ -28,6 +28,7 @@ import { eq, and, or, ilike, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { validateJournalBalance } from "../accounting";
+import { postTransaction, resolveAccount } from "../accounting/posting-engine";
 import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, requireRole } from "./shared";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { convertToBaseUnit, updateWarehouseStock, updateBatchStock } from "./inventory";
@@ -1648,52 +1649,35 @@ export async function approvePurchaseReturn(id: string) {
         await tx.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${refundAmt}, 0)` }).where(eq(vendors.id, purchaseReturn.vendorId));
       }
 
-      // Create debit note journal entry
-      const entryNumber = await (async () => {
-        const res = await tx.select({ entryNumber: journalEntries.entryNumber }).from(journalEntries).where(eq(journalEntries.orgId, orgId)).orderBy(desc(journalEntries.createdAt)).limit(1);
-        let nextNum = 1;
-        if (res.length > 0 && res[0].entryNumber) { const m = res[0].entryNumber.match(/\d+$/); if (m) nextNum = parseInt(m[0]) + 1; }
-        return `JE-${String(nextNum).padStart(5, '0')}`;
-      })();
+      // Create debit note journal entry via posting engine
+      const apAcc = await resolveAccount(tx, orgId, "accounts_payable");
+      const invAcc = await resolveAccount(tx, orgId, "inventory");
 
-      const [journalEntry] = await tx.insert(journalEntries).values({
+      // NB-P0-05: Credit Inventory Asset (not Purchase Returns) to reduce GL inventory value
+      await postTransaction(tx, {
         orgId,
-        entryNumber,
-        entryDate: new Date(purchaseReturn.returnDate),
-        referenceType: 'purchase_return',
-        referenceId: id,
         description: `Purchase Return ${purchaseReturn.returnNumber} - Debit Note`,
-        status: "posted",
-        postedAt: new Date(),
-      }).returning();
-
-      const [accountsPayable] = await tx.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'accounts_payable'))).limit(1);
-      const [purchaseReturnsAccount] = await tx.select().from(chartOfAccounts).where(and(eq(chartOfAccounts.orgId, orgId), or(eq(chartOfAccounts.name, 'Purchase Returns & Allowances'), eq(chartOfAccounts.name, 'Purchases')))).limit(1);
-
-      if (accountsPayable && purchaseReturnsAccount) {
-        if (!validateJournalBalance([{ debitAmount: purchaseReturn.refundAmount, creditAmount: "0" }, { debitAmount: "0", creditAmount: purchaseReturn.refundAmount }]))
-          throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-        // Debit: Accounts Payable (reduce liability)
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: accountsPayable.id,
-          description: `Debit - Accounts Payable (Return ${purchaseReturn.returnNumber})`,
-          debitAmount: purchaseReturn.refundAmount,
-          creditAmount: '0',
-        });
-
-        // Credit: Purchase Returns (contra-expense)
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: purchaseReturnsAccount.id,
-          description: `Credit - Purchase Returns (Return ${purchaseReturn.returnNumber})`,
-          debitAmount: '0',
-          creditAmount: purchaseReturn.refundAmount,
-        });
-      }
+        date: new Date(purchaseReturn.returnDate),
+        referenceType: "purchase_return",
+        referenceId: id,
+        sourceType: "purchase_return",
+        lines: [
+          // Dr AP (reduce liability)
+          {
+            accountId: apAcc.id,
+            description: `Debit - Accounts Payable (Return ${purchaseReturn.returnNumber})`,
+            debit: purchaseReturn.refundAmount,
+            credit: "0",
+          },
+          // Cr Inventory (reduce asset — was Purchase Returns, now correctly Inventory)
+          {
+            accountId: invAcc.id,
+            description: `Credit - Inventory Asset (Return ${purchaseReturn.returnNumber})`,
+            debit: "0",
+            credit: purchaseReturn.refundAmount,
+          },
+        ],
+      });
 
       // Update return status
       await tx.update(purchaseReturns).set({ status: 'approved' }).where(eq(purchaseReturns.id, id));

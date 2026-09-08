@@ -3011,83 +3011,70 @@ export async function approveSalesReturn(returnId: string) {
         }
       }
 
-      // 3. Create journal entry for return
-      const [accountsReceivable] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "accounts_receivable"),
-          ),
-        )
-        .limit(1);
-      const [salesReturnsAccount] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "sales_revenue"),
-          ),
-        )
-        .limit(1);
+      // 3. Create journal entry for return via posting engine
+      const arAcc = await resolveAccount(tx, orgId, "accounts_receivable");
+      const salesRetAcc = await resolveAccount(tx, orgId, "sales_revenue");
+      const cogsAcc = await resolveAccount(tx, orgId, "cogs");
+      const invAcc = await resolveAccount(tx, orgId, "inventory");
 
-      if (accountsReceivable && salesReturnsAccount) {
-        const result = await tx
-          .select({ entryNumber: journalEntries.entryNumber })
-          .from(journalEntries)
-          .where(eq(journalEntries.orgId, orgId))
-          .orderBy(desc(journalEntries.createdAt))
+      // Calculate COGS for returned items using current costPrice (interim until FIFO layer model)
+      let totalCOGS = 0;
+      for (const item of items) {
+        if (!item.productId) continue;
+        const [product] = await tx
+          .select({ costPrice: products.costPrice })
+          .from(products)
+          .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
           .limit(1);
-        let nextNumber = 1;
-        if (result.length > 0 && result[0].entryNumber) {
-          const match = result[0].entryNumber.match(/\d+$/);
-          if (match) nextNumber = parseInt(match[0]) + 1;
+        if (product) {
+          totalCOGS += parseFloat(item.quantity) * parseFloat(product.costPrice || "0");
         }
-        const entryNumber = `JE-${String(nextNumber).padStart(5, "0")}`;
-
-        const [journalEntry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId,
-            entryNumber,
-            entryDate: new Date(salesReturn.returnDate),
-            referenceType: "sales_return",
-            referenceId: returnId,
-            description: `Sales Return ${salesReturn.returnNumber} - Stock Reversal & Refund`,
-            status: "posted",
-            postedAt: new Date(),
-          })
-          .returning();
-
-        const returnLines = [
-          { debitAmount: "0", creditAmount: salesReturn.refundAmount },
-          { debitAmount: salesReturn.refundAmount, creditAmount: "0" },
-        ];
-        if (!validateJournalBalance(returnLines)) throw new Error("Journal entry out of balance");
-
-        await tx
-          .insert(journalEntryLines)
-          .values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: accountsReceivable.id,
-            description: `Credit - Accounts Receivable (Return ${salesReturn.returnNumber})`,
-            debitAmount: "0",
-            creditAmount: salesReturn.refundAmount,
-          });
-        await tx
-          .insert(journalEntryLines)
-          .values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: salesReturnsAccount.id,
-            description: `Debit - Sales Returns (Return ${salesReturn.returnNumber})`,
-            debitAmount: salesReturn.refundAmount,
-            creditAmount: "0",
-          });
       }
+
+      const returnLines = [
+        // Dr Sales Returns (contra-revenue)
+        {
+          accountId: salesRetAcc.id,
+          description: `Debit - Sales Returns (Return ${salesReturn.returnNumber})`,
+          debit: salesReturn.refundAmount,
+          credit: "0",
+        },
+        // Cr AR (reduce receivable)
+        {
+          accountId: arAcc.id,
+          description: `Credit - Accounts Receivable (Return ${salesReturn.returnNumber})`,
+          debit: "0",
+          credit: salesReturn.refundAmount,
+        },
+      ];
+
+      // NB-P0-04: Dr Inventory, Cr COGS to restore inventory asset value
+      if (totalCOGS > 0) {
+        returnLines.push(
+          {
+            accountId: invAcc.id,
+            description: `Inventory Restore (Return ${salesReturn.returnNumber})`,
+            debit: totalCOGS.toFixed(2),
+            credit: "0",
+          },
+          {
+            accountId: cogsAcc.id,
+            description: `COGS Reversal (Return ${salesReturn.returnNumber})`,
+            debit: "0",
+            credit: totalCOGS.toFixed(2),
+          },
+        );
+      }
+
+      await postTransaction(tx, {
+        orgId,
+        description: `Sales Return ${salesReturn.returnNumber} - Stock Reversal & Refund`,
+        date: new Date(salesReturn.returnDate),
+        referenceType: "sales_return",
+        referenceId: returnId,
+        sourceType: "sales_return",
+        lines: returnLines,
+      });
 
       // 4. Update return status
       await tx

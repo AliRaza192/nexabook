@@ -424,4 +424,152 @@ describe("Posting Engine — Parity with approveInvoice (plain invoice, received
     const netAR = arLines.reduce((s, l) => s + Number(l.debitAmount) - Number(l.creditAmount), 0);
     expect(netAR).toBe(600);
   });
+
+  it("NB-P0-04: approveSalesReturn creates Dr Inventory + Cr COGS reversal lines", async () => {
+    const { db, ids } = testDb;
+    const { orgId, arAccId, revAccId, cogsAccId, invAccId, custId, prodId } = ids;
+
+    // Setup: approve an invoice first so we can return items from it
+    const invId = "50000000-0000-0000-0000-000000000001";
+    const itmId = "60000000-0000-0000-0000-000000000001";
+    const issueDate = new Date("2026-09-01");
+
+    await db.execute(
+      `INSERT INTO invoices (id, org_id, customer_id, invoice_number, status, issue_date, net_amount, gross_amount, discount_amount, shipping_charges, round_off, received_amount, balance_amount, tax_amount)
+       VALUES ('${invId}','${orgId}','${custId}','INV-SR-001','approved','${issueDate.toISOString()}','1000.00','1000.00','0.00','0.00','0.00','0.00','1000.00','0.00')`,
+    );
+    await db.execute(
+      `INSERT INTO invoice_items (id, org_id, invoice_id, product_id, description, quantity, unit_price, tax_rate, line_total)
+       VALUES ('${itmId}','${orgId}','${invId}','${prodId}','Widget sale','10','100.00','0','1000.00')`,
+    );
+
+    // Create a sales return for 5 units
+    const srId = "70000000-0000-0000-0000-000000000001";
+    const srItmId = "80000000-0000-0000-0000-000000000001";
+    const returnDate = new Date("2026-09-05");
+
+    await db.execute(
+      `INSERT INTO sales_returns (id, org_id, return_number, invoice_id, customer_id, return_date, reason, gross_amount, tax_amount, net_amount, refund_amount, status)
+       VALUES ('${srId}','${orgId}','SR-001','${invId}','${custId}','${returnDate.toISOString()}','defective','500.00','0.00','500.00','500.00','pending')`,
+    );
+    await db.execute(
+      `INSERT INTO sales_return_items (id, org_id, sales_return_id, product_id, description, quantity, unit_price, line_total)
+       VALUES ('${srItmId}','${orgId}','${srId}','${prodId}','Widget return','5','100.00','500.00')`,
+    );
+
+    const { approveSalesReturn } = await import("@/lib/actions/sales");
+    const result = await approveSalesReturn(srId);
+    expect(result.success).toBe(true);
+
+    // Read the JE
+    const [je] = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.referenceId, srId))
+      .limit(1);
+    expect(je).toBeDefined();
+    expect(je.status).toBe("posted");
+    expect(je.referenceType).toBe("sales_return");
+
+    const lines = await db
+      .select()
+      .from(journalEntryLines)
+      .where(eq(journalEntryLines.journalEntryId, je.id));
+
+    // 4 lines: Dr Sales Returns, Cr AR, Dr Inventory, Cr COGS
+    expect(lines.length).toBe(4);
+
+    // Balance check
+    const totalDebit = lines.reduce((s, l) => s + Number(l.debitAmount), 0);
+    const totalCredit = lines.reduce((s, l) => s + Number(l.creditAmount), 0);
+    expect(totalDebit).toBe(totalCredit);
+
+    const findLine = (accId: string, descFragment: string) =>
+      lines.find((l) => l.accountId === accId && l.description?.includes(descFragment));
+
+    // Dr Sales Returns = 500
+    const srDr = findLine(revAccId, "Sales Returns");
+    expect(srDr).toBeDefined();
+    expect(Number(srDr!.debitAmount)).toBe(500);
+
+    // Cr AR = 500
+    const arCr = findLine(arAccId, "Accounts Receivable");
+    expect(arCr).toBeDefined();
+    expect(Number(arCr!.creditAmount)).toBe(500);
+
+    // NB-P0-04: Dr Inventory = 300 (5 units * costPrice 60)
+    const invDr = findLine(invAccId, "Inventory Restore");
+    expect(invDr).toBeDefined();
+    expect(Number(invDr!.debitAmount)).toBe(300);
+
+    // NB-P0-04: Cr COGS = 300
+    const cogsCr = findLine(cogsAccId, "COGS Reversal");
+    expect(cogsCr).toBeDefined();
+    expect(Number(cogsCr!.creditAmount)).toBe(300);
+  });
+
+  it("NB-P0-05: approvePurchaseReturn credits Inventory Asset (not Purchase Returns)", async () => {
+    const { db, ids } = testDb;
+    const { orgId, apAccId, invAccId, vendId, prodId } = ids;
+
+    // Create a purchase return
+    const prId = "90000000-0000-0000-0000-000000000001";
+    const prItmId = "a0000000-0000-0000-0000-000000000001";
+    const returnDate = new Date("2026-09-05");
+
+    await db.execute(
+      `INSERT INTO purchase_returns (id, org_id, return_number, vendor_id, return_date, reason, gross_amount, tax_amount, net_amount, refund_amount, status)
+       VALUES ('${prId}','${orgId}','PR-001','${vendId}','${returnDate.toISOString()}','defective','600.00','0.00','600.00','600.00','pending')`,
+    );
+    await db.execute(
+      `INSERT INTO purchase_return_items (id, org_id, purchase_return_id, product_id, description, quantity, unit_price, line_total)
+       VALUES ('${prItmId}','${orgId}','${prId}','${prodId}','Widget return','10','60.00','600.00')`,
+    );
+
+    const { approvePurchaseReturn } = await import("@/lib/actions/purchases");
+    const result = await approvePurchaseReturn(prId);
+    expect(result.success).toBe(true);
+
+    // Read the JE
+    const [je] = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.referenceId, prId))
+      .limit(1);
+    expect(je).toBeDefined();
+    expect(je.status).toBe("posted");
+    expect(je.referenceType).toBe("purchase_return");
+
+    const lines = await db
+      .select()
+      .from(journalEntryLines)
+      .where(eq(journalEntryLines.journalEntryId, je.id));
+
+    // 2 lines: Dr AP, Cr Inventory (not Purchase Returns)
+    expect(lines.length).toBe(2);
+
+    // Balance check
+    const totalDebit = lines.reduce((s, l) => s + Number(l.debitAmount), 0);
+    const totalCredit = lines.reduce((s, l) => s + Number(l.creditAmount), 0);
+    expect(totalDebit).toBe(totalCredit);
+    expect(totalDebit).toBe(600);
+
+    // Dr AP = 600
+    const apLine = lines.find((l) => l.accountId === apAccId);
+    expect(apLine).toBeDefined();
+    expect(Number(apLine!.debitAmount)).toBe(600);
+    expect(Number(apLine!.creditAmount)).toBe(0);
+
+    // NB-P0-05: Cr Inventory = 600 (was Purchase Returns, now correctly Inventory)
+    const invLine = lines.find((l) => l.accountId === invAccId);
+    expect(invLine).toBeDefined();
+    expect(Number(invLine!.debitAmount)).toBe(0);
+    expect(Number(invLine!.creditAmount)).toBe(600);
+
+    // Verify NO line credits a "Purchase Returns" account
+    const purchaseRetLine = lines.find((l) =>
+      l.description?.toLowerCase().includes("purchase returns"),
+    );
+    expect(purchaseRetLine).toBeUndefined();
+  });
 });
