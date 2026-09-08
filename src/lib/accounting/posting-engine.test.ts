@@ -425,11 +425,11 @@ describe("Posting Engine — Parity with approveInvoice (plain invoice, received
     expect(netAR).toBe(600);
   });
 
-  it("NB-P0-04: approveSalesReturn creates Dr Inventory + Cr COGS reversal lines", async () => {
+  it("NB-P0-04: approveSalesReturn uses historical unitCost, not current costPrice", async () => {
     const { db, ids } = testDb;
     const { orgId, arAccId, revAccId, cogsAccId, invAccId, custId, prodId } = ids;
 
-    // Setup: approve an invoice first so we can return items from it
+    // Original sale: 10 units at unit_cost=60 (captured at sale time)
     const invId = "50000000-0000-0000-0000-000000000001";
     const itmId = "60000000-0000-0000-0000-000000000001";
     const issueDate = new Date("2026-09-01");
@@ -439,11 +439,16 @@ describe("Posting Engine — Parity with approveInvoice (plain invoice, received
        VALUES ('${invId}','${orgId}','${custId}','INV-SR-001','approved','${issueDate.toISOString()}','1000.00','1000.00','0.00','0.00','0.00','0.00','1000.00','0.00')`,
     );
     await db.execute(
-      `INSERT INTO invoice_items (id, org_id, invoice_id, product_id, description, quantity, unit_price, tax_rate, line_total)
-       VALUES ('${itmId}','${orgId}','${invId}','${prodId}','Widget sale','10','100.00','0','1000.00')`,
+      `INSERT INTO invoice_items (id, org_id, invoice_id, product_id, description, quantity, unit_price, tax_rate, line_total, unit_cost)
+       VALUES ('${itmId}','${orgId}','${invId}','${prodId}','Widget sale','10','100.00','0','1000.00','60')`,
     );
 
-    // Create a sales return for 5 units
+    // Simulate cost change AFTER the sale
+    await db.execute(
+      `UPDATE products SET cost_price = '80' WHERE id = '${prodId}'`,
+    );
+
+    // Return 5 units — reversal should use original 60, not current 80
     const srId = "70000000-0000-0000-0000-000000000001";
     const srItmId = "80000000-0000-0000-0000-000000000001";
     const returnDate = new Date("2026-09-05");
@@ -479,7 +484,6 @@ describe("Posting Engine — Parity with approveInvoice (plain invoice, received
     // 4 lines: Dr Sales Returns, Cr AR, Dr Inventory, Cr COGS
     expect(lines.length).toBe(4);
 
-    // Balance check
     const totalDebit = lines.reduce((s, l) => s + Number(l.debitAmount), 0);
     const totalCredit = lines.reduce((s, l) => s + Number(l.creditAmount), 0);
     expect(totalDebit).toBe(totalCredit);
@@ -497,12 +501,12 @@ describe("Posting Engine — Parity with approveInvoice (plain invoice, received
     expect(arCr).toBeDefined();
     expect(Number(arCr!.creditAmount)).toBe(500);
 
-    // NB-P0-04: Dr Inventory = 300 (5 units * costPrice 60)
+    // NB-P0-04: Dr Inventory = 300 (5 units * original unitCost 60, NOT current 80)
     const invDr = findLine(invAccId, "Inventory Restore");
     expect(invDr).toBeDefined();
     expect(Number(invDr!.debitAmount)).toBe(300);
 
-    // NB-P0-04: Cr COGS = 300
+    // NB-P0-04: Cr COGS = 300 (5 units * original unitCost 60, NOT current 80)
     const cogsCr = findLine(cogsAccId, "COGS Reversal");
     expect(cogsCr).toBeDefined();
     expect(Number(cogsCr!.creditAmount)).toBe(300);

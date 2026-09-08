@@ -3017,17 +3017,34 @@ export async function approveSalesReturn(returnId: string) {
       const cogsAcc = await resolveAccount(tx, orgId, "cogs");
       const invAcc = await resolveAccount(tx, orgId, "inventory");
 
-      // Calculate COGS for returned items using current costPrice (interim until FIFO layer model)
+      // NB-P0-04: Calculate COGS using historical unitCost from original invoice items
       let totalCOGS = 0;
-      for (const item of items) {
-        if (!item.productId) continue;
-        const [product] = await tx
-          .select({ costPrice: products.costPrice })
-          .from(products)
-          .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
-          .limit(1);
-        if (product) {
-          totalCOGS += parseFloat(item.quantity) * parseFloat(product.costPrice || "0");
+      if (salesReturn.invoiceId) {
+        const origItems = await tx
+          .select({ productId: invoiceItems.productId, unitCost: invoiceItems.unitCost, quantity: invoiceItems.quantity })
+          .from(invoiceItems)
+          .where(eq(invoiceItems.invoiceId, salesReturn.invoiceId));
+        const origByProduct = new Map<string, { unitCost: string | null; quantity: string }>();
+        for (const oi of origItems) {
+          if (oi.productId) origByProduct.set(oi.productId, { unitCost: oi.unitCost, quantity: oi.quantity });
+        }
+
+        for (const item of items) {
+          if (!item.productId) continue;
+          const orig = origByProduct.get(item.productId);
+          let cost = 0;
+          if (orig?.unitCost) {
+            cost = parseFloat(item.quantity) * parseFloat(orig.unitCost);
+          } else {
+            // Fallback: original invoice item has no unitCost (pre-ACC-11 data)
+            const [product] = await tx
+              .select({ costPrice: products.costPrice })
+              .from(products)
+              .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
+              .limit(1);
+            cost = parseFloat(item.quantity) * parseFloat(product?.costPrice || "0");
+          }
+          totalCOGS += cost;
         }
       }
 
