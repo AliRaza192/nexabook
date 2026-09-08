@@ -326,4 +326,102 @@ describe("Posting Engine — Parity with approveInvoice (plain invoice, received
       resolveAccount(testDb.db, ids.orgId, "nonexistent_sub_type"),
     ).rejects.toThrow('no account with subType "nonexistent_sub_type"');
   });
+
+  it("NB-P0-01: approveInvoice with receivedAmount > 0 creates Dr Cash/Bank + Cr AR lines", async () => {
+    const { db, ids } = testDb;
+    const { orgId, arAccId, revAccId, cogsAccId, invAccId, cashAccId, custId, prodId } = ids;
+
+    // Invoice: 10 widgets @ Rs.100, costPrice=60, receivedAmount=400
+    // Expected: 6 lines
+    //   Dr AR       1000   Cr 0       (full netAmount)
+    //   Dr 0        Cr 1000          (revenue)
+    //   Dr COGS     600    Cr 0      (10 * 60)
+    //   Dr 0        Cr 600           (inventory)
+    //   Dr Cash     400    Cr 0      (received — NB-P0-01 NEW)
+    //   Dr 0        Cr 400           (AR credit — NB-P0-01 NEW)
+    // Net AR = 1000 - 400 = 600 = balanceAmount ✓
+
+    const invId = "30000000-0000-0000-0000-000000000001";
+    const itmId = "40000000-0000-0000-0000-000000000001";
+    const issueDate = new Date("2026-09-15");
+
+    await db.execute(
+      `INSERT INTO invoices (id, org_id, customer_id, invoice_number, status, issue_date, net_amount, gross_amount, discount_amount, shipping_charges, round_off, received_amount, balance_amount, cash_bank_account_id, tax_amount)
+       VALUES ('${invId}','${orgId}','${custId}','INV-P001','pending','${issueDate.toISOString()}','1000.00','1000.00','0.00','0.00','0.00','400.00','600.00','${cashAccId}','0.00')`,
+    );
+    await db.execute(
+      `INSERT INTO invoice_items (id, org_id, invoice_id, product_id, description, quantity, unit_price, tax_rate, line_total)
+       VALUES ('${itmId}','${orgId}','${invId}','${prodId}','Widget sale','10','100.00','0','1000.00')`,
+    );
+
+    const { approveInvoice } = await import("@/lib/actions/sales");
+    const result = await approveInvoice(invId);
+    expect(result.success).toBe(true);
+
+    // Read the JE
+    const [je] = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.referenceId, invId))
+      .limit(1);
+    expect(je).toBeDefined();
+    expect(je.status).toBe("posted");
+
+    const lines = await db
+      .select()
+      .from(journalEntryLines)
+      .where(eq(journalEntryLines.journalEntryId, je.id));
+
+    // 6 lines: AR, Revenue, COGS, Inventory, Cash (dr), AR Credit (cr)
+    expect(lines.length).toBe(6);
+
+    // Balance check
+    const totalDebit = lines.reduce((s, l) => s + Number(l.debitAmount), 0);
+    const totalCredit = lines.reduce((s, l) => s + Number(l.creditAmount), 0);
+    expect(totalDebit).toBe(totalCredit);
+    // Dr: AR 1000 + COGS 600 + Cash 400 = 2000
+    expect(totalDebit).toBe(2000);
+
+    const findLine = (accId: string, desc: string) =>
+      lines.find((l) => l.accountId === accId && l.description?.includes(desc));
+
+    // AR: Dr 1000 (full netAmount)
+    const arDr = findLine(arAccId, "AR Invoice");
+    expect(arDr).toBeDefined();
+    expect(Number(arDr!.debitAmount)).toBe(1000);
+    expect(Number(arDr!.creditAmount)).toBe(0);
+
+    // Revenue: Cr 1000
+    const revCr = findLine(revAccId, "Revenue Invoice");
+    expect(revCr).toBeDefined();
+    expect(Number(revCr!.debitAmount)).toBe(0);
+    expect(Number(revCr!.creditAmount)).toBe(1000);
+
+    // COGS: Dr 600
+    const cogsDr = findLine(cogsAccId, "COGS Invoice");
+    expect(cogsDr).toBeDefined();
+    expect(Number(cogsDr!.debitAmount)).toBe(600);
+
+    // Inventory: Cr 600
+    const invCr = findLine(invAccId, "Inventory Credit Invoice");
+    expect(invCr).toBeDefined();
+    expect(Number(invCr!.creditAmount)).toBe(600);
+
+    // Cash/Bank: Dr 400 (NB-P0-01 — the fix)
+    const cashDr = findLine(cashAccId, "Cash Received");
+    expect(cashDr).toBeDefined();
+    expect(Number(cashDr!.debitAmount)).toBe(400);
+    expect(Number(cashDr!.creditAmount)).toBe(0);
+
+    // AR Credit: Cr 400 (NB-P0-01 — offsets the AR)
+    const arCr = findLine(arAccId, "AR Credit");
+    expect(arCr).toBeDefined();
+    expect(Number(arCr!.debitAmount)).toBe(0);
+    expect(Number(arCr!.creditAmount)).toBe(400);
+
+    // Net AR = 1000 - 400 = 600 = balanceAmount
+    const arLines = lines.filter((l) => l.accountId === arAccId);
+    const netAR = arLines.reduce((s, l) => s + Number(l.debitAmount) - Number(l.creditAmount), 0);
+    expect(netAR).toBe(600);
+  });
 });

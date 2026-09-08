@@ -38,6 +38,7 @@ import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, re
 import { checkPeriodLocked } from "./fiscal-periods";
 import { getOffset, buildPaginationResult, type PaginationParams } from "@/lib/pagination";
 import { validateJournalBalance } from "../accounting";
+import { postTransaction, resolveAccount } from "../accounting/posting-engine";
 import { submitInvoiceToFBR } from "../fbr-api";
 import {
   convertToBaseUnit,
@@ -1009,98 +1010,16 @@ export async function approveInvoice(invoiceId: string) {
         await tx.insert(stockMovements).values(stockMovementsData);
       }
 
-      // 3. Journal Entry Setup
-      const entryNumber = await generateJournalEntryNumber(orgId);
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(invoice.issueDate),
-          referenceType: "invoice",
-          referenceId: invoiceId,
-          description: `Invoice ${invoice.invoiceNumber} approval`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
+      // 3. Account Lookups via posting engine
+      const arAcc = await resolveAccount(tx, orgId, "accounts_receivable");
+      const revAcc = await resolveAccount(tx, orgId, "sales_revenue");
+      const cogsAcc = await resolveAccount(tx, orgId, "cogs");
+      const invAcc = await resolveAccount(tx, orgId, "inventory");
 
-      // Write journalEntryId back to invoice (ACC-05)
-      await tx
-        .update(invoices)
-        .set({ journalEntryId: journalEntry.id })
-        .where(eq(invoices.id, invoiceId));
-
-      // Account Lookups
-      const [ar] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "accounts_receivable"),
-          ),
-        )
-        .limit(1);
-      const [rev] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "sales_revenue"),
-          ),
-        )
-        .limit(1);
-      const [cogsAcc] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "cogs"),
-          ),
-        )
-        .limit(1);
-      const [invAcc] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "inventory"),
-          ),
-        )
-        .limit(1);
-      const [shippingAcc] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "shipping_revenue"),
-          ),
-        )
-        .limit(1);
-      const [otherIncomeAcc] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, "other_income"),
-          ),
-        )
-        .limit(1);
-
-      if (!ar || !rev || !cogsAcc || !invAcc)
-        throw new Error("Required accounting accounts missing. Please go to Chart of Accounts and seed default accounts first.");
-
-      // 4. Posting Lines
+      // 4. Build posting lines
       const shippingVal = parseFloat(invoice.shippingCharges || "0");
       const roundOffVal = parseFloat(invoice.roundOff || "0");
 
-      // Calculate tax per taxType from invoice items
       const taxByType = new Map<string, number>();
       for (const item of items) {
         const lineTotal = parseFloat(item.lineTotal || "0");
@@ -1120,101 +1039,110 @@ export async function approveInvoice(invoiceId: string) {
 
       const lines = [
         {
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: ar.id,
+          accountId: arAcc.id,
           description: `AR Invoice ${invoice.invoiceNumber}`,
-          debitAmount: invoice.netAmount,
-          creditAmount: "0",
+          debit: invoice.netAmount,
+          credit: "0",
         },
         {
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: rev.id,
+          accountId: revAcc.id,
           description: `Revenue Invoice ${invoice.invoiceNumber}`,
-          debitAmount: "0",
-          creditAmount: (
+          debit: "0",
+          credit: (
             parseFloat(invoice.grossAmount || "0") -
             parseFloat(invoice.discountAmount || "0")
           ).toFixed(2),
         },
         {
-          orgId,
-          journalEntryId: journalEntry.id,
           accountId: cogsAcc.id,
           description: `COGS Invoice ${invoice.invoiceNumber}`,
-          debitAmount: totalCOGS.toFixed(2),
-          creditAmount: "0",
+          debit: totalCOGS.toFixed(2),
+          credit: "0",
         },
         {
-          orgId,
-          journalEntryId: journalEntry.id,
           accountId: invAcc.id,
           description: `Inventory Credit Invoice ${invoice.invoiceNumber}`,
-          debitAmount: "0",
-          creditAmount: totalCOGS.toFixed(2),
+          debit: "0",
+          credit: totalCOGS.toFixed(2),
         },
       ];
 
-      // Add tax lines per tax type
+      // NB-P0-01: Dr Cash/Bank, Cr AR when receivedAmount > 0
+      const receivedAmt = parseFloat(invoice.receivedAmount || "0");
+      if (receivedAmt > 0 && invoice.cashBankAccountId) {
+        lines.push(
+          {
+            accountId: invoice.cashBankAccountId,
+            description: `Cash Received Invoice ${invoice.invoiceNumber}`,
+            debit: receivedAmt.toFixed(2),
+            credit: "0",
+          },
+          {
+            accountId: arAcc.id,
+            description: `AR Credit Invoice ${invoice.invoiceNumber}`,
+            debit: "0",
+            credit: receivedAmt.toFixed(2),
+          },
+        );
+      }
+
+      // Tax lines per tax type
       for (const [tType, amount] of taxByType.entries()) {
         if (amount <= 0) continue;
         const subType = taxSubTypeMap[tType] || "tax_payable";
-        const [[taxAcc]] = await Promise.all([
-          tx.select().from(chartOfAccounts)
-            .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, subType)))
-            .limit(1),
-        ]);
-        if (taxAcc) {
-          lines.push({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: taxAcc.id,
-            description: `${tType} Tax Invoice ${invoice.invoiceNumber}`,
-            debitAmount: "0",
-            creditAmount: amount.toFixed(2),
-          });
-        }
+        const taxAcc = await resolveAccount(tx, orgId, subType);
+        lines.push({
+          accountId: taxAcc.id,
+          description: `${tType} Tax Invoice ${invoice.invoiceNumber}`,
+          debit: "0",
+          credit: amount.toFixed(2),
+        });
       }
 
       if (shippingVal > 0) {
-        if (!shippingAcc) throw new Error("Shipping Revenue account not found in Chart of Accounts.");
-        
+        const shippingAcc = await resolveAccount(tx, orgId, "shipping_revenue");
         lines.push({
-          orgId,
-          journalEntryId: journalEntry.id,
           accountId: shippingAcc.id,
           description: `Shipping Revenue Invoice ${invoice.invoiceNumber}`,
-          debitAmount: "0",
-          creditAmount: invoice.shippingCharges,
+          debit: "0",
+          credit: invoice.shippingCharges,
         });
       }
 
       if (roundOffVal > 0) {
-        if (!otherIncomeAcc) throw new Error("Other Income account not found for rounding.");
+        const otherIncomeAcc = await resolveAccount(tx, orgId, "other_income");
         lines.push({
-          orgId,
-          journalEntryId: journalEntry.id,
           accountId: otherIncomeAcc.id,
           description: `Rounding Gain Invoice ${invoice.invoiceNumber}`,
-          debitAmount: "0",
-          creditAmount: invoice.roundOff,
+          debit: "0",
+          credit: invoice.roundOff,
         });
       } else if (roundOffVal < 0) {
-        if (!otherIncomeAcc) throw new Error("Other Income account not found for rounding.");
+        const otherIncomeAcc = await resolveAccount(tx, orgId, "other_income");
         lines.push({
-          orgId,
-          journalEntryId: journalEntry.id,
           accountId: otherIncomeAcc.id,
           description: `Rounding Loss Invoice ${invoice.invoiceNumber}`,
-          debitAmount: invoice.roundOff.replace("-", ""),
-          creditAmount: "0",
+          debit: invoice.roundOff.replace("-", ""),
+          credit: "0",
         });
       }
 
-      if (!validateJournalBalance(lines)) throw new Error("Journal entry out of balance");
+      // 5. Post via centralized engine
+      const { journalEntryId } = await postTransaction(tx, {
+        orgId,
+        description: `Invoice ${invoice.invoiceNumber} approval`,
+        date: new Date(invoice.issueDate),
+        referenceType: "invoice",
+        referenceId: invoiceId,
+        sourceType: "invoice",
+        lines,
+      });
 
-      await tx.insert(journalEntryLines).values(lines);
+      // Write journalEntryId back to invoice
+      await tx
+        .update(invoices)
+        .set({ journalEntryId })
+        .where(eq(invoices.id, invoiceId));
 
       return { success: true };
     });
