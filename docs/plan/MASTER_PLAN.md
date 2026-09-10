@@ -79,6 +79,10 @@
 | 2026-09-01 | Coverage baseline | Statements 20.84% · Branches 11.31% · Functions 21.62% · Lines 21.33% |
 | 2026-09-01 | Wave 6 complete | Observability & debt: structured logger, error-handler rename, financial catch blocks, health endpoint, lint zero errors, coverage baseline |
 | 2026-09-01 | **PART A GATE** | **All 9 P0 findings closed · build/test/lint/tsc green · Part A complete** |
+| 2026-09-10 | `npm run build` | Compiled successfully · exit 0 |
+| 2026-09-10 | `npm run test` | 25 files · 249 tests passed · 0 failed · exit 0 |
+| 2026-09-10 | `npx tsc --noEmit` | exit 0 (zero errors) |
+| 2026-09-10 | Wave 7 complete | Financial core hardening: 13 P0 findings fixed, posting engine, balance source-of-truth, reconciliation gate tests |
 
 ## Wave 4 Findings (2026-08-31)
 
@@ -164,6 +168,46 @@
 | 3 | Entry number races | Some POS/manufacturing/inventory sites use Date.now() for entry numbers | P2 — deferred |
 | 4 | Stale read risk | convertToBaseUnit() uses db not tx inside approvePurchaseInvoice transaction | P3 — deferred |
 | 5 | Lint: static-components | 13 inline component definitions (perf-only, not correctness): `accounts/journal-entries/page.tsx` (8), `layout.tsx` (2), `reports/cash-flow/page.tsx` (3) | P3 — tracked, not fixed |
+
+---
+
+## Wave 7 Findings (2026-09-10)
+
+### Fixed in Wave 7 (Financial Core Hardening — 13 P0 findings)
+| # | ID | Finding | Fix | Commits |
+|---|---|---|---|---|
+| 1 | NB-P0-01 | Invoice "received amount" has no cash/bank JE | `approveInvoice` posts Dr Cash/Bank + Cr AR via posting engine for receivedAmount | `0ceab43` |
+| 2 | NB-P0-02 | `customers.balance` denormalized but never maintained | `postTransaction` now atomically updates `customers.balance` from AR lines | `4005c2d` |
+| 3 | NB-P0-03 | Settlements change balances/status without accounting entries | Both `createCustomerSettlement` and `createVendorSettlement` now post JEs via posting engine | `4005c2d` |
+| 4 | NB-P0-04 | Sales return missing COGS/inventory GL reversal | `approveSalesReturn` adds Dr Inventory + Cr COGS lines using historical `unitCost` | `4e43515`, `69688b3` |
+| 5 | NB-P0-05 | Purchase return credits wrong account (not inventory asset) | `approvePurchaseReturn` now credits Inventory Asset instead of Purchase Returns | `4e43515` |
+| 6 | NB-P0-06 | GRN + purchase invoice double-count inventory stock | GRN no longer increments stock — only invoice approval does (Option A) | `b434828` |
+| 7 | NB-P0-07 | Stock count claims journal entry but never creates it | `completeStockCount` now inserts the JE with account lookup | `5189cea` |
+| 8 | NB-P0-08 | Stock adjustment mutates stock before approval | Stock mutation moved from `addStockAdjustment` to `approveStockAdjustment` | `d919325` |
+| 9 | NB-P0-09 | Posted journal entries are deletable | `deleteJournalEntry` now rejects if `status === "posted"` | `9c82deb` |
+| 10 | NB-P0-10 | Approved invoices are physically deleted | Void lifecycle: `POSTED → VOIDED` with reversal JE, no physical delete | `7625dda` |
+| 11 | NB-P0-11 | Journal line account IDs not validated for tenant ownership | `createJournalEntry` now verifies each `accountId` belongs to current `orgId` | `8f2afd5` |
+| 12 | NB-P0-12 | Zod validation schemas exist but are never used | Schemas wired into all financial action entry points | `85db58a` |
+| 13 | NB-P0-13 | Hardcoded fallback encryption key in production | Throws error if `ENCRYPTION_KEY` missing in production | `cfd579d` |
+
+### W7-GATE Results
+| Check | Result |
+|---|---|
+| `npm run build` | exit 0 |
+| `npm run test` | 25 files · 249 tests passed · 0 failed |
+| `npx tsc --noEmit` | exit 0 (zero errors) |
+| Posting engine | Core `postTransaction`/`reverseTransaction` + parity test (identical JEs to legacy) |
+| Balance reconciliation | Gate test: customer/vendor balance = sum of posted AR/AP JE lines (invoice → payment → return) |
+| Historical cost | Gate test: sales return COGS uses `unitCost` from original invoice, not current `costPrice` |
+| Void lifecycle | Gate test: posted invoice → voided → reversal JE exists, no physical delete |
+| Stock adjustment | Gate test: `addStockAdjustment` does NOT mutate stock; `approveStockAdjustment` does |
+| Stock count | Gate test: `completeStockCount` creates actual JE |
+| GRN dedup | Gate test: GRN does NOT add stock; only invoice approval does |
+| Tenant isolation | Gate test: account IDs from other org rejected |
+| Posted JE immutability | Gate test: posted JE cannot be deleted |
+
+### Deferred note
+`vendors.balance` uses `GREATEST(...,0)` which silently clamps negative balances to zero. Add warning log if this triggers — Wave 8 backlog item.
 
 ---
 
