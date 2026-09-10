@@ -73,7 +73,6 @@ export default function OpeningBalancePage() {
   const [importing, setImporting] = useState(false);
 
   const loadAccounts = async () => {
-    setLoading(true);
     const res = await getAccounts();
     if (res.success && res.data) {
       setAccounts(res.data as Account[]);
@@ -82,6 +81,7 @@ export default function OpeningBalancePage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAccounts();
   }, []);
 

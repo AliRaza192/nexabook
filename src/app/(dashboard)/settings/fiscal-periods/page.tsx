@@ -19,13 +19,13 @@ export default function FiscalPeriodsPage() {
   const [form, setForm] = useState({ name: "", startDate: "", endDate: "" });
 
   const loadPeriods = async () => {
-    setLoading(true);
     const result = await getFiscalPeriods();
     if (result.success) setPeriods(result.data || []);
     setLoading(false);
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPeriods();
   }, []);
 

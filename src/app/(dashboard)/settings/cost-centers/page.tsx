@@ -36,13 +36,13 @@ export default function CostCentersPage() {
   const [error, setError] = useState("");
 
   async function load() {
-    setLoading(true);
     const res = await getCostCenters();
     if (res.success && res.data) setItems(res.data);
     setLoading(false);
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []);
 

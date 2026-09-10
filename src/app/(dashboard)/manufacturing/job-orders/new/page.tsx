@@ -135,7 +135,6 @@ export default function JobOrdersPage() {
   });
 
   const loadData = async () => {
-    setLoading(true);
     try {
       const [ordersRes, bomsRes, accountsRes] = await Promise.all([
         getJobOrders(statusFilter === "all" ? undefined : statusFilter),
@@ -161,6 +160,7 @@ export default function JobOrdersPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [statusFilter]);
 

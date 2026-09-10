@@ -326,7 +326,6 @@ export default function FixedAssetsRegisterPage() {
   const [deleteAsset, setDeleteAsset] = useState<FixedAsset | null>(null);
 
   const loadAssets = async () => {
-    setLoading(true);
     const result = await getFixedAssets(searchQuery || undefined);
     if (result.success && result.data) {
       setAssets(result.data as FixedAsset[]);
@@ -335,6 +334,7 @@ export default function FixedAssetsRegisterPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAssets();
   }, [searchQuery]);
 

@@ -83,7 +83,6 @@ export default function DisassemblePage() {
   const [quantity, setQuantity] = useState(1);
   const [instructions, setInstructions] = useState("");
   const loadData = async () => {
-    setLoading(true);
     try {
       const [bomsRes, productsRes] = await Promise.all([
         getBoms("active"),
@@ -105,6 +104,7 @@ export default function DisassemblePage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, []);
 

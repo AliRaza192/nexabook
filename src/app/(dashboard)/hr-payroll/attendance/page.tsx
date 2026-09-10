@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Calendar,
@@ -60,11 +60,20 @@ export default function AttendancePage() {
   // Load employees
   useEffect(() => {
     const loadEmployees = async () => {
-      setLoading(true);
       try {
         const result = await getEmployees("Active");
         if (result.success && result.data) {
-          setEmployees(result.data as Employee[]);
+          const emps = result.data as Employee[];
+          setEmployees(emps);
+          const data: Record<string, AttendanceRecord> = {};
+          emps.forEach((emp) => {
+            data[emp.id] = {
+              employeeId: emp.id,
+              date: selectedDate,
+              status: 'Present',
+            };
+          });
+          setAttendanceData(data);
         }
       } catch (error) {
       } finally {
@@ -73,26 +82,6 @@ export default function AttendancePage() {
     };
     loadEmployees();
   }, []);
-
-  // Initialize attendance data when employees load
-  const initialAttendanceData = useMemo(() => {
-    if (employees.length === 0) return {};
-    const data: Record<string, AttendanceRecord> = {};
-    employees.forEach((emp) => {
-      data[emp.id] = {
-        employeeId: emp.id,
-        date: selectedDate,
-        status: 'Present',
-      };
-    });
-    return data;
-  }, [employees, selectedDate]);
-
-  useEffect(() => {
-    if (employees.length > 0 && Object.keys(attendanceData).length === 0) {
-      setAttendanceData(initialAttendanceData);
-    }
-  }, [employees, initialAttendanceData]);
 
   // Update attendance record
   const updateAttendance = (employeeId: string, field: keyof AttendanceRecord, value: any) => {

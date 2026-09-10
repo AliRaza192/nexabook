@@ -154,7 +154,6 @@ export default function JournalEntriesPage() {
   const [amount, setAmount] = useState("");
 
   const fetchAllVouchers = async () => {
-    setVoucherListLoading(true);
     const allVouchers: VoucherRecord[] = [];
     const voucherTypes: VoucherType[] = ["JV", "CPV", "CRV", "BPV", "BRV", "CONTRA"];
 
@@ -173,7 +172,6 @@ export default function JournalEntriesPage() {
 
   useEffect(() => {
     const fetchAccounts = async () => {
-      setLoading(true);
       const result = await getAccounts();
       if (result.success && result.data) {
         setAccounts(result.data as ChartOfAccount[]);
@@ -181,6 +179,7 @@ export default function JournalEntriesPage() {
       setLoading(false);
     };
     fetchAccounts();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchAllVouchers();
   }, []);
 

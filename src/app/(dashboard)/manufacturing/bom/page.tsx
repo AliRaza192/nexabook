@@ -152,7 +152,6 @@ export default function BOMPage() {
   });
 
   const loadData = async () => {
-    setLoading(true);
     try {
       const [bomsRes, productsRes] = await Promise.all([
         getBoms(statusFilter === "all" ? undefined : statusFilter),
@@ -173,6 +172,7 @@ export default function BOMPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [statusFilter]);
 

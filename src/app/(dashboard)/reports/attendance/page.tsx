@@ -19,7 +19,6 @@ export default function AttendancePage() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   const loadReport = async () => {
-    setLoading(true);
     try {
       const result = await getAttendanceReport(selectedMonth, selectedYear);
       if (result.success && result.data) {
@@ -32,6 +31,7 @@ export default function AttendancePage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadReport();
   }, []);
 

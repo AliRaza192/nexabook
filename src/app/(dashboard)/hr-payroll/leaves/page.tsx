@@ -75,7 +75,6 @@ export default function LeaveManagementPage() {
 
   // Load data
   const loadData = async () => {
-    setLoading(true);
     
     const [appsRes, typesRes, employeesRes] = await Promise.all([
       getLeaveApplications(),
@@ -97,6 +96,7 @@ export default function LeaveManagementPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, []);
 

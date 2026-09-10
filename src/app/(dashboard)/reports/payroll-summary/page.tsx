@@ -20,7 +20,6 @@ export default function PayrollSummaryPage() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   const loadReport = async () => {
-    setLoading(true);
     try {
       const result = await getPayrollSummaryReportFull(selectedMonth, selectedYear);
       if (result.success && result.data) {
@@ -33,6 +32,7 @@ export default function PayrollSummaryPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadReport();
   }, []);
 
