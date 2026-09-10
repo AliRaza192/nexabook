@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestDb } from "@/__tests__/test-db";
-import { journalEntries, journalEntryLines } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { journalEntries, journalEntryLines, customers, vendors } from "@/db/schema";
+import { eq, and, sql } from "drizzle-orm";
 
 vi.setConfig({ hookTimeout: 60000 });
 
@@ -575,5 +575,213 @@ describe("Posting Engine — Parity with approveInvoice (plain invoice, received
       l.description?.toLowerCase().includes("purchase returns"),
     );
     expect(purchaseRetLine).toBeUndefined();
+  });
+
+  it("NB-P0-02/03: customer.balance equals sum of posted AR JE lines after invoice + payment + return", async () => {
+    const { db, ids } = testDb;
+    const { orgId, arAccId, revAccId, cogsAccId, invAccId, cashAccId, custId, prodId } = ids;
+
+    // Step 1: Invoice — Dr AR 1000, Cr Revenue 1000, Dr COGS 600, Cr Inventory 600
+    const invId = "a1000000-0000-0000-0000-000000000001";
+    const itmId = "b1000000-0000-0000-0000-000000000001";
+    const issueDate = new Date("2026-09-01");
+
+    await db.execute(
+      `INSERT INTO invoices (id, org_id, customer_id, invoice_number, status, issue_date, net_amount, gross_amount, discount_amount, shipping_charges, round_off, received_amount, balance_amount, tax_amount)
+       VALUES ('${invId}','${orgId}','${custId}','INV-REC-001','pending','${issueDate.toISOString()}','1000.00','1000.00','0.00','0.00','0.00','0.00','1000.00','0.00')`,
+    );
+    await db.execute(
+      `INSERT INTO invoice_items (id, org_id, invoice_id, product_id, description, quantity, unit_price, tax_rate, line_total)
+       VALUES ('${itmId}','${orgId}','${invId}','${prodId}','Widget sale','10','100.00','0','1000.00')`,
+    );
+
+    const { approveInvoice } = await import("@/lib/actions/sales");
+    const invResult = await approveInvoice(invId);
+    expect(invResult.success).toBe(true);
+
+    // After invoice: customer.balance should be 1000 (Dr AR 1000)
+    const [cust1] = await db.select().from(customers).where(eq(customers.id, custId)).limit(1);
+    expect(Number(cust1!.balance)).toBe(1000);
+
+    // Step 2: Partial payment — Dr Cash 400, Cr AR 400
+    const payId = "c1000000-0000-0000-0000-000000000001";
+    await db.execute(
+      `INSERT INTO customer_payments (id, org_id, customer_id, payment_number, payment_date, payment_method, amount, reference)
+       VALUES ('${payId}','${orgId}','${custId}','CP-REC-001','${issueDate.toISOString()}','cash','400.00','test')`,
+    );
+
+    const { postTransaction: postTx2 } = await import("@/lib/accounting/posting-engine");
+    await postTx2(db, {
+      orgId,
+      description: "Partial payment",
+      date: issueDate,
+      referenceType: "customer_payment",
+      referenceId: payId,
+      sourceType: "customer_payment",
+      customerId: custId,
+      lines: [
+        { accountId: cashAccId, description: "Dr Cash", debit: "400", credit: "0" },
+        { accountId: arAccId, description: "Cr AR", debit: "0", credit: "400" },
+      ],
+    });
+
+    // After payment: customer.balance should be 600 (1000 - 400)
+    const [cust2] = await db.select().from(customers).where(eq(customers.id, custId)).limit(1);
+    expect(Number(cust2!.balance)).toBe(600);
+
+    // Step 3: Sales return — Dr Sales Returns 200, Cr AR 200, Dr Inventory 120, Cr COGS 120
+    const srId = "d1000000-0000-0000-0000-000000000001";
+    await db.execute(
+      `INSERT INTO sales_returns (id, org_id, return_number, invoice_id, customer_id, return_date, reason, gross_amount, tax_amount, net_amount, refund_amount, status)
+       VALUES ('${srId}','${orgId}','SR-REC-001','${invId}','${custId}','${issueDate.toISOString()}','defective','200.00','0.00','200.00','200.00','pending')`,
+    );
+
+    const { postTransaction: postTx3 } = await import("@/lib/accounting/posting-engine");
+    await postTx3(db, {
+      orgId,
+      description: "Sales return",
+      date: issueDate,
+      referenceType: "sales_return",
+      referenceId: srId,
+      sourceType: "sales_return",
+      customerId: custId,
+      lines: [
+        { accountId: revAccId, description: "Dr Sales Returns", debit: "200", credit: "0" },
+        { accountId: arAccId, description: "Cr AR", debit: "0", credit: "200" },
+        { accountId: invAccId, description: "Dr Inventory", debit: "120", credit: "0" },
+        { accountId: cogsAccId, description: "Cr COGS", debit: "0", credit: "120" },
+      ],
+    });
+
+    // After return: customer.balance should be 400 (600 - 200)
+    const [cust3] = await db.select().from(customers).where(eq(customers.id, custId)).limit(1);
+    expect(Number(cust3!.balance)).toBe(400);
+
+    // Step 4: Reconciliation — balance must equal sum of posted AR JE lines
+    const arLines = await db
+      .select({
+        debit: journalEntryLines.debitAmount,
+        credit: journalEntryLines.creditAmount,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(
+        and(
+          eq(journalEntryLines.accountId, arAccId),
+          eq(journalEntries.orgId, orgId),
+          eq(journalEntries.status, "posted"),
+        ),
+      );
+
+    const computedBalance = arLines.reduce(
+      (sum, l) => sum + Number(l.debit) - Number(l.credit),
+      0,
+    );
+
+    expect(computedBalance).toBe(Number(cust3!.balance));
+    expect(computedBalance).toBe(400);
+  });
+
+  it("NB-P0-02/03: vendor.balance equals sum of posted AP JE lines after purchase invoice + payment + return", async () => {
+    const { db, ids } = testDb;
+    const { orgId, apAccId, invAccId, cashAccId, vendId, prodId } = ids;
+
+    // Step 1: Purchase invoice — Dr Inventory 800, Cr AP 800
+    const piId = "e1000000-0000-0000-0000-000000000001";
+    const piItmId = "f1000000-0000-0000-0000-000000000001";
+    const piDate = new Date("2026-09-01");
+
+    await db.execute(
+      `INSERT INTO purchase_invoices (id, org_id, vendor_id, bill_number, date, net_amount, gross_amount, discount_total, tax_total, status)
+       VALUES ('${piId}','${orgId}','${vendId}','BILL-REC-001','${piDate.toISOString()}','800.00','800.00','0.00','0.00','Draft')`,
+    );
+    await db.execute(
+      `INSERT INTO purchase_items (id, org_id, purchase_invoice_id, product_id, description, quantity, unit_price, tax_rate, line_total)
+       VALUES ('${piItmId}','${orgId}','${piId}','${prodId}','Widget purchase','10','80.00','0','800.00')`,
+    );
+
+    const { approvePurchaseInvoice } = await import("@/lib/actions/purchases");
+    const piResult = await approvePurchaseInvoice(piId);
+    expect(piResult.success).toBe(true);
+
+    // After purchase invoice: vendor.balance should be 800 (Cr AP 800)
+    const [vend1] = await db.select().from(vendors).where(eq(vendors.id, vendId)).limit(1);
+    expect(Number(vend1!.balance)).toBe(800);
+
+    // Step 2: Vendor payment — Dr AP 300, Cr Cash 300
+    const vpId = "f1000000-0000-0000-0000-000000000002";
+    await db.execute(
+      `INSERT INTO vendor_payments (id, org_id, vendor_id, payment_number, payment_date, payment_method, amount, reference)
+       VALUES ('${vpId}','${orgId}','${vendId}','VP-REC-001','${piDate.toISOString()}','cash','300.00','test')`,
+    );
+
+    const { postTransaction: postTx2 } = await import("@/lib/accounting/posting-engine");
+    await postTx2(db, {
+      orgId,
+      description: "Vendor payment",
+      date: piDate,
+      referenceType: "vendor_payment",
+      referenceId: vpId,
+      sourceType: "vendor_payment",
+      vendorId: vendId,
+      lines: [
+        { accountId: apAccId, description: "Dr AP", debit: "300", credit: "0" },
+        { accountId: cashAccId, description: "Cr Cash", debit: "0", credit: "300" },
+      ],
+    });
+
+    // After payment: vendor.balance should be 500 (800 - 300)
+    const [vend2] = await db.select().from(vendors).where(eq(vendors.id, vendId)).limit(1);
+    expect(Number(vend2!.balance)).toBe(500);
+
+    // Step 3: Purchase return — Dr AP 100, Cr Inventory 100
+    const prId = "f1000000-0000-0000-0000-000000000003";
+    await db.execute(
+      `INSERT INTO purchase_returns (id, org_id, return_number, vendor_id, return_date, reason, gross_amount, tax_amount, net_amount, refund_amount, status)
+       VALUES ('${prId}','${orgId}','PR-REC-001','${vendId}','${piDate.toISOString()}','defective','100.00','0.00','100.00','100.00','pending')`,
+    );
+
+    const { postTransaction: postTx3 } = await import("@/lib/accounting/posting-engine");
+    await postTx3(db, {
+      orgId,
+      description: "Purchase return",
+      date: piDate,
+      referenceType: "purchase_return",
+      referenceId: prId,
+      sourceType: "purchase_return",
+      vendorId: vendId,
+      lines: [
+        { accountId: apAccId, description: "Dr AP", debit: "100", credit: "0" },
+        { accountId: invAccId, description: "Cr Inventory", debit: "0", credit: "100" },
+      ],
+    });
+
+    // After return: vendor.balance should be 400 (500 - 100)
+    const [vend3] = await db.select().from(vendors).where(eq(vendors.id, vendId)).limit(1);
+    expect(Number(vend3!.balance)).toBe(400);
+
+    // Step 4: Reconciliation — balance must equal sum of posted AP JE lines (credit - debit)
+    const apLines = await db
+      .select({
+        debit: journalEntryLines.debitAmount,
+        credit: journalEntryLines.creditAmount,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(
+        and(
+          eq(journalEntryLines.accountId, apAccId),
+          eq(journalEntries.orgId, orgId),
+          eq(journalEntries.status, "posted"),
+        ),
+      );
+
+    const computedBalance = apLines.reduce(
+      (sum, l) => sum + Number(l.credit) - Number(l.debit),
+      0,
+    );
+
+    expect(computedBalance).toBe(Number(vend3!.balance));
+    expect(computedBalance).toBe(400);
   });
 });

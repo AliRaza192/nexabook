@@ -1,5 +1,5 @@
-import { journalEntries, journalEntryLines, chartOfAccounts } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { journalEntries, journalEntryLines, chartOfAccounts, customers, vendors } from "@/db/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { validateJournalBalance } from "@/lib/accounting";
 import { generateJournalEntryNumber } from "@/lib/actions/shared";
 
@@ -18,6 +18,8 @@ export interface PostTransactionSpec {
   referenceId: string;
   sourceType?: string;
   lines: JournalLineSpec[];
+  customerId?: string;
+  vendorId?: string;
 }
 
 /**
@@ -78,6 +80,45 @@ export async function postTransaction(
   }));
 
   await tx.insert(journalEntryLines).values(lines);
+
+  // NB-P0-02/03: Atomically update customer/vendor balance from AR/AP lines
+  if (spec.customerId || spec.vendorId) {
+    const arApAccounts = await tx
+      .select({ id: chartOfAccounts.id, subType: chartOfAccounts.subType })
+      .from(chartOfAccounts)
+      .where(
+        and(
+          eq(chartOfAccounts.orgId, spec.orgId),
+          sql`${chartOfAccounts.subType} IN ('accounts_receivable', 'accounts_payable')`,
+        ),
+      );
+
+    const arApIds = new Set(arApAccounts.map((a: { id: string; subType: string | null }) => a.id));
+    const arAccountId = arApAccounts.find((a: { id: string; subType: string | null }) => a.subType === "accounts_receivable")?.id;
+    const apAccountId = arApAccounts.find((a: { id: string; subType: string | null }) => a.subType === "accounts_payable")?.id;
+
+    if (spec.customerId && arAccountId) {
+      const arLines = spec.lines.filter((l) => l.accountId === arAccountId && arApIds.has(l.accountId));
+      const netAR = arLines.reduce((s, l) => s + Number(l.debit) - Number(l.credit), 0);
+      if (netAR !== 0) {
+        await tx
+          .update(customers)
+          .set({ balance: sql`COALESCE(${customers.balance}, 0) + ${netAR}` })
+          .where(and(eq(customers.id, spec.customerId), eq(customers.orgId, spec.orgId)));
+      }
+    }
+
+    if (spec.vendorId && apAccountId) {
+      const apLines = spec.lines.filter((l) => l.accountId === apAccountId && arApIds.has(l.accountId));
+      const netAP = apLines.reduce((s, l) => s + Number(l.credit) - Number(l.debit), 0);
+      if (netAP !== 0) {
+        await tx
+          .update(vendors)
+          .set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) + ${netAP}, 0)` })
+          .where(and(eq(vendors.id, spec.vendorId), eq(vendors.orgId, spec.orgId)));
+      }
+    }
+  }
 
   return { journalEntryId: entry.id, entryNumber };
 }

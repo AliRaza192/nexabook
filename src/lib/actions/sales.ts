@@ -1135,6 +1135,7 @@ export async function approveInvoice(invoiceId: string) {
         referenceType: "invoice",
         referenceId: invoiceId,
         sourceType: "invoice",
+        customerId: invoice.customerId,
         lines,
       });
 
@@ -3090,6 +3091,7 @@ export async function approveSalesReturn(returnId: string) {
         referenceType: "sales_return",
         referenceId: returnId,
         sourceType: "sales_return",
+        customerId: salesReturn.customerId,
         lines: returnLines,
       });
 
@@ -3255,59 +3257,29 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
       }
 
       if (cashBankAccount && arAccount) {
-        const entryNumber = await (async () => {
-          const result = await tx
-            .select({ entryNumber: journalEntries.entryNumber })
-            .from(journalEntries)
-            .where(eq(journalEntries.orgId, orgId))
-            .orderBy(desc(journalEntries.createdAt))
-            .limit(1);
-          let nextNumber = 1;
-          if (result.length > 0 && result[0].entryNumber) {
-            const match = result[0].entryNumber.match(/\d+$/);
-            if (match) nextNumber = parseInt(match[0]) + 1;
-          }
-          return `JE-${String(nextNumber).padStart(5, "0")}`;
-        })();
-        const [journalEntry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId,
-            entryNumber,
-            entryDate: new Date(data.paymentDate),
-            referenceType: "customer_payment",
-            referenceId: newPayment.id,
-            description: `Customer Payment ${paymentNumber}`,
-            status: "posted",
-            postedAt: new Date(),
-          })
-          .returning();
-        const paymentLines = [
-          { debitAmount: data.amount, creditAmount: "0" },
-          { debitAmount: "0", creditAmount: data.amount },
-        ];
-        if (!validateJournalBalance(paymentLines)) throw new Error("Journal entry out of balance");
-
-        await tx
-          .insert(journalEntryLines)
-          .values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: cashBankAccount.id,
-            description: `Debit - ${cashBankAccount.name}`,
-            debitAmount: data.amount,
-            creditAmount: "0",
-          });
-        await tx
-          .insert(journalEntryLines)
-          .values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: arAccount.id,
-            description: `Credit - Accounts Receivable`,
-            debitAmount: "0",
-            creditAmount: data.amount,
-          });
+        await postTransaction(tx, {
+          orgId,
+          description: `Customer Payment ${paymentNumber}`,
+          date: new Date(data.paymentDate),
+          referenceType: "customer_payment",
+          referenceId: newPayment.id,
+          sourceType: "customer_payment",
+          customerId: data.customerId,
+          lines: [
+            {
+              accountId: cashBankAccount.id,
+              description: `Debit - ${cashBankAccount.name}`,
+              debit: data.amount,
+              credit: "0",
+            },
+            {
+              accountId: arAccount.id,
+              description: `Credit - Accounts Receivable`,
+              debit: "0",
+              credit: data.amount,
+            },
+          ],
+        });
       }
 
       return newPayment;
@@ -3539,6 +3511,48 @@ export async function createCustomerSettlement(data: SettlementFormData) {
             );
         }
       }
+
+      // NB-P0-03: Post settlement JE via posting engine
+      const paymentSubType = data.paymentMethod === "cash" ? "cash" : "bank";
+      const cashAcc = await resolveAccount(tx, orgId, paymentSubType);
+      const arAcc = await resolveAccount(tx, orgId, "accounts_receivable");
+
+      const settlementLines_spec: { accountId: string; description: string; debit: string; credit: string }[] = [
+        {
+          accountId: cashAcc.id,
+          description: `Cash Received (Settlement ${settlementNumber})`,
+          debit: totalSettlement.toFixed(2),
+          credit: "0",
+        },
+        {
+          accountId: arAcc.id,
+          description: `AR Credit (Settlement ${settlementNumber})`,
+          debit: "0",
+          credit: totalOutstanding.toFixed(2),
+        },
+      ];
+
+      if (totalDiscount > 0) {
+        const discountAcc = await resolveAccount(tx, orgId, "discount_allowed");
+        settlementLines_spec.push({
+          accountId: discountAcc.id,
+          description: `Discount Allowed (Settlement ${settlementNumber})`,
+          debit: totalDiscount.toFixed(2),
+          credit: "0",
+        });
+      }
+
+      await postTransaction(tx, {
+        orgId,
+        description: `Customer Settlement ${settlementNumber}`,
+        date: new Date(data.settlementDate),
+        referenceType: "settlement",
+        referenceId: settlement.id,
+        sourceType: "settlement",
+        customerId: data.customerId,
+        lines: settlementLines_spec,
+      });
+
       return settlement;
     });
 

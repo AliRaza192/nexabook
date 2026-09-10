@@ -450,57 +450,13 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         }
       }
 
-      // 3. Update vendor balance (accumulate payable)
-      await tx
-        .update(vendors)
-        .set({ balance: sql`COALESCE(${vendors.balance}, 0) + ${invoice.netAmount}` })
-        .where(eq(vendors.id, invoice.vendorId));
+      // 3. Create Journal Entry via posting engine (NB-P0-02: vendor balance updated atomically)
+      const invAcc = await resolveAccount(tx, orgId, "inventory");
+      const apAcc = await resolveAccount(tx, orgId, "accounts_payable");
 
-      // 4. Create Journal Entry
-      const entryNumber = await generateJournalEntryNumber(orgId);
-
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(invoice.date),
-          referenceType: 'purchase_invoice',
-          referenceId: invoiceId,
-          description: `Purchase Invoice ${invoice.billNumber} approval`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      // Find accounts
-      const [inventoryAccount] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'inventory')
-        ))
-        .limit(1);
-
-      const [vendorPayable] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'accounts_payable')
-        ))
-        .limit(1);
-
-      if (!inventoryAccount || !vendorPayable) {
-        throw new Error('Required accounts not found. Please seed Chart of Accounts first.');
-      }
-
-      // 5. Create Journal Entry Lines
       const discountAmount = parseFloat(invoice.discountTotal || '0');
       const inventoryDebitAmount = (parseFloat(invoice.grossAmount || '0') - discountAmount).toFixed(2);
 
-      // Calculate tax per taxType from purchase items
       const taxByType = new Map<string, number>();
       for (const item of items) {
         const lineTotal = parseFloat(item.lineTotal || "0");
@@ -518,59 +474,48 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         BRA: "tax_receivable_bra",
       };
 
-      let totalTaxAmount = 0;
-      for (const amount of taxByType.values()) totalTaxAmount += amount;
-
-      // Validate journal balance before posting
-      const purchaseLines: { debitAmount: string; creditAmount: string }[] = [
-        { debitAmount: inventoryDebitAmount, creditAmount: "0" },
+      const purchaseLines = [
+        {
+          accountId: invAcc.id,
+          description: `Debit - Inventory Asset (Purchase ${invoice.billNumber})`,
+          debit: inventoryDebitAmount,
+          credit: "0",
+        },
+        ...Array.from(taxByType.entries())
+          .filter(([, amount]) => amount > 0)
+          .map(([tType, amount]) => ({
+            accountId: "", // resolved below
+            description: `Debit - ${tType} Input Tax (Purchase ${invoice.billNumber})`,
+            debit: amount.toFixed(2),
+            credit: "0",
+            taxSubType: inputTaxSubTypeMap[tType] || "input_tax",
+          })),
+        {
+          accountId: apAcc.id,
+          description: `Credit - Vendor Payable (Purchase ${invoice.billNumber})`,
+          debit: "0",
+          credit: invoice.netAmount,
+        },
       ];
-      for (const amount of taxByType.values()) {
-        if (amount > 0) purchaseLines.push({ debitAmount: amount.toFixed(2), creditAmount: "0" });
-      }
-      purchaseLines.push({ debitAmount: "0", creditAmount: invoice.netAmount });
-      if (!validateJournalBalance(purchaseLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
 
-      // Debit: Inventory (Asset) — grossAmount minus any discount
-      await tx.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: inventoryAccount.id,
-        description: `Debit - Inventory Asset (Purchase ${invoice.billNumber})`,
-        debitAmount: inventoryDebitAmount,
-        creditAmount: '0',
-      });
-
-      // Debit: Input Tax per tax type
-      for (const [tType, amount] of taxByType.entries()) {
-        if (amount <= 0) continue;
-        const subType = inputTaxSubTypeMap[tType] || "input_tax";
-        const [[taxAcc]] = await Promise.all([
-          tx.select().from(chartOfAccounts)
-            .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, subType)))
-            .limit(1),
-        ]);
-        if (!taxAcc) {
-          throw new Error(`${tType} Input Tax account not found. Please seed Chart of Accounts first.`);
+      // Resolve tax account IDs
+      for (const line of purchaseLines) {
+        if ((line as any).taxSubType) {
+          const taxAcc = await resolveAccount(tx, orgId, (line as any).taxSubType);
+          line.accountId = taxAcc.id;
+          delete (line as any).taxSubType;
         }
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: taxAcc.id,
-          description: `Debit - ${tType} Input Tax (Purchase ${invoice.billNumber})`,
-          debitAmount: amount.toFixed(2),
-          creditAmount: '0',
-        });
       }
 
-      // Credit: Vendor Payable (Liability) — Net Amount (total payable)
-      await tx.insert(journalEntryLines).values({
+      const { entryNumber } = await postTransaction(tx, {
         orgId,
-        journalEntryId: journalEntry.id,
-        accountId: vendorPayable.id,
-        description: `Credit - Vendor Payable (Purchase ${invoice.billNumber})`,
-        debitAmount: '0',
-        creditAmount: invoice.netAmount,
+        description: `Purchase Invoice ${invoice.billNumber} approval`,
+        date: new Date(invoice.date),
+        referenceType: "purchase_invoice",
+        referenceId: invoiceId,
+        sourceType: "purchase_invoice",
+        vendorId: invoice.vendorId,
+        lines: purchaseLines,
       });
 
       // 6. Create audit log
@@ -667,72 +612,33 @@ export async function revisePurchaseInvoice(invoiceId: string) {
           .where(eq(journalEntries.id, originalJE.id));
       }
 
-      // 4. Create reversal journal entry
-      const entryNumber = await generateJournalEntryNumber(orgId);
+      // 4. Create reversal journal entry via posting engine
+      const invAcc = await resolveAccount(tx, orgId, "inventory");
+      const apAcc = await resolveAccount(tx, orgId, "accounts_payable");
 
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(invoice.date),
-          referenceType: 'purchase_invoice_revision',
-          referenceId: invoiceId,
-          description: `Purchase Invoice ${invoice.billNumber} revision - reversal`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      const [inventoryAccount] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'inventory')
-        ))
-        .limit(1);
-
-      const [vendorPayable] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'accounts_payable')
-        ))
-        .limit(1);
-
-      if (!inventoryAccount || !vendorPayable) {
-        throw new Error('Required accounts not found');
-      }
-
-      if (!validateJournalBalance([{ debitAmount: invoice.netAmount, creditAmount: "0" }, { debitAmount: "0", creditAmount: invoice.netAmount }]))
-        throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-      // Reverse: Credit Inventory, Debit Vendor Payable
-      await tx.insert(journalEntryLines).values({
+      const { entryNumber } = await postTransaction(tx, {
         orgId,
-        journalEntryId: journalEntry.id,
-        accountId: inventoryAccount.id,
-        description: `Credit - Inventory Asset (Reversal ${invoice.billNumber})`,
-        debitAmount: '0',
-        creditAmount: invoice.netAmount,
+        description: `Purchase Invoice ${invoice.billNumber} revision - reversal`,
+        date: new Date(invoice.date),
+        referenceType: "purchase_invoice_revision",
+        referenceId: invoiceId,
+        sourceType: "purchase_invoice_revision",
+        vendorId: invoice.vendorId,
+        lines: [
+          {
+            accountId: apAcc.id,
+            description: `Debit - Vendor Payable (Reversal ${invoice.billNumber})`,
+            debit: invoice.netAmount,
+            credit: "0",
+          },
+          {
+            accountId: invAcc.id,
+            description: `Credit - Inventory Asset (Reversal ${invoice.billNumber})`,
+            debit: "0",
+            credit: invoice.netAmount,
+          },
+        ],
       });
-
-      await tx.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: vendorPayable.id,
-        description: `Debit - Vendor Payable (Reversal ${invoice.billNumber})`,
-        debitAmount: invoice.netAmount,
-        creditAmount: '0',
-      });
-
-      // 4. Update vendor balance
-      await tx
-        .update(vendors)
-        .set({ balance: '0' })
-        .where(eq(vendors.id, invoice.vendorId));
 
       // 5. Audit log
       await tx.insert(auditLogs).values({
@@ -1642,13 +1548,6 @@ export async function approvePurchaseReturn(id: string) {
         }
       }
 
-      // Update vendor balance (reduce payable)
-      const [vendor] = await tx.select().from(vendors).where(eq(vendors.id, purchaseReturn.vendorId)).limit(1);
-      if (vendor) {
-        const refundAmt = parseFloat(purchaseReturn.refundAmount || '0');
-        await tx.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${refundAmt}, 0)` }).where(eq(vendors.id, purchaseReturn.vendorId));
-      }
-
       // Create debit note journal entry via posting engine
       const apAcc = await resolveAccount(tx, orgId, "accounts_payable");
       const invAcc = await resolveAccount(tx, orgId, "inventory");
@@ -1661,6 +1560,7 @@ export async function approvePurchaseReturn(id: string) {
         referenceType: "purchase_return",
         referenceId: id,
         sourceType: "purchase_return",
+        vendorId: purchaseReturn.vendorId,
         lines: [
           // Dr AP (reduce liability)
           {
@@ -1809,79 +1709,48 @@ export async function createVendorPayment(data: VendorPaymentFormData) {
         }
       }
 
-      // Create journal entry: Debit Accounts Payable, Credit Cash/Bank, Credit WHT Payable
-      const entryNumber = await (async () => {
-        const res = await tx.select({ entryNumber: journalEntries.entryNumber }).from(journalEntries).where(eq(journalEntries.orgId, orgId)).orderBy(desc(journalEntries.createdAt)).limit(1);
-        let nextNum = 1;
-        if (res.length > 0 && res[0].entryNumber) { const m = res[0].entryNumber.match(/\d+$/); if (m) nextNum = parseInt(m[0]) + 1; }
-        return `JE-${String(nextNum).padStart(5, '0')}`;
-      })();
-
+      // NB-P0-02/03: Post vendor payment JE via posting engine
       if (cashBankAccount && apAccount) {
-        const lines = [
-          { debitAmount: String(paymentAmount), creditAmount: '0' },
-          { debitAmount: '0', creditAmount: String(netPayment) },
+        const paymentLines = [
+          {
+            accountId: apAccount.id,
+            description: `Debit - Accounts Payable`,
+            debit: String(paymentAmount),
+            credit: "0",
+          },
+          {
+            accountId: cashBankAccount.id,
+            description: `Credit - ${cashBankAccount.name}`,
+            debit: "0",
+            credit: String(netPayment),
+          },
         ];
-        if (whtAmount > 0) {
-          lines.push({ debitAmount: '0', creditAmount: String(whtAmount) });
-        }
-        if (!validateJournalBalance(lines))
-          throw new Error("Journal entry out of balance: total debits must equal total credits");
 
-        const [journalEntry] = await tx.insert(journalEntries).values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(data.paymentDate),
-          referenceType: 'vendor_payment',
-          referenceId: payment.id,
-          description: `Vendor Payment ${paymentNumber}${whtAmount > 0 ? ` (WHT: ${whtAmount.toFixed(2)})` : ''}`,
-          status: "posted",
-          postedAt: new Date(),
-        }).returning();
-
-        // Debit: Accounts Payable (full invoice amount)
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: apAccount.id,
-          description: `Debit - Accounts Payable`,
-          debitAmount: String(paymentAmount),
-          creditAmount: '0',
-        });
-
-        // Credit: Cash/Bank (net of WHT)
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: cashBankAccount.id,
-          description: `Credit - ${cashBankAccount.name}`,
-          debitAmount: '0',
-          creditAmount: String(netPayment),
-        });
-
-        // Credit: WHT Payable (WHT amount)
         if (whtAmount > 0) {
           const [whtAccount] = await tx.select().from(chartOfAccounts).where(
             and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'wht_payable'))
           ).limit(1);
 
           if (whtAccount) {
-            await tx.insert(journalEntryLines).values({
-              orgId,
-              journalEntryId: journalEntry.id,
+            paymentLines.push({
               accountId: whtAccount.id,
               description: `Credit - WHT Payable (${whtRate > 0 ? whtRate + '%' : 'Fixed'})`,
-              debitAmount: '0',
-              creditAmount: String(whtAmount),
+              debit: "0",
+              credit: String(whtAmount),
             });
           }
         }
-      }
 
-      // Update vendor balance (reduce payable by full amount)
-      const [vendor] = await tx.select().from(vendors).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId))).limit(1);
-      if (vendor) {
-        await tx.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${paymentAmount}, 0)` }).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId)));
+      const { entryNumber } = await postTransaction(tx, {
+          orgId,
+          description: `Vendor Payment ${paymentNumber}${whtAmount > 0 ? ` (WHT: ${whtAmount.toFixed(2)})` : ''}`,
+          date: new Date(data.paymentDate),
+          referenceType: "vendor_payment",
+          referenceId: payment.id,
+          sourceType: "vendor_payment",
+          vendorId: data.vendorId,
+          lines: paymentLines,
+        });
       }
 
       return payment;
@@ -2035,11 +1904,46 @@ export async function createVendorSettlement(data: {
         }
       }
 
-      // Update vendor balance (reduce payable)
-      const [vendor] = await tx.select().from(vendors).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId))).limit(1);
-      if (vendor) {
-        await tx.update(vendors).set({ balance: sql`GREATEST(COALESCE(${vendors.balance}, 0) - ${totalSettlement}, 0)` }).where(and(eq(vendors.id, data.vendorId), eq(vendors.orgId, orgId)));
+      // NB-P0-03: Post settlement JE via posting engine
+      const paymentSubType = data.paymentMethod === 'cash' ? 'cash' : 'bank';
+      const cashAcc = await resolveAccount(tx, orgId, paymentSubType);
+      const apAcc = await resolveAccount(tx, orgId, "accounts_payable");
+
+      const settlementLines_spec: { accountId: string; description: string; debit: string; credit: string }[] = [
+        {
+          accountId: apAcc.id,
+          description: `Debit - Accounts Payable (Settlement ${settlementNumber})`,
+          debit: totalOutstanding.toFixed(2),
+          credit: "0",
+        },
+        {
+          accountId: cashAcc.id,
+          description: `Credit - ${cashAcc.name} (Settlement ${settlementNumber})`,
+          debit: "0",
+          credit: totalSettlement.toFixed(2),
+        },
+      ];
+
+      if (totalDiscount > 0) {
+        const discountAcc = await resolveAccount(tx, orgId, "discount_allowed");
+        settlementLines_spec.push({
+          accountId: discountAcc.id,
+          description: `Credit - Discount Received (Settlement ${settlementNumber})`,
+          debit: "0",
+          credit: totalDiscount.toFixed(2),
+        });
       }
+
+      await postTransaction(tx, {
+        orgId,
+        description: `Vendor Settlement ${settlementNumber}`,
+        date: new Date(data.settlementDate),
+        referenceType: "settlement",
+        referenceId: newSettlement.id,
+        sourceType: "settlement",
+        vendorId: data.vendorId,
+        lines: settlementLines_spec,
+      });
 
       return newSettlement;
     });
