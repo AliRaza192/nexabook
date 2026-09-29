@@ -1968,3 +1968,30 @@ ALTER TABLE "warehouses" ADD CONSTRAINT "warehouses_org_id_organizations_id_fk" 
 ALTER TABLE "webhook_deliveries" ADD CONSTRAINT "webhook_deliveries_webhook_endpoint_id_webhook_endpoints_id_fk" FOREIGN KEY ("webhook_endpoint_id") REFERENCES "public"."webhook_endpoints"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "webhook_deliveries" ADD CONSTRAINT "webhook_deliveries_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "webhook_endpoints" ADD CONSTRAINT "webhook_endpoints_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
+
+-- Folded in from migrations/0005_org_scoping_and_unique_constraints.sql
+-- (test-db.ts does not replay migrations beyond 0001/0002/0006)
+ALTER TABLE "warehouse_stock" ADD COLUMN "org_id" uuid REFERENCES "organizations"("id");
+ALTER TABLE "warehouse_stock" ALTER COLUMN "org_id" SET NOT NULL;
+ALTER TABLE "stock_transfer_items" ADD COLUMN "org_id" uuid REFERENCES "organizations"("id");
+ALTER TABLE "stock_transfer_items" ALTER COLUMN "org_id" SET NOT NULL;
+
+ALTER TABLE "delivery_notes" ADD CONSTRAINT "uq_delivery_note_org_number" UNIQUE (org_id, delivery_number);
+ALTER TABLE "sales_returns" ADD CONSTRAINT "uq_sales_return_org_number" UNIQUE (org_id, return_number);
+ALTER TABLE "purchase_returns" ADD CONSTRAINT "uq_purchase_return_org_number" UNIQUE (org_id, return_number);
+ALTER TABLE "customer_payments" ADD CONSTRAINT "uq_customer_payment_org_number" UNIQUE (org_id, payment_number);
+ALTER TABLE "vendor_payments" ADD CONSTRAINT "uq_vendor_payment_org_number" UNIQUE (org_id, payment_number);
+ALTER TABLE "settlements" ADD CONSTRAINT "uq_settlement_org_number" UNIQUE (org_id, settlement_number);
+ALTER TABLE "bank_deposits" ADD CONSTRAINT "uq_bank_deposit_org_number" UNIQUE (org_id, deposit_number);
+ALTER TABLE "funds_transfers" ADD CONSTRAINT "uq_funds_transfer_org_number" UNIQUE (org_id, transfer_number);
+ALTER TABLE "misc_contacts" ADD CONSTRAINT "uq_misc_contact_org_number" UNIQUE (org_id, reference_number);
+ALTER TABLE "credit_debit_notes" ADD CONSTRAINT "uq_credit_debit_note_org_number" UNIQUE (org_id, note_number);
+ALTER TABLE "pdc_instruments" ADD CONSTRAINT "uq_pdc_instrument_org_number" UNIQUE (org_id, instrument_number);
+ALTER TABLE "stock_adjustments" ADD CONSTRAINT "uq_stock_adjustment_org_number" UNIQUE (org_id, adjustment_number);
+ALTER TABLE "stock_counts" ADD CONSTRAINT "uq_stock_count_org_number" UNIQUE (org_id, count_number);
+ALTER TABLE "products" ADD CONSTRAINT "uq_product_org_sku" UNIQUE (org_id, sku);
+ALTER TABLE "product_categories" ADD CONSTRAINT "uq_category_org_name" UNIQUE (org_id, name);
+
+-- Folded in from migrations/0008_manufacturing_constraints.sql
+ALTER TABLE "manufacturing_boms" ADD CONSTRAINT "uq_bom_org_code" UNIQUE (org_id, code);
+ALTER TABLE "job_orders" ADD CONSTRAINT "uq_job_order_org_number" UNIQUE (org_id, order_number);

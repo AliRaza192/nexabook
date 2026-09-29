@@ -19,6 +19,8 @@ export const dateRangeSchema = z.object({
 });
 
 // Invoice validation
+// NB: InvoiceFormData (and the invoice form UI) carries money/qty as STRINGS —
+// use z.coerce.number() so valid payloads aren't rejected as "Expected number".
 export const createInvoiceSchema = z.object({
   customerId: z.string().uuid("Invalid customer ID"),
   warehouseId: z.string().uuid("Invalid warehouse ID").optional(),
@@ -26,18 +28,18 @@ export const createInvoiceSchema = z.object({
   dueDate: z.coerce.date().optional(),
   subject: z.string().max(255).optional(),
   reference: z.string().max(100).optional(),
-  discountPercentage: z.number().min(0).max(100).default(0),
-  taxAmount: z.number().min(0).default(0),
-  shippingCharges: z.number().min(0).default(0),
+  discountPercentage: z.coerce.number().min(0).max(100).default(0),
+  taxAmount: z.coerce.number().min(0).default(0),
+  shippingCharges: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
   terms: z.string().optional(),
   items: z.array(z.object({
     productId: z.string().uuid().optional(),
     description: z.string().min(1, "Description is required"),
-    quantity: z.number().positive("Quantity must be positive"),
-    unitPrice: z.number().min(0, "Price must be non-negative"),
-    discountPercentage: z.number().min(0).max(100).default(0),
-    taxRate: z.number().min(0).max(100).default(0),
+    quantity: z.coerce.number().positive("Quantity must be positive"),
+    unitPrice: z.coerce.number().min(0, "Price must be non-negative"),
+    discountPercentage: z.coerce.number().min(0).max(100).default(0),
+    taxRate: z.coerce.number().min(0).max(100).default(0),
   })).min(1, "At least one item is required"),
 });
 

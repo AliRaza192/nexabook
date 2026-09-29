@@ -31,7 +31,14 @@ export async function validateCsrf(): Promise<void> {
   const cookieToken = cookieStore.get(CSRF_COOKIE)?.value;
   const headerToken = hdrs.get(CSRF_HEADER) ?? hdrs.get("x-csrf-token");
 
-  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+  if (!cookieToken || !headerToken) {
+    throw new Error("CSRF token missing");
+  }
+
+  const { timingSafeEqual } = await import("node:crypto");
+  const a = Buffer.from(cookieToken);
+  const b = Buffer.from(headerToken);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
     throw new Error("Invalid CSRF token");
   }
 }

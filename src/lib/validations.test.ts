@@ -43,6 +43,55 @@ describe("validations", () => {
       });
       expect(result.success).toBe(false);
     });
+
+    // NB: the invoice form UI (and InvoiceFormData) sends money/qty as strings.
+    // This exact payload shape was rejected before coerce was added — invoice
+    // creation failed on its own valid input.
+    it("accepts the string-typed payload the invoice form actually submits", () => {
+      const result = validate(createInvoiceSchema, {
+        customerId: "550e8400-e29b-41d4-a716-446655440000",
+        invoiceNumber: "INV-0001",
+        issueDate: new Date("2026-01-15"),
+        grossAmount: "1000.00",
+        discountPercentage: "0.00",
+        discountAmount: "0.00",
+        taxAmount: "100.00",
+        shippingCharges: "0.00",
+        roundOff: "0.00",
+        netAmount: "1100.00",
+        receivedAmount: "0.00",
+        balanceAmount: "1100.00",
+        terms: "",
+        items: [
+          {
+            productId: "550e8400-e29b-41d4-a716-446655440099",
+            description: "Widget",
+            quantity: "10",
+            unitPrice: "100",
+            discountPercentage: "0",
+            taxRate: "10",
+            lineTotal: "1000.00",
+          },
+        ],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("still rejects non-numeric quantity and negative amounts", () => {
+      const bad = validate(createInvoiceSchema, {
+        customerId: "550e8400-e29b-41d4-a716-446655440000",
+        issueDate: "2026-01-15",
+        items: [{ description: "Item", quantity: "abc", unitPrice: "100" }],
+      });
+      expect(bad.success).toBe(false);
+
+      const negative = validate(createInvoiceSchema, {
+        customerId: "550e8400-e29b-41d4-a716-446655440000",
+        issueDate: "2026-01-15",
+        items: [{ description: "Item", quantity: "-2", unitPrice: "100" }],
+      });
+      expect(negative.success).toBe(false);
+    });
   });
 
   describe("createCustomerSchema", () => {
