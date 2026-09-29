@@ -119,7 +119,7 @@ export async function getDashboardData(dateRange?: { from: Date; to: Date }): Pr
         eq(purchaseInvoices.orgId, orgId),
         gte(purchaseInvoices.date, currentPeriod.from),
         lte(purchaseInvoices.date, currentPeriod.to),
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`
       ));
 
     const [currentExpensesResult] = await db
@@ -143,7 +143,7 @@ export async function getDashboardData(dateRange?: { from: Date; to: Date }): Pr
         eq(purchaseInvoices.orgId, orgId),
         gte(purchaseInvoices.date, previousPeriod.from),
         lte(purchaseInvoices.date, previousPeriod.to),
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`
       ));
 
     const [prevExpensesResult] = await db

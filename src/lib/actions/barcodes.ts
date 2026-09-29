@@ -36,18 +36,33 @@ export async function getBarcodePrintData(
       isSerialTracked: boolean;
     }> = [];
 
+    const serialProductIds = productRows.filter((p) => p.isSerialTracked).map((p) => p.id);
+    const allSerials = includeSerials && serialProductIds.length
+      ? await db
+          .select({
+            id: serialNumbers.id,
+            productId: serialNumbers.productId,
+            serialNumber: serialNumbers.serialNumber,
+          })
+          .from(serialNumbers)
+          .where(and(
+            eq(serialNumbers.orgId, orgId),
+            inArray(serialNumbers.productId, serialProductIds),
+            eq(serialNumbers.status, "in_stock"),
+          ))
+      : [];
+    const serialsByProduct = new Map<string, typeof allSerials>();
+    for (const s of allSerials) {
+      const list = serialsByProduct.get(s.productId) || [];
+      list.push(s);
+      serialsByProduct.set(s.productId, list);
+    }
+
     for (const p of productRows) {
       const barcodeValue = p.barcode || p.sku;
 
       if (includeSerials && p.isSerialTracked) {
-        const serials = await db
-          .select({ id: serialNumbers.id, serialNumber: serialNumbers.serialNumber })
-          .from(serialNumbers)
-          .where(and(
-            eq(serialNumbers.orgId, orgId),
-            eq(serialNumbers.productId, p.id),
-            eq(serialNumbers.status, "in_stock"),
-          ));
+        const serials = serialsByProduct.get(p.id) || [];
 
         if (serials.length > 0) {
           for (const s of serials) {

@@ -70,6 +70,7 @@ export default function WebhooksPage() {
   const [deliveriesLoading, setDeliveriesLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [revealedSecret, setRevealedSecret] = useState<{ name: string; secret: string } | null>(null);
 
   // Form state
   const [formName, setFormName] = useState("");
@@ -118,6 +119,9 @@ export default function WebhooksPage() {
       setFormEvents([]);
       setFormDescription("");
       setMessage("Webhook created!");
+      if (res.data?.secret) {
+        setRevealedSecret({ name: res.data.name, secret: res.data.secret });
+      }
       loadEndpoints();
     } else {
       setMessage(res.error || "Failed to create webhook");
@@ -149,6 +153,9 @@ export default function WebhooksPage() {
     const res = await regenerateWebhookSecret(id);
     if (res.success) {
       setMessage("Secret regenerated!");
+      if (res.data?.secret) {
+        setRevealedSecret({ name: res.data.name, secret: res.data.secret });
+      }
       loadEndpoints();
     }
     setTimeout(() => setMessage(""), 3000);
@@ -256,6 +263,29 @@ export default function WebhooksPage() {
         </div>
       )}
 
+      {revealedSecret && (
+        <div className="bg-amber-50 border border-amber-200 px-4 py-3 rounded-md text-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="font-medium text-amber-800">
+                Secret for &quot;{revealedSecret.name}&quot; — copy it now, it won&apos;t be shown again
+              </p>
+              <code className="block mt-1 break-all text-xs bg-white border border-amber-200 px-2 py-1 rounded font-mono">
+                {revealedSecret.secret}
+              </code>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button variant="outline" size="sm" onClick={() => copyToClipboard(revealedSecret.secret)}>
+                <Copy className="h-3 w-3 mr-1" /> Copy
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setRevealedSecret(null)}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-nexabook-600" />
@@ -336,11 +366,8 @@ export default function WebhooksPage() {
                 <div className="mt-3 flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Secret:</span>
                   <code className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
-                    {ep.secret.substring(0, 16)}...
+                    {ep.secret}
                   </code>
-                  <button onClick={() => copyToClipboard(ep.secret)} className="text-muted-foreground hover:text-foreground">
-                    <Copy className="h-3 w-3" />
-                  </button>
                 </div>
                 {ep.description && (
                   <p className="text-xs text-muted-foreground mt-2">{ep.description}</p>

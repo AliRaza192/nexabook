@@ -374,19 +374,23 @@ export async function getLeaveBalance(employeeId: string) {
       isPaid: boolean;
     }> = [];
 
-    for (const leaveType of allLeaveTypes) {
-      // Get approved leaves for this employee and type in current year
-      const approvedLeaves = await db
-        .select({ totalDays: sql<number>`sum(${leaveApplications.totalDays})` })
-        .from(leaveApplications)
-        .where(and(
-          eq(leaveApplications.employeeId, employeeId),
-          eq(leaveApplications.leaveTypeId, leaveType.id),
-          eq(leaveApplications.status, "approved"),
-          sql`EXTRACT(YEAR FROM ${leaveApplications.fromDate}) = ${currentYear}`
-        ));
+    const usedRows = await db
+      .select({
+        leaveTypeId: leaveApplications.leaveTypeId,
+        totalDays: sql<string>`COALESCE(sum(${leaveApplications.totalDays}), 0)`,
+      })
+      .from(leaveApplications)
+      .where(and(
+        eq(leaveApplications.employeeId, employeeId),
+        eq(leaveApplications.status, "approved"),
+        eq(leaveApplications.orgId, orgId),
+        sql`EXTRACT(YEAR FROM ${leaveApplications.fromDate}) = ${currentYear}`
+      ))
+      .groupBy(leaveApplications.leaveTypeId);
+    const usedByType = new Map(usedRows.map((r) => [r.leaveTypeId, parseFloat(r.totalDays)]));
 
-      const daysUsed = approvedLeaves[0]?.totalDays || 0;
+    for (const leaveType of allLeaveTypes) {
+      const daysUsed = usedByType.get(leaveType.id) || 0;
       const daysRemaining = leaveType.daysAllowed - daysUsed;
 
       balance.push({

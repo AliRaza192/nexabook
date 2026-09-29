@@ -148,14 +148,18 @@ export async function createStockCount(data: CreateStockCountData) {
       })
       .returning();
 
-    // Insert line items with system qty from products
-    for (const item of data.items) {
-      const [product] = await db
-        .select({ currentStock: products.currentStock, costPrice: products.costPrice })
-        .from(products)
-        .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
-        .limit(1);
+    // Insert line items with system qty from products (batch-fetched once)
+    const countProductIds = [...new Set(data.items.map((i) => i.productId))];
+    const countProducts = countProductIds.length
+      ? await db
+          .select({ id: products.id, currentStock: products.currentStock, costPrice: products.costPrice })
+          .from(products)
+          .where(and(inArray(products.id, countProductIds), eq(products.orgId, orgId)))
+      : [];
+    const productById = new Map(countProducts.map((p) => [p.id, p]));
 
+    for (const item of data.items) {
+      const product = productById.get(item.productId);
       if (!product) continue;
 
       const systemQty = (product.currentStock || 0).toString();

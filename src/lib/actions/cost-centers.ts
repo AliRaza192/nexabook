@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { costCenters, journalEntryLines, journalEntries, chartOfAccounts } from "@/db/schema";
 import { eq, and, sql, gte, lte } from "drizzle-orm";
 import { getCurrentOrgId, requireRole } from "./shared";
+import { getFiscalYearRange } from "./fiscal-periods";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "./audit";
 
@@ -100,6 +101,25 @@ export async function deleteCostCenter(id: string) {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
+    await requireRole(["admin", "accountant"]);
+
+    const [usage] = await db
+      .select({ n: sql<number>`COUNT(*)::int` })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(and(
+        eq(journalEntryLines.costCenterId, id),
+        eq(journalEntryLines.orgId, orgId),
+        eq(journalEntries.status, "posted"),
+      ));
+
+    if ((usage?.n ?? 0) > 0) {
+      return {
+        success: false,
+        error: `Cannot delete: ${usage.n} posted journal entr${usage.n === 1 ? "y" : "ies"} reference this cost center`,
+      };
+    }
+
     await db
       .delete(costCenters)
       .where(and(eq(costCenters.id, id), eq(costCenters.orgId, orgId)));
@@ -119,8 +139,7 @@ export async function getCostCenterPLReport(costCenterId: string, fiscalYear?: s
     if (!orgId) return { success: false, error: "No organization found" };
 
     const year = fiscalYear || `${new Date().getFullYear()}`;
-    const startDate = new Date(`${year}-01-01`);
-    const endDate = new Date(`${year}-12-31`);
+    const { startDate, endDate } = await getFiscalYearRange(orgId, year);
 
     const rows = await db
       .select({

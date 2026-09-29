@@ -72,11 +72,22 @@ export async function POST(request: NextRequest) {
         .where(eq(paymentTransactions.id, existing[0].id));
     }
 
-    // Determine return origin (POS, invoice page, or dashboard)
-    const origin = returnOrigin && returnOrigin.startsWith("/")
-      ? returnOrigin
-      : "/dashboard";
+    // Determine return origin (POS, invoice page, or dashboard).
+    // Only same-origin absolute paths are allowed: "//host" and "/\host"
+    // would otherwise resolve to an external origin (open redirect).
+    const isSafePath =
+      typeof returnOrigin === "string" &&
+      returnOrigin.startsWith("/") &&
+      !returnOrigin.startsWith("//") &&
+      !returnOrigin.startsWith("/\\") &&
+      !returnOrigin.includes("://") &&
+      !returnOrigin.includes("\\");
+    const origin = isSafePath ? returnOrigin : "/dashboard";
     const redirectUrl = new URL(origin, request.url);
+    if (redirectUrl.origin !== new URL(request.url).origin) {
+      redirectUrl.href = new URL("/dashboard", request.url).href;
+      redirectUrl.search = "";
+    }
     redirectUrl.searchParams.set("payment", status);
     redirectUrl.searchParams.set("txn", orderRef);
 

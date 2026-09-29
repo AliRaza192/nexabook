@@ -2,8 +2,9 @@
 
 import { db } from "@/db";
 import { budgets, chartOfAccounts, journalEntryLines, journalEntries } from "@/db/schema";
-import { eq, and, sql, gte, lte } from "drizzle-orm";
+import { eq, and, sql, gte, lte, inArray } from "drizzle-orm";
 import { getCurrentOrgId, requireRole } from "./shared";
+import { getFiscalYearRange } from "./fiscal-periods";
 import { revalidatePath } from "next/cache";
 
 export async function getBudgets(fiscalYear?: string) {
@@ -45,8 +46,7 @@ export async function getBudgetVsActual(fiscalYear?: string) {
     if (!orgId) return { success: false, error: "No organization found" };
 
     const year = fiscalYear || `${new Date().getFullYear()}`;
-    const startDate = new Date(`${year}-01-01`);
-    const endDate = new Date(`${year}-12-31`);
+    const { startDate, endDate } = await getFiscalYearRange(orgId, year);
 
     // Get all budgets for this year grouped by account
     const budgetRows = await db
@@ -98,14 +98,17 @@ export async function getBudgetVsActual(fiscalYear?: string) {
 
     const allAccountIds = [...new Set([...budgetMap.keys(), ...actualMap.keys()])];
 
+    const accts = allAccountIds.length
+      ? await db
+          .select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name, type: chartOfAccounts.type })
+          .from(chartOfAccounts)
+          .where(and(inArray(chartOfAccounts.id, allAccountIds), eq(chartOfAccounts.orgId, orgId)))
+      : [];
+    const acctById = new Map(accts.map((a) => [a.id, a]));
+
     const result = [];
     for (const accountId of allAccountIds) {
-      const [acct] = await db
-        .select({ code: chartOfAccounts.code, name: chartOfAccounts.name, type: chartOfAccounts.type })
-        .from(chartOfAccounts)
-        .where(eq(chartOfAccounts.id, accountId))
-        .limit(1);
-
+      const acct = acctById.get(accountId);
       if (!acct) continue;
 
       const months = [];

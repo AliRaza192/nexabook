@@ -1,10 +1,52 @@
 "use server";
 
 import { db } from "@/db";
-import { fiscalPeriods, journalEntries } from "@/db/schema";
+import { fiscalPeriods, journalEntries, organizations } from "@/db/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { getCurrentOrgId, requireRole } from "./shared";
 import { captureException } from "@/lib/error-handler";
+
+const DEFAULT_FISCAL_START = "01-01";
+
+export interface FiscalYearRange {
+  label: string;
+  startDate: Date;
+  endDate: Date;
+}
+
+// Resolves the org's fiscal year window from organizations.fiscalYearStart
+// (Pakistan default "07-01") instead of assuming a calendar year.
+// `fiscalYear` is the calendar year in which the fiscal year BEGINS;
+// when omitted, the fiscal year containing today is used.
+export async function getFiscalYearRange(orgId: string, fiscalYear?: string): Promise<FiscalYearRange> {
+  const [org] = await db
+    .select({ fiscalYearStart: organizations.fiscalYearStart })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+
+  const startMonthDay = /^\d{2}-\d{2}$/.test(org?.fiscalYearStart || "")
+    ? (org!.fiscalYearStart as string)
+    : DEFAULT_FISCAL_START;
+  const startMonth = parseInt(startMonthDay.slice(0, 2), 10);
+  const startDay = startMonthDay.slice(3, 5);
+
+  const today = new Date();
+  const thisYear = today.getFullYear();
+
+  // Fiscal year begins in `startMonth`; if today is before this year's start,
+  // the current fiscal year began last calendar year.
+  const currentStartYear = today.getMonth() + 1 >= startMonth ? thisYear : thisYear - 1;
+
+  const label = fiscalYear || `${currentStartYear}`;
+  const startYear = parseInt(label, 10) || currentStartYear;
+
+  const startDate = new Date(Date.UTC(startYear, startMonth - 1, parseInt(startDay, 10)));
+  const endDate = new Date(Date.UTC(startYear + 1, startMonth - 1, parseInt(startDay, 10)));
+  endDate.setUTCDate(endDate.getUTCDate() - 1);
+
+  return { label: `${startYear}`, startDate, endDate };
+}
 
 export async function getFiscalPeriods() {
   try {

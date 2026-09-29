@@ -39,7 +39,10 @@ export async function GET(request: NextRequest) {
       .where(eq(webhookEndpoints.orgId, orgId))
       .orderBy(desc(webhookEndpoints.createdAt));
 
-    return NextResponse.json({ success: true, data: endpoints });
+    return NextResponse.json({
+      success: true,
+      data: endpoints.map((e) => ({ ...e, secret: `${e.secret.slice(0, 8)}${"•".repeat(16)}` })),
+    });
   } catch (err) {
     captureException(err, { module: "webhooks", function: "GET" });
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

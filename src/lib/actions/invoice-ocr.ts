@@ -72,21 +72,26 @@ function parseGeminiResponse(response: string): ExtractedInvoiceData {
   };
 }
 
-// Save uploaded file
-async function saveUploadedFile(file: File): Promise<{ success: boolean; filePath?: string; error?: string }> {
+// Save uploaded file outside public/ so raw vendor documents are never
+// reachable without authentication — served via /api/invoice-ocr/file/<orgId>.
+// Files are partitioned per org so the serving route can enforce tenancy.
+async function saveUploadedFile(
+  file: File,
+  orgId: string,
+): Promise<{ success: boolean; filePath?: string; error?: string }> {
   try {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    const uploadDir = join(process.cwd(), "public", "uploads", "invoices");
+    const uploadDir = join(process.cwd(), ".uploads", "invoices", orgId);
     await mkdir(uploadDir, { recursive: true });
 
-    const ext = file.name.split(".").pop() || "jpg";
-    const filename = `${randomUUID()}.${ext}`;
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const filename = `${randomUUID()}.${ext || "jpg"}`;
     const filePath = join(uploadDir, filename);
 
     await writeFile(filePath, buffer);
-    return { success: true, filePath: `/uploads/invoices/${filename}` };
+    return { success: true, filePath: `/api/invoice-ocr/file/${orgId}/${filename}` };
   } catch (error) {
     console.error("[saveUploadedFile]", error);
     return { success: false, error: "Failed to save file" };
@@ -96,8 +101,11 @@ async function saveUploadedFile(file: File): Promise<{ success: boolean; filePat
 // Process invoice image with Gemini Vision
 export async function processInvoiceImage(file: File): Promise<OCRResult> {
   try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
     // Save file
-    const saveResult = await saveUploadedFile(file);
+    const saveResult = await saveUploadedFile(file, orgId);
     if (!saveResult.success) {
       return { success: false, error: saveResult.error };
     }

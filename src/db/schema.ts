@@ -655,6 +655,7 @@ export const invoices = pgTable('invoices', {
   fbrStatus: varchar('fbr_status', { length: 20 }),
   fbrResponse: text('fbr_response'),
   fbrSubmittedAt: timestamp('fbr_submitted_at'),
+  lastReminderSentAt: timestamp('last_reminder_sent_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
@@ -1058,7 +1059,9 @@ export const salesTaxReturns = pgTable('sales_tax_returns', {
   createdBy: varchar('created_by', { length: 255 }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueOrgPeriod: unique('uq_tax_return_org_period').on(table.orgId, table.periodLabel),
+}));
 
 export const salesTaxReturnsRelations = relations(salesTaxReturns, ({ one }) => ({
   organization: one(organizations, {

@@ -399,7 +399,14 @@ export async function processPosSale(saleData: PosSaleData) {
         })
         .returning();
 
-      // Create invoice items and deduct stock
+      // Create invoice items and deduct stock (products batch-fetched once)
+      const saleProductIds = [...new Set(saleData.items.map((i) => i.productId))];
+      const stockProducts = await tx
+        .select({ id: products.id, currentStock: products.currentStock })
+        .from(products)
+        .where(and(inArray(products.id, saleProductIds), eq(products.orgId, orgId)));
+      const stockMap = new Map(stockProducts.map((p) => [p.id, p.currentStock]));
+
       for (const item of saleData.items) {
         const lineTotal = item.quantity * item.unitPrice;
         const discount = item.discountPercentage ? lineTotal * (item.discountPercentage / 100) : 0;
@@ -417,14 +424,10 @@ export async function processPosSale(saleData: PosSaleData) {
           lineTotal: afterDiscount.toFixed(2),
         });
 
-        const [product] = await tx
-          .select({ currentStock: products.currentStock })
-          .from(products)
-          .where(and(eq(products.id, item.productId), eq(products.orgId, orgId)))
-          .limit(1);
-
-        if (product) {
-          const newStock = Math.max(0, (parseFloat(product.currentStock || "0")) - item.quantity);
+        const currentStock = stockMap.get(item.productId);
+        if (currentStock !== undefined) {
+          const newStock = Math.max(0, (parseFloat(currentStock || "0")) - item.quantity);
+          stockMap.set(item.productId, String(newStock));
           await tx
             .update(products)
             .set({ currentStock: String(newStock) })
@@ -751,7 +754,7 @@ export async function generatePOSReport(
     }
 
     const [profile] = await db
-      .select({ fullName: profiles.fullName })
+      .select({ fullName: profiles.fullName, userId: profiles.userId })
       .from(profiles)
       .where(eq(profiles.id, shift.profileId))
       .limit(1);
@@ -761,18 +764,62 @@ export async function generatePOSReport(
     const closingTime = reportType === 'Z' ? new Date() : new Date();
     const openingCash = parseFloat(shift.openingAmount || '0');
 
-    // Find POS sale journal entries within the shift window
+    if (reportType === 'Z' && shift.status === 'closed') {
+      return { success: false, error: "Shift is already closed" };
+    }
+
+    // Find POS sale journal entries within the shift window, scoped to the
+    // shift's cashier so one cashier's report never counts another's sales.
+    const saleConditions = [
+      eq(journalEntries.orgId, orgId),
+      eq(journalEntries.referenceType, 'pos_sale'),
+      gte(journalEntries.createdAt, openingTime),
+      lte(journalEntries.createdAt, closingTime),
+    ];
+    if (profile?.userId) {
+      saleConditions.push(eq(journalEntries.createdBy, profile.userId));
+    }
+
     const saleEntries = await db
-      .select({ invoiceId: journalEntries.referenceId })
+      .select({ journalEntryId: journalEntries.id, invoiceId: journalEntries.referenceId })
       .from(journalEntries)
-      .where(and(
-        eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_sale'),
-        gte(journalEntries.createdAt, openingTime),
-        lte(journalEntries.createdAt, closingTime),
-      ));
+      .where(and(...saleConditions));
 
     const invoiceIds = saleEntries.map((e) => e.invoiceId).filter((id): id is string => !!id);
+    const journalEntryIds = saleEntries.map((e) => e.journalEntryId).filter((id): id is string => !!id);
+
+    // Classify each sale by the account its JE debited (cash vs card clearing)
+    // rather than assuming every paid invoice was a cash sale.
+    const paymentSplits = journalEntryIds.length > 0
+      ? await db
+          .select({
+            journalEntryId: journalEntryLines.journalEntryId,
+            subType: chartOfAccounts.subType,
+            debit: journalEntryLines.debitAmount,
+          })
+          .from(journalEntryLines)
+          .innerJoin(chartOfAccounts, eq(journalEntryLines.accountId, chartOfAccounts.id))
+          .where(and(
+            inArray(journalEntryLines.journalEntryId, journalEntryIds),
+            inArray(chartOfAccounts.subType, ['cash', 'card_clearing']),
+          ))
+      : [];
+
+    const splitByJournalEntry = new Map<string, { cash: number; card: number }>();
+    for (const row of paymentSplits) {
+      const split = splitByJournalEntry.get(row.journalEntryId) || { cash: 0, card: 0 };
+      const amount = parseFloat(row.debit || '0');
+      if (row.subType === 'card_clearing') split.card += amount;
+      else split.cash += amount;
+      splitByJournalEntry.set(row.journalEntryId, split);
+    }
+
+    const splitByInvoice = new Map<string, { cash: number; card: number }>();
+    for (const entry of saleEntries) {
+      if (!entry.invoiceId || !entry.journalEntryId) continue;
+      const split = splitByJournalEntry.get(entry.journalEntryId);
+      if (split) splitByInvoice.set(entry.invoiceId, split);
+    }
 
     const shiftInvoices = invoiceIds.length > 0
       ? await db
@@ -797,8 +844,8 @@ export async function generatePOSReport(
     let totalTaxCollected = 0;
     let cashSales = 0;
     let cashTransactions = 0;
-    const cardSales = 0;
-    const cardTransactions = 0;
+    let cardSales = 0;
+    let cardTransactions = 0;
 
     const productSales: Record<string, { name: string; sku: string; quantity: number; revenue: number }> = {};
 
@@ -830,8 +877,17 @@ export async function generatePOSReport(
       totalDiscounts += parseFloat(invoice.discountAmount || '0');
       totalTaxCollected += parseFloat(invoice.taxAmount || '0');
 
-      const balance = parseFloat(invoice.balanceAmount || '0');
-      if (balance <= 0) {
+      const split = splitByInvoice.get(invoice.id);
+      if (split) {
+        if (split.cash > 0) {
+          cashSales += split.cash;
+          cashTransactions++;
+        }
+        if (split.card > 0) {
+          cardSales += split.card;
+          cardTransactions++;
+        }
+      } else if (parseFloat(invoice.balanceAmount || '0') <= 0) {
         cashSales += parseFloat(invoice.netAmount || '0');
         cashTransactions++;
       }

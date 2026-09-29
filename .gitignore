@@ -50,3 +50,6 @@ next-env.d.ts
 *.swo
 *~
 *.zip
+
+# OCR uploads (served via authenticated API route, never public)
+.uploads/

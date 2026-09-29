@@ -145,7 +145,7 @@ export async function getVendorPortalData(token: string) {
         and(
           eq(purchaseInvoices.vendorId, vendor.id),
           eq(purchaseInvoices.orgId, vendor.orgId),
-          sql`${purchaseInvoices.status} NOT IN ('draft', 'cancelled')`
+          sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised', 'cancelled')`
         )
       )
       .orderBy(sql`${purchaseInvoices.date} DESC`);

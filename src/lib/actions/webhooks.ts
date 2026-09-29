@@ -18,6 +18,11 @@ function generateSecret(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
+function maskSecret(secret: string): string {
+  if (!secret) return "";
+  return `${secret.slice(0, 8)}${"•".repeat(16)}`;
+}
+
 export async function getWebhookEndpoints() {
   try {
     const orgId = await getCurrentOrgId();
@@ -29,7 +34,7 @@ export async function getWebhookEndpoints() {
       .where(eq(webhookEndpoints.orgId, orgId))
       .orderBy(desc(webhookEndpoints.createdAt));
 
-    return { success: true, data: endpoints };
+    return { success: true, data: endpoints.map((e) => ({ ...e, secret: maskSecret(e.secret) })) };
   } catch (error) {
     console.error("Error in webhooks.ts:", error);
     return { success: false, error: "Failed to load webhook endpoints" };

@@ -5,7 +5,7 @@ import {
   stockMovements, stockAdjustments, stockAdjustmentLines, stockValuationLogs,
   products, chartOfAccounts, journalEntries, journalEntryLines, productBatches,
 } from "@/db/schema";
-import { eq, and, desc, ilike, or, asc, sql } from "drizzle-orm";
+import { eq, and, desc, ilike, or, asc, sql, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
@@ -459,24 +459,37 @@ export async function runStockValuation(method: "fifo" | "weighted_average", val
     let totalValue = 0;
     const valuationDetails: Array<Record<string, unknown>> = [];
 
-    for (const product of allProducts) {
-      if (method === "fifo") {
-        // FIFO: consume stock from oldest batches first, value remaining at newest batch cost
-        const batches = await db
+    const productIds = allProducts.map((p) => p.id);
+    const allBatches = productIds.length
+      ? await db
           .select({
+            productId: productBatches.productId,
             currentQty: productBatches.currentQty,
             costPrice: productBatches.costPrice,
             batchNo: productBatches.batchNo,
+            createdAt: productBatches.createdAt,
           })
           .from(productBatches)
           .where(
             and(
+              inArray(productBatches.productId, productIds),
               eq(productBatches.orgId, orgId),
-              eq(productBatches.productId, product.id),
               sql`${productBatches.currentQty} > 0`,
             ),
           )
-          .orderBy(asc(productBatches.createdAt));
+          .orderBy(asc(productBatches.createdAt))
+      : [];
+    const batchesByProduct = new Map<string, typeof allBatches>();
+    for (const b of allBatches) {
+      const list = batchesByProduct.get(b.productId) || [];
+      list.push(b);
+      batchesByProduct.set(b.productId, list);
+    }
+
+    for (const product of allProducts) {
+      if (method === "fifo") {
+        // FIFO: consume stock from oldest batches first, value remaining at newest batch cost
+        const batches = batchesByProduct.get(product.id) || [];
 
         const currentStock = parseFloat(product.currentStock || "0");
         let remainingToValue = currentStock;

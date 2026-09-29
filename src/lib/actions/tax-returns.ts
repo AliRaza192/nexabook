@@ -75,7 +75,7 @@ export async function generateTaxReturn(
         eq(purchaseInvoices.orgId, orgId),
         sql`${purchaseInvoices.date} >= ${start}`,
         sql`${purchaseInvoices.date} <= ${end}`,
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`
       ));
 
     const [purchaseResult] = await db
@@ -85,7 +85,7 @@ export async function generateTaxReturn(
         eq(purchaseInvoices.orgId, orgId),
         sql`${purchaseInvoices.date} >= ${start}`,
         sql`${purchaseInvoices.date} <= ${end}`,
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`
       ));
 
     const totalSales = parseFloat(salesResult?.total || "0");
@@ -118,7 +118,12 @@ export async function generateTaxReturn(
         createdBy: userId || "system",
         fbrReturnPeriod,
       })
+      .onConflictDoNothing({ target: [salesTaxReturns.orgId, salesTaxReturns.periodLabel] })
       .returning();
+
+    if (!taxReturn) {
+      return { success: false, error: `Tax return for ${label} already exists` };
+    }
 
     revalidatePath("/reports/tax-returns");
     return { success: true, data: taxReturn };

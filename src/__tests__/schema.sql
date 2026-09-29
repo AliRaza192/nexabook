@@ -616,6 +616,7 @@ CREATE TABLE "invoices" (
 	"fbr_status" varchar(20),
 	"fbr_response" text,
 	"fbr_submitted_at" timestamp,
+	"last_reminder_sent_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "uq_invoice_org_number" UNIQUE("org_id","invoice_number")
@@ -1365,7 +1366,8 @@ CREATE TABLE "sales_tax_returns" (
 	"notes" text,
 	"created_by" varchar(255),
 	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL
+	"updated_at" timestamp DEFAULT now() NOT NULL,
+	CONSTRAINT "uq_tax_return_org_period" UNIQUE("org_id","period_label")
 );
 
 CREATE TABLE "serial_numbers" (

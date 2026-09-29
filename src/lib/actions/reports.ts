@@ -822,7 +822,7 @@ export async function getSalesTaxReport(dateFrom: string, dateTo: string) {
         eq(purchaseInvoices.orgId, orgId),
         gte(purchaseInvoices.date, fromDate),
         lte(purchaseInvoices.date, toDate),
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`
       ));
 
     // Provincial breakdown from invoice items
@@ -852,7 +852,7 @@ export async function getSalesTaxReport(dateFrom: string, dateTo: string) {
         eq(purchaseInvoices.orgId, orgId),
         gte(purchaseInvoices.date, fromDate),
         lte(purchaseInvoices.date, toDate),
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`,
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`,
       ))
       .groupBy(purchaseItems.taxType);
 
@@ -919,7 +919,7 @@ export async function getAgedPayablesReport() {
       .leftJoin(vendors, eq(purchaseInvoices.vendorId, vendors.id))
       .where(and(
         eq(purchaseInvoices.orgId, orgId),
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Cancelled')`
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised', 'cancelled')`
       ));
 
     const vendorMap = new Map<string, {
@@ -1039,7 +1039,7 @@ export async function getPurchaseTaxReport(dateFrom: string, dateTo: string) {
       })
       .from(purchaseInvoices)
       .leftJoin(vendors, eq(purchaseInvoices.vendorId, vendors.id))
-      .where(and(eq(purchaseInvoices.orgId, orgId), gte(purchaseInvoices.date, new Date(dateFrom)), lte(purchaseInvoices.date, new Date(dateTo)), sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`))
+      .where(and(eq(purchaseInvoices.orgId, orgId), gte(purchaseInvoices.date, new Date(dateFrom)), lte(purchaseInvoices.date, new Date(dateTo)), sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`))
       .groupBy(vendors.id, vendors.name);
 
     return { success: true, data: taxPaid };

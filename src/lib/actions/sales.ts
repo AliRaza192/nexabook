@@ -1487,85 +1487,6 @@ export async function getInvoiceStats() {
   }
 }
 
-// ==================== JOURNAL ENTRY ACTIONS ====================
-
-// Create journal entry for invoice (Accounting Integration)
-export async function createInvoiceJournalEntry(invoiceId: string) {
-  try {
-    const orgId = await getCurrentOrgId();
-    if (!orgId) {
-      return { success: false, error: "No organization found" };
-    }
-
-    // Get invoice details
-    const [invoice] = await db
-      .select()
-      .from(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
-      .limit(1);
-
-    if (!invoice) {
-      return { success: false, error: "Invoice not found" };
-    }
-
-    // Find accounts by subType (not name — names may vary by org)
-    const accountsReceivable = await db
-      .select()
-      .from(chartOfAccounts)
-      .where(
-        and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, "accounts_receivable"),
-        ),
-      )
-      .limit(1);
-
-    const salesRevenue = await db
-      .select()
-      .from(chartOfAccounts)
-      .where(
-        and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, "sales_revenue"),
-        ),
-      )
-      .limit(1);
-
-    const salesTaxPayable = await db
-      .select()
-      .from(chartOfAccounts)
-      .where(
-        and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, "tax_payable"),
-        ),
-      )
-      .limit(1);
-
-    // Note: This function is deprecated - use approveInvoice instead
-    // which creates proper journal entries with the new schema
-
-    // Create audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || "system",
-      action: "INVOICE_CREATED",
-      entityType: "invoice",
-      entityId: invoiceId,
-      changes: JSON.stringify({
-        invoiceNumber: invoice.invoiceNumber,
-        netAmount: invoice.netAmount,
-        status: invoice.status,
-      }),
-    });
-
-    return { success: true, message: "Journal entry created for invoice" };
-  } catch (error) {
-    captureException(error, { module: "sales", function: "createInvoiceJournalEntry" });
-    return { success: false, error: "Failed to create journal entry" };
-  }
-}
-
 // ==================== HELPER FUNCTIONS ====================
 
 // Get Cash/Bank accounts for payment dropdown
@@ -3342,6 +3263,15 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
         .returning();
 
       if (data.allocations && data.allocations.length > 0) {
+        const allocIds = [...new Set(data.allocations.map((a) => a.invoiceId))];
+        const allocInvoices = allocIds.length
+          ? await tx
+              .select()
+              .from(invoices)
+              .where(and(inArray(invoices.id, allocIds), eq(invoices.orgId, orgId)))
+          : [];
+        const invById = new Map(allocInvoices.map((i) => [i.id, i]));
+
         for (const alloc of data.allocations) {
           await tx.insert(customerPaymentAllocations).values({
             orgId,
@@ -3349,11 +3279,7 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
             invoiceId: alloc.invoiceId,
             allocatedAmount: alloc.amount,
           });
-          const [inv] = await tx
-            .select()
-            .from(invoices)
-            .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.orgId, orgId)))
-            .limit(1);
+          const inv = invById.get(alloc.invoiceId);
           if (inv) {
             const newBalance =
               parseFloat(inv.balanceAmount || "0") - parseFloat(alloc.amount);

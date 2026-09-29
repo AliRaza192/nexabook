@@ -481,14 +481,6 @@ export async function postOpeningBalance(data: {
     const userId = (await auth()).userId || "system";
 
     const allLines = [...data.lines];
-    const diff = totalDebit - totalCredit;
-    if (Math.abs(diff) > 0.01) {
-      allLines.push({
-        accountId: obeAccount.id,
-        debit: diff < 0 ? Math.abs(diff).toFixed(2) : "0",
-        credit: diff > 0 ? diff.toFixed(2) : "0",
-      });
-    }
 
     const { entryNumber } = await db.transaction(async (tx) => {
       const posted = await postTransaction(tx, {
@@ -918,7 +910,7 @@ export async function getTaxSummary(
         eq(purchaseInvoices.orgId, orgId),
         sql`${purchaseInvoices.date} >= ${from}`,
         sql`${purchaseInvoices.date} <= ${to}`,
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`
       ));
 
     const inputTax = parseFloat(inputResult?.total || '0');
@@ -947,7 +939,7 @@ export async function getTaxSummary(
         eq(purchaseInvoices.orgId, orgId),
         sql`${purchaseInvoices.date} >= ${from}`,
         sql`${purchaseInvoices.date} <= ${to}`,
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`
       ));
 
     const monthMap = new Map<string, { output: number; input: number }>();
@@ -1001,7 +993,7 @@ export async function getTaxSummary(
         eq(purchaseInvoices.orgId, orgId),
         sql`${purchaseInvoices.date} >= ${from}`,
         sql`${purchaseInvoices.date} <= ${to}`,
-        sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`,
+        sql`LOWER(${purchaseInvoices.status}) NOT IN ('draft', 'revised')`,
       ))
       .groupBy(purchaseItems.taxType);
 

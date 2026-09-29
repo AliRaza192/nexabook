@@ -442,6 +442,10 @@ export async function createJobOrder(data: JobOrderFormData) {
 
     if (!bom) return { success: false, error: "BOM not found" };
 
+    if (bom.quantity <= 0) {
+      return { success: false, error: "BOM quantity must be greater than 0" };
+    }
+
     const orderNumber = await generateJobOrderNumber(orgId);
 
     const bomItemsList = await db
@@ -738,6 +742,10 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
 
     if (!bom) return { success: false, error: "No active BOM found for this product" };
 
+    if (bom.quantity <= 0) {
+      return { success: false, error: "BOM quantity must be greater than 0" };
+    }
+
     const [finishedGood] = await db
       .select({
         id: products.id,
@@ -884,21 +892,25 @@ export async function explodeBOM(
 
     let flatList: Array<{ productId: string, name: string, sku: string, quantity: number, unit: string }> = [];
 
+    const componentIds = items.map((i) => i.componentId);
+    const subBoms = componentIds.length
+      ? await db
+          .select({ id: manufacturingBoms.id, quantity: manufacturingBoms.quantity, finishedGoodId: manufacturingBoms.finishedGoodId })
+          .from(manufacturingBoms)
+          .where(and(
+            inArray(manufacturingBoms.finishedGoodId, componentIds),
+            eq(manufacturingBoms.orgId, orgId),
+            eq(manufacturingBoms.isActive, true),
+            eq(manufacturingBoms.status, 'active')
+          ))
+      : [];
+    const subBomByProduct = new Map(subBoms.map((b) => [b.finishedGoodId, b]));
+
     for (const item of items) {
       if (!item.component) continue;
 
       const totalQty = parseFloat(item.quantityRequired) * multiplier;
-
-      const [subBom] = await db
-        .select({ id: manufacturingBoms.id, quantity: manufacturingBoms.quantity })
-        .from(manufacturingBoms)
-        .where(and(
-          eq(manufacturingBoms.finishedGoodId, item.componentId),
-          eq(manufacturingBoms.orgId, orgId),
-          eq(manufacturingBoms.isActive, true),
-          eq(manufacturingBoms.status, 'active')
-        ))
-        .limit(1);
+      const subBom = subBomByProduct.get(item.componentId);
 
       if (subBom) {
         const subMultiplier = totalQty / subBom.quantity;

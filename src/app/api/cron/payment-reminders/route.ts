@@ -5,6 +5,12 @@ import { eq, and, sql } from "drizzle-orm";
 import { sendTextMessage, isWhatsAppConfigured } from "@/lib/utils/whatsapp";
 import { captureException } from "@/lib/error-handler";
 
+const startOfDay = (d: Date) => {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
+
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -40,11 +46,13 @@ export async function GET(request: NextRequest) {
 
       const dueInvoices = await db
         .select({
+          id: invoices.id,
           invoiceNumber: invoices.invoiceNumber,
           customerName: customers.name,
           customerPhone: customers.phone,
           netAmount: invoices.netAmount,
           dueDate: invoices.dueDate,
+          lastReminderSentAt: invoices.lastReminderSentAt,
         })
         .from(invoices)
         .innerJoin(customers, eq(invoices.customerId, customers.id))
@@ -59,6 +67,26 @@ export async function GET(request: NextRequest) {
         );
 
       for (const inv of dueInvoices) {
+        if (!inv.dueDate) continue;
+        const dueDate = startOfDay(new Date(inv.dueDate));
+
+        // Dedup: the reminder window spans many days but the cron runs daily, so
+        // without this the same invoice would be messaged once per day for the
+        // whole window. Only re-send when the phase changes
+        // (upcoming -> due today -> overdue), i.e. at most 3 messages per invoice.
+        const phase = startOfDay(new Date()).getTime() < dueDate.getTime() ? "upcoming"
+          : startOfDay(new Date()).getTime() === dueDate.getTime() ? "due"
+            : "overdue";
+
+        const lastSent = inv.lastReminderSentAt ? new Date(inv.lastReminderSentAt) : null;
+        const lastPhase = !lastSent ? null
+          : startOfDay(lastSent).getTime() < dueDate.getTime() ? "upcoming"
+            : startOfDay(lastSent).getTime() === dueDate.getTime() ? "due"
+              : "overdue";
+
+        if (lastPhase === phase) continue;
+        if (phase === "due" && !org.onDueDate) continue;
+
         const message = org.template
           .replace(/{customerName}/g, inv.customerName || "Customer")
           .replace(/{businessName}/g, org.orgName || "Business")
@@ -73,6 +101,13 @@ export async function GET(request: NextRequest) {
           if (!result.success) {
             captureException(result.error, { module: "payment-reminders", function: "GET", customerPhone: inv.customerPhone });
           }
+        }
+
+        if (sent) {
+          await db
+            .update(invoices)
+            .set({ lastReminderSentAt: new Date() })
+            .where(eq(invoices.id, inv.id));
         }
 
         results.push({
