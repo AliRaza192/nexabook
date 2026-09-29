@@ -719,6 +719,7 @@ export async function getInvoiceWithDetails(
 // Create invoice (Draft/Pending - does not update inventory yet)
 export async function createInvoice(data: InvoiceFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) {
       return { success: false, error: "No organization found" };
@@ -820,6 +821,38 @@ export async function createInvoice(data: InvoiceFormData) {
           }))
         );
       }
+
+      let computedGross = 0;
+      let computedTax = 0;
+      for (const item of data.items) {
+        const qty = parseFloat(item.quantity || "1");
+        const price = parseFloat(item.unitPrice || "0");
+        const discPct = parseFloat(item.discountPercentage || "0");
+        const taxRate = parseFloat(item.taxRate || "0");
+        const lineSubtotal = qty * price;
+        const discAmt = (lineSubtotal * discPct) / 100;
+        const taxable = lineSubtotal - discAmt;
+        const taxAmt = (taxable * taxRate) / 100;
+        computedGross += lineSubtotal;
+        computedTax += taxAmt;
+      }
+      const computedDiscount = parseFloat(data.discountAmount || "0");
+      const computedShipping = parseFloat(data.shippingCharges || "0");
+      const computedRoundOff = parseFloat(data.roundOff || "0");
+      const computedNet =
+        computedGross - computedDiscount + computedTax + computedShipping + computedRoundOff;
+      const receivedAmt = parseFloat(receivedAmount || "0");
+      const computedBalance = computedNet - receivedAmt;
+
+      await tx
+        .update(invoices)
+        .set({
+          grossAmount: computedGross.toFixed(2),
+          taxAmount: computedTax.toFixed(2),
+          netAmount: computedNet.toFixed(2),
+          balanceAmount: computedBalance.toFixed(2),
+        })
+        .where(eq(invoices.id, created.id));
 
       await tx.insert(auditLogs).values({
         orgId,
@@ -983,7 +1016,7 @@ export async function approveInvoice(invoiceId: string) {
           .where(eq(products.id, item.productId));
 
         if (invoice.warehouseId)
-          await updateWarehouseStock(tx, invoice.warehouseId, item.productId, -baseQuantity);
+          await updateWarehouseStock(tx, orgId, invoice.warehouseId, item.productId, -baseQuantity);
         if (item.batchId)
           await updateBatchStock(tx, item.batchId, -baseQuantity);
 
@@ -1304,7 +1337,7 @@ export async function deleteInvoice(invoiceId: string) {
 
           // Reverse warehouse stock
           if (invoice.warehouseId) {
-            await updateWarehouseStock(tx, invoice.warehouseId, item.productId, quantity);
+            await updateWarehouseStock(tx, orgId, invoice.warehouseId, item.productId, quantity);
           }
 
           // Reverse batch stock
@@ -1386,11 +1419,13 @@ export async function deleteInvoice(invoiceId: string) {
           .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
       });
     } else {
-      // Draft or pending: safe to delete
-      await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
-      await db
-        .delete(invoices)
-        .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
+      // Draft or pending: safe to delete — atomically
+      await db.transaction(async (tx) => {
+        await tx.delete(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+        await tx
+          .delete(invoices)
+          .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)));
+      });
     }
 
     revalidatePath("/sales/invoices");
@@ -1635,6 +1670,7 @@ export async function getNextSaleOrderNumber() {
 // Create sale order (Draft - does not update inventory)
 export async function createSaleOrder(data: SaleOrderFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) {
       return { success: false, error: "No organization found" };
@@ -1653,58 +1689,63 @@ export async function createSaleOrder(data: SaleOrderFormData) {
       return { success: false, error: "Failed to generate order number" };
     }
 
-    // Create sale order
-    const [newOrder] = await db
-      .insert(saleOrders)
-      .values({
-        orgId,
-        orderNumber,
-        customerId: data.customerId,
-        orderBooker: data.orderBooker || "",
-        subject: data.subject || "",
-        reference: data.reference || "",
-        orderDate: data.orderDate,
-        deliveryDate: data.deliveryDate || null,
-        status: "draft",
-        grossAmount: data.grossAmount,
-        discountPercentage: data.discountPercentage || "0",
-        discountAmount: data.discountAmount || "0",
-        taxAmount: data.taxAmount,
-        shippingCharges: data.shippingCharges || "0",
-        roundOff: data.roundOff || "0",
-        netAmount: data.netAmount,
-        notes: data.notes,
-        terms: data.terms,
-      })
-      .returning();
+    // Create sale order with items and audit log in a transaction
+    let newOrder: typeof saleOrders.$inferSelect | undefined;
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(saleOrders)
+        .values({
+          orgId,
+          orderNumber,
+          customerId: data.customerId,
+          orderBooker: data.orderBooker || "",
+          subject: data.subject || "",
+          reference: data.reference || "",
+          orderDate: data.orderDate,
+          deliveryDate: data.deliveryDate || null,
+          status: "draft",
+          grossAmount: data.grossAmount,
+          discountPercentage: data.discountPercentage || "0",
+          discountAmount: data.discountAmount || "0",
+          taxAmount: data.taxAmount,
+          shippingCharges: data.shippingCharges || "0",
+          roundOff: data.roundOff || "0",
+          netAmount: data.netAmount,
+          notes: data.notes,
+          terms: data.terms,
+        })
+        .returning();
 
-    // Create order items
-    for (const item of data.items) {
-      await db.insert(orderItems).values({
+      if (data.items.length > 0) {
+        await tx.insert(orderItems).values(
+          data.items.map((item) => ({
+            orgId,
+            orderId: created.id,
+            productId: item.productId || null,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discountPercentage: item.discountPercentage || "0",
+            taxRate: item.taxRate,
+            lineTotal: item.lineTotal,
+          })),
+        );
+      }
+
+      await tx.insert(auditLogs).values({
         orgId,
-        orderId: newOrder.id,
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercentage: item.discountPercentage || "0",
-        taxRate: item.taxRate,
-        lineTotal: item.lineTotal,
+        userId: (await auth()).userId || "system",
+        action: "SALE_ORDER_CREATED",
+        entityType: "sale_order",
+        entityId: created.id,
+        changes: JSON.stringify({
+          orderNumber: created.orderNumber,
+          netAmount: created.netAmount,
+          status: created.status,
+        }),
       });
-    }
 
-    // Create audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || "system",
-      action: "SALE_ORDER_CREATED",
-      entityType: "sale_order",
-      entityId: newOrder.id,
-      changes: JSON.stringify({
-        orderNumber: newOrder.orderNumber,
-        netAmount: newOrder.netAmount,
-        status: newOrder.status,
-      }),
+      newOrder = created;
     });
 
     revalidatePath("/sales/orders");
@@ -1725,6 +1766,7 @@ export async function createSaleOrder(data: SaleOrderFormData) {
 // Approve sale order (does NOT update inventory or create journal entries)
 export async function approveSaleOrder(orderId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) {
       return { success: false, error: "No organization found" };
@@ -2092,55 +2134,61 @@ export async function createQuotation(data: QuotationFormData) {
     const taxAmount = parseFloat(data.taxAmount || "0");
     const shipping = parseFloat(data.shippingCharges || "0");
     const netAmount = grossAmount - discountAmount + taxAmount + shipping;
-    const [newQuotation] = await db
-      .insert(quotations)
-      .values({
-        orgId,
-        quotationNumber,
-        customerId: data.customerId,
-        subject: data.subject || "",
-        reference: data.reference || "",
-        issueDate: new Date(data.issueDate),
-        expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
-        status: "draft",
-        grossAmount: grossAmount.toFixed(2),
-        discountPercentage: globalDiscPct.toFixed(2),
-        discountAmount: discountAmount.toFixed(2),
-        taxAmount: taxAmount.toFixed(2),
-        shippingCharges: shipping.toFixed(2),
-        netAmount: netAmount.toFixed(2),
-        notes: data.notes || null,
-        terms: data.terms || null,
-      })
-      .returning();
-    for (const item of data.items) {
-      const qty = parseFloat(item.quantity || "0");
-      const price = parseFloat(item.unitPrice || "0");
-      const discPct = parseFloat(item.discountPercentage || "0");
-      const taxRate = parseFloat(item.taxRate || "0");
-      const lineTotal = qty * price - (qty * price * discPct) / 100;
-      await db.insert(quotationItems).values({
-        orgId,
-        quotationId: newQuotation.id,
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercentage: item.discountPercentage || "0",
-        taxRate: item.taxRate || "0",
-        lineTotal: lineTotal.toFixed(2),
-      });
-    }
-    await db
-      .insert(auditLogs)
-      .values({
+
+    let newQuotation: typeof quotations.$inferSelect | undefined;
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(quotations)
+        .values({
+          orgId,
+          quotationNumber,
+          customerId: data.customerId,
+          subject: data.subject || "",
+          reference: data.reference || "",
+          issueDate: new Date(data.issueDate),
+          expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
+          status: "draft",
+          grossAmount: grossAmount.toFixed(2),
+          discountPercentage: globalDiscPct.toFixed(2),
+          discountAmount: discountAmount.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          shippingCharges: shipping.toFixed(2),
+          netAmount: netAmount.toFixed(2),
+          notes: data.notes || null,
+          terms: data.terms || null,
+        })
+        .returning();
+
+      for (const item of data.items) {
+        const qty = parseFloat(item.quantity || "0");
+        const price = parseFloat(item.unitPrice || "0");
+        const discPct = parseFloat(item.discountPercentage || "0");
+        const lineTotal = qty * price - (qty * price * discPct) / 100;
+        await tx.insert(quotationItems).values({
+          orgId,
+          quotationId: created.id,
+          productId: item.productId || null,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountPercentage: item.discountPercentage || "0",
+          taxRate: item.taxRate || "0",
+          lineTotal: lineTotal.toFixed(2),
+        });
+      }
+
+      await tx.insert(auditLogs).values({
         orgId,
         userId: (await auth()).userId || "system",
         action: "QUOTATION_CREATED",
         entityType: "quotation",
-        entityId: newQuotation.id,
+        entityId: created.id,
         changes: JSON.stringify({ quotationNumber, netAmount }),
       });
+
+      newQuotation = created;
+    });
+
     revalidatePath("/sales/quotations");
     return {
       success: true,
@@ -2178,43 +2226,47 @@ export async function updateQuotation(
     if (data.shippingCharges !== undefined)
       updateData.shippingCharges = data.shippingCharges;
     if (data.taxAmount !== undefined) updateData.taxAmount = data.taxAmount;
-    if (data.items) {
-      const grossAmount = data.items.reduce((sum, item) => {
-        const qty = parseFloat(item.quantity || "0");
-        const price = parseFloat(item.unitPrice || "0");
-        const discPct = parseFloat(item.discountPercentage || "0");
-        const lineTotal = qty * price;
-        return sum + (lineTotal - (lineTotal * discPct) / 100);
-      }, 0);
-      const globalDiscPct = parseFloat(data.discountPercentage || "0");
-      const discountAmount = (grossAmount * globalDiscPct) / 100;
-      const taxAmount = parseFloat(data.taxAmount || "0");
-      const shipping = parseFloat(data.shippingCharges || "0");
-      const netAmount = grossAmount - discountAmount + taxAmount + shipping;
-      updateData.grossAmount = grossAmount.toFixed(2);
-      updateData.discountAmount = discountAmount.toFixed(2);
-      updateData.netAmount = netAmount.toFixed(2);
-      await db
-        .delete(quotationItems)
-        .where(eq(quotationItems.quotationId, quotationId));
-      for (const item of data.items) {
-        const qty = parseFloat(item.quantity || "0");
-        const price = parseFloat(item.unitPrice || "0");
-        const discPct = parseFloat(item.discountPercentage || "0");
-        const lineTotal = qty * price - (qty * price * discPct) / 100;
-        await db.insert(quotationItems).values({
-          orgId,
-          quotationId,
-          productId: item.productId || null,
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discountPercentage: item.discountPercentage || "0",
-          taxRate: item.taxRate || "0",
-          lineTotal: lineTotal.toFixed(2),
-        });
+
+    await db.transaction(async (tx) => {
+      if (data.items) {
+        const grossAmount = data.items.reduce((sum, item) => {
+          const qty = parseFloat(item.quantity || "0");
+          const price = parseFloat(item.unitPrice || "0");
+          const discPct = parseFloat(item.discountPercentage || "0");
+          const lineTotal = qty * price;
+          return sum + (lineTotal - (lineTotal * discPct) / 100);
+        }, 0);
+        const globalDiscPct = parseFloat(data.discountPercentage || "0");
+        const discountAmount = (grossAmount * globalDiscPct) / 100;
+        const taxAmount = parseFloat(data.taxAmount || "0");
+        const shipping = parseFloat(data.shippingCharges || "0");
+        const netAmount = grossAmount - discountAmount + taxAmount + shipping;
+        updateData.grossAmount = grossAmount.toFixed(2);
+        updateData.discountAmount = discountAmount.toFixed(2);
+        updateData.netAmount = netAmount.toFixed(2);
+        await tx
+          .delete(quotationItems)
+          .where(eq(quotationItems.quotationId, quotationId));
+        for (const item of data.items) {
+          const qty = parseFloat(item.quantity || "0");
+          const price = parseFloat(item.unitPrice || "0");
+          const discPct = parseFloat(item.discountPercentage || "0");
+          const lineTotal = qty * price - (qty * price * discPct) / 100;
+          await tx.insert(quotationItems).values({
+            orgId,
+            quotationId,
+            productId: item.productId || null,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discountPercentage: item.discountPercentage || "0",
+            taxRate: item.taxRate || "0",
+            lineTotal: lineTotal.toFixed(2),
+          });
+        }
       }
-    }
+    });
+
     const [updated] = await db
       .update(quotations)
       .set(updateData)
@@ -2237,12 +2289,14 @@ export async function deleteQuotation(quotationId: string) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    await db
-      .delete(quotationItems)
-      .where(eq(quotationItems.quotationId, quotationId));
-    await db
-      .delete(quotations)
-      .where(and(eq(quotations.id, quotationId), eq(quotations.orgId, orgId)));
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(quotationItems)
+        .where(eq(quotationItems.quotationId, quotationId));
+      await tx
+        .delete(quotations)
+        .where(and(eq(quotations.id, quotationId), eq(quotations.orgId, orgId)));
+    });
     revalidatePath("/sales/quotations");
     return { success: true, message: "Quotation deleted successfully" };
   } catch (error) {
@@ -2271,45 +2325,53 @@ export async function convertQuotationToOrder(quotationId: string) {
     if (!orderNumber) {
       return { success: false, error: "Failed to generate sale order number" };
     }
-    const [newOrder] = await db
-      .insert(saleOrders)
-      .values({
-        orgId,
-        orderNumber,
-        customerId: quotation.customerId,
-        orderBooker: "",
-        subject: quotation.subject || `From ${quotation.quotationNumber}`,
-        reference: quotation.reference,
-        orderDate: quotation.issueDate,
-        deliveryDate: quotation.expiryDate,
-        status: "draft",
-        grossAmount: quotation.grossAmount,
-        discountPercentage: quotation.discountPercentage,
-        discountAmount: quotation.discountAmount,
-        taxAmount: quotation.taxAmount,
-        shippingCharges: quotation.shippingCharges,
-        netAmount: quotation.netAmount,
-        notes: quotation.notes,
-        terms: quotation.terms,
-      })
-      .returning();
-    for (const item of items) {
-      await db.insert(orderItems).values({
-        orgId,
-        orderId: newOrder.id,
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercentage: item.discountPercentage,
-        taxRate: item.taxRate,
-        lineTotal: item.lineTotal,
-      });
-    }
-    await db
-      .update(quotations)
-      .set({ status: "converted", isConverted: true })
-      .where(eq(quotations.id, quotationId));
+
+    const newOrder = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(saleOrders)
+        .values({
+          orgId,
+          orderNumber,
+          customerId: quotation.customerId,
+          orderBooker: "",
+          subject: quotation.subject || `From ${quotation.quotationNumber}`,
+          reference: quotation.reference,
+          orderDate: quotation.issueDate,
+          deliveryDate: quotation.expiryDate,
+          status: "draft",
+          grossAmount: quotation.grossAmount,
+          discountPercentage: quotation.discountPercentage,
+          discountAmount: quotation.discountAmount,
+          taxAmount: quotation.taxAmount,
+          shippingCharges: quotation.shippingCharges,
+          netAmount: quotation.netAmount,
+          notes: quotation.notes,
+          terms: quotation.terms,
+        })
+        .returning();
+
+      for (const item of items) {
+        await tx.insert(orderItems).values({
+          orgId,
+          orderId: created.id,
+          productId: item.productId || null,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountPercentage: item.discountPercentage,
+          taxRate: item.taxRate,
+          lineTotal: item.lineTotal,
+        });
+      }
+
+      await tx
+        .update(quotations)
+        .set({ status: "converted", isConverted: true })
+        .where(eq(quotations.id, quotationId));
+
+      return created;
+    });
+
     revalidatePath("/sales/quotations");
     revalidatePath("/sales/orders");
     return {
@@ -2406,45 +2468,53 @@ export async function createDeliveryNote(data: DeliveryNoteFormData) {
     if (!data.customerId)
       return { success: false, error: "Customer is required" };
     const deliveryNumber = await generateDeliveryNumber(orgId);
-    const [newDelivery] = await db
-      .insert(deliveryNotes)
-      .values({
-        orgId,
-        deliveryNumber,
-        customerId: data.customerId,
-        invoiceId: data.invoiceId || null,
-        orderId: data.orderId || null,
-        deliveryDate: new Date(data.deliveryDate),
-        status: "pending",
-        shippedVia: data.shippedVia || null,
-        trackingNumber: data.trackingNumber || null,
-        deliveryAddress: data.deliveryAddress || null,
-        notes: data.notes || null,
-      })
-      .returning();
-    for (const item of data.items) {
-      await db.insert(deliveryNoteItems).values({
-        orgId,
-        deliveryNoteId: newDelivery.id,
-        productId: item.productId || null,
-        description: item.description,
-        orderedQty: item.orderedQty,
-        deliveredQty: item.deliveredQty,
-      });
-    }
-    if (data.invoiceId) {
-      const [inv] = await db
-        .select()
-        .from(invoices)
-        .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, orgId)))
-        .limit(1);
-      if (inv && inv.status === "approved") {
-        await db
-          .update(invoices)
-          .set({ status: "sent" })
-          .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, orgId)));
+
+    const newDelivery = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(deliveryNotes)
+        .values({
+          orgId,
+          deliveryNumber,
+          customerId: data.customerId,
+          invoiceId: data.invoiceId || null,
+          orderId: data.orderId || null,
+          deliveryDate: new Date(data.deliveryDate),
+          status: "pending",
+          shippedVia: data.shippedVia || null,
+          trackingNumber: data.trackingNumber || null,
+          deliveryAddress: data.deliveryAddress || null,
+          notes: data.notes || null,
+        })
+        .returning();
+
+      for (const item of data.items) {
+        await tx.insert(deliveryNoteItems).values({
+          orgId,
+          deliveryNoteId: created.id,
+          productId: item.productId || null,
+          description: item.description,
+          orderedQty: item.orderedQty,
+          deliveredQty: item.deliveredQty,
+        });
       }
-    }
+
+      if (data.invoiceId) {
+        const [inv] = await tx
+          .select()
+          .from(invoices)
+          .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, orgId)))
+          .limit(1);
+        if (inv && inv.status === "approved") {
+          await tx
+            .update(invoices)
+            .set({ status: "sent" })
+            .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, orgId)));
+        }
+      }
+
+      return created;
+    });
+
     revalidatePath("/sales/delivery");
     return {
       success: true,
@@ -2550,6 +2620,7 @@ export async function getRecurringInvoices(statusFilter?: string) {
 
 export async function createRecurringInvoice(data: RecurringInvoiceFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.customerId || !data.templateName)
@@ -2558,42 +2629,49 @@ export async function createRecurringInvoice(data: RecurringInvoiceFormData) {
         error: "Customer and template name are required",
       };
     const startDate = new Date(data.startDate);
-    let nextInvoiceDate = new Date(startDate);
-    const [newRecurring] = await db
-      .insert(recurringInvoices)
-      .values({
-        orgId,
-        customerId: data.customerId,
-        templateName: data.templateName,
-        interval: data.interval,
-        startDate,
-        endDate: data.endDate ? new Date(data.endDate) : null,
-        nextInvoiceDate,
-        status: "active",
-        subject: data.subject || null,
-        notes: data.notes || null,
-        terms: data.terms || null,
-        discountPercentage: data.discountPercentage || "0",
-        taxAmount: data.taxAmount || "0",
-        shippingCharges: data.shippingCharges || "0",
-      })
-      .returning();
-    for (const item of data.items) {
-      const qty = parseFloat(item.quantity || "0");
-      const price = parseFloat(item.unitPrice || "0");
-      const taxRate = parseFloat(item.taxRate || "0");
-      const lineTotal = qty * price + (qty * price * taxRate) / 100;
-      await db.insert(recurringInvoiceItems).values({
-        orgId,
-        recurringInvoiceId: newRecurring.id,
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        taxRate: item.taxRate || "0",
-        lineTotal: lineTotal.toFixed(2),
-      });
-    }
+    const nextInvoiceDate = new Date(startDate);
+
+    const newRecurring = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(recurringInvoices)
+        .values({
+          orgId,
+          customerId: data.customerId,
+          templateName: data.templateName,
+          interval: data.interval,
+          startDate,
+          endDate: data.endDate ? new Date(data.endDate) : null,
+          nextInvoiceDate,
+          status: "active",
+          subject: data.subject || null,
+          notes: data.notes || null,
+          terms: data.terms || null,
+          discountPercentage: data.discountPercentage || "0",
+          taxAmount: data.taxAmount || "0",
+          shippingCharges: data.shippingCharges || "0",
+        })
+        .returning();
+
+      for (const item of data.items) {
+        const qty = parseFloat(item.quantity || "0");
+        const price = parseFloat(item.unitPrice || "0");
+        const taxRate = parseFloat(item.taxRate || "0");
+        const lineTotal = qty * price + (qty * price * taxRate) / 100;
+        await tx.insert(recurringInvoiceItems).values({
+          orgId,
+          recurringInvoiceId: created.id,
+          productId: item.productId || null,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          taxRate: item.taxRate || "0",
+          lineTotal: lineTotal.toFixed(2),
+        });
+      }
+
+      return created;
+    });
+
     revalidatePath("/sales/recurring");
     return {
       success: true,
@@ -2631,6 +2709,31 @@ export async function updateRecurringInvoice(
     if (data.shippingCharges !== undefined)
       updateData.shippingCharges = data.shippingCharges;
     if (data.status !== undefined) updateData.status = data.status;
+
+    await db.transaction(async (tx) => {
+      if (data.items) {
+        await tx
+          .delete(recurringInvoiceItems)
+          .where(eq(recurringInvoiceItems.recurringInvoiceId, id));
+        for (const item of data.items) {
+          const qty = parseFloat(item.quantity || "0");
+          const price = parseFloat(item.unitPrice || "0");
+          const taxRate = parseFloat(item.taxRate || "0");
+          const lineTotal = qty * price + (qty * price * taxRate) / 100;
+          await tx.insert(recurringInvoiceItems).values({
+            orgId,
+            recurringInvoiceId: id,
+            productId: item.productId || null,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: item.taxRate || "0",
+            lineTotal: lineTotal.toFixed(2),
+          });
+        }
+      }
+    });
+
     const [updated] = await db
       .update(recurringInvoices)
       .set(updateData)
@@ -2640,27 +2743,6 @@ export async function updateRecurringInvoice(
       .returning();
     if (!updated)
       return { success: false, error: "Recurring invoice not found" };
-    if (data.items) {
-      await db
-        .delete(recurringInvoiceItems)
-        .where(eq(recurringInvoiceItems.recurringInvoiceId, id));
-      for (const item of data.items) {
-        const qty = parseFloat(item.quantity || "0");
-        const price = parseFloat(item.unitPrice || "0");
-        const taxRate = parseFloat(item.taxRate || "0");
-        const lineTotal = qty * price + (qty * price * taxRate) / 100;
-        await db.insert(recurringInvoiceItems).values({
-          orgId,
-          recurringInvoiceId: id,
-          productId: item.productId || null,
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          taxRate: item.taxRate || "0",
-          lineTotal: lineTotal.toFixed(2),
-        });
-      }
-    }
     revalidatePath("/sales/recurring");
     return {
       success: true,
@@ -2677,14 +2759,16 @@ export async function deleteRecurringInvoice(id: string) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    await db
-      .delete(recurringInvoiceItems)
-      .where(eq(recurringInvoiceItems.recurringInvoiceId, id));
-    await db
-      .delete(recurringInvoices)
-      .where(
-        and(eq(recurringInvoices.id, id), eq(recurringInvoices.orgId, orgId)),
-      );
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(recurringInvoiceItems)
+        .where(eq(recurringInvoiceItems.recurringInvoiceId, id));
+      await tx
+        .delete(recurringInvoices)
+        .where(
+          and(eq(recurringInvoices.id, id), eq(recurringInvoices.orgId, orgId)),
+        );
+    });
     revalidatePath("/sales/recurring");
     return { success: true, message: "Recurring invoice deleted" };
   } catch (error) {
@@ -2693,6 +2777,10 @@ export async function deleteRecurringInvoice(id: string) {
   }
 }
 
+// FIX (2026 review): invoice + invoiceItems inserts previously ran outside
+// any transaction — if the items insert failed after the invoice insert
+// succeeded, an orphan invoice with no line items would be left behind.
+// Now the whole per-recurring-template invoice generation is atomic.
 export async function generateRecurringInvoices() {
   try {
     const orgId = await getCurrentOrgId();
@@ -2733,39 +2821,7 @@ export async function generateRecurringInvoices() {
       const taxAmount = parseFloat(recurring.taxAmount || "0");
       const shipping = parseFloat(recurring.shippingCharges || "0");
       const netAmount = grossAmount - discountAmount + taxAmount + shipping;
-      const [newInvoice] = await db
-        .insert(invoices)
-        .values({
-          orgId,
-          invoiceNumber,
-          customerId: recurring.customerId,
-          subject: recurring.subject || recurring.templateName,
-          issueDate: today,
-          status: "draft",
-          grossAmount: grossAmount.toFixed(2),
-          discountPercentage: recurring.discountPercentage,
-          discountAmount: discountAmount.toFixed(2),
-          taxAmount: taxAmount.toFixed(2),
-          shippingCharges: shipping.toFixed(2),
-          netAmount: netAmount.toFixed(2),
-          receivedAmount: "0",
-          balanceAmount: netAmount.toFixed(2),
-          notes: recurring.notes,
-          terms: recurring.terms,
-        })
-        .returning();
-      for (const item of items) {
-        await db.insert(invoiceItems).values({
-          orgId,
-          invoiceId: newInvoice.id,
-          productId: item.productId || null,
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          taxRate: item.taxRate,
-          lineTotal: item.lineTotal,
-        });
-      }
+
       let nextDate = new Date(recurring.nextInvoiceDate || today);
       switch (recurring.interval) {
         case "weekly":
@@ -2781,13 +2837,52 @@ export async function generateRecurringInvoices() {
           nextDate.setFullYear(nextDate.getFullYear() + 1);
           break;
       }
-      await db
-        .update(recurringInvoices)
-        .set({
-          nextInvoiceDate: nextDate,
-          lastGeneratedInvoiceId: newInvoice.id,
-        })
-        .where(eq(recurringInvoices.id, recurring.id));
+
+      await db.transaction(async (tx) => {
+        const [newInvoice] = await tx
+          .insert(invoices)
+          .values({
+            orgId,
+            invoiceNumber,
+            customerId: recurring.customerId,
+            subject: recurring.subject || recurring.templateName,
+            issueDate: today,
+            status: "draft",
+            grossAmount: grossAmount.toFixed(2),
+            discountPercentage: recurring.discountPercentage,
+            discountAmount: discountAmount.toFixed(2),
+            taxAmount: taxAmount.toFixed(2),
+            shippingCharges: shipping.toFixed(2),
+            netAmount: netAmount.toFixed(2),
+            receivedAmount: "0",
+            balanceAmount: netAmount.toFixed(2),
+            notes: recurring.notes,
+            terms: recurring.terms,
+          })
+          .returning();
+
+        for (const item of items) {
+          await tx.insert(invoiceItems).values({
+            orgId,
+            invoiceId: newInvoice.id,
+            productId: item.productId || null,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: item.taxRate,
+            lineTotal: item.lineTotal,
+          });
+        }
+
+        await tx
+          .update(recurringInvoices)
+          .set({
+            nextInvoiceDate: nextDate,
+            lastGeneratedInvoiceId: newInvoice.id,
+          })
+          .where(eq(recurringInvoices.id, recurring.id));
+      });
+
       generated++;
     }
     revalidatePath("/sales/recurring");
@@ -2880,6 +2975,7 @@ export async function getSalesReturns(
 
 export async function createSalesReturn(data: SalesReturnFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.customerId)
@@ -2961,15 +3057,29 @@ export async function approveSalesReturn(returnId: string) {
 
     await db.transaction(async (tx) => {
       // 1. Reverse stock for returned items
+      const productIds = items.map((i) => i.productId).filter((p): p is string => !!p);
+      const productsToUpdate =
+        productIds.length > 0
+          ? await tx
+              .select({ id: products.id, currentStock: products.currentStock })
+              .from(products)
+              .where(and(inArray(products.id, productIds), eq(products.orgId, orgId)))
+          : [];
+      const productMap = new Map(productsToUpdate.map((p) => [p.id, p]));
+
+      let originalWarehouseId: string | null = null;
+      if (salesReturn.invoiceId) {
+        const [originalInvoice] = await tx
+          .select({ warehouseId: invoices.warehouseId })
+          .from(invoices)
+          .where(eq(invoices.id, salesReturn.invoiceId))
+          .limit(1);
+        originalWarehouseId = originalInvoice?.warehouseId || null;
+      }
+
       for (const item of items) {
         if (item.productId) {
-          const [product] = await tx
-            .select({ currentStock: products.currentStock })
-            .from(products)
-            .where(
-              and(eq(products.id, item.productId), eq(products.orgId, orgId)),
-            )
-            .limit(1);
+          const product = productMap.get(item.productId);
           if (product) {
             const newStock =
               parseFloat(String(product.currentStock || "0")) +
@@ -2978,6 +3088,16 @@ export async function approveSalesReturn(returnId: string) {
               .update(products)
               .set({ currentStock: String(newStock) })
               .where(eq(products.id, item.productId));
+          }
+
+          if (originalWarehouseId) {
+            await updateWarehouseStock(
+              tx,
+              orgId,
+              originalWarehouseId,
+              item.productId,
+              parseFloat(item.quantity),
+            );
           }
         }
       }
@@ -3303,6 +3423,7 @@ export async function allocatePayment(
   allocations: Array<{ invoiceId: string; amount: string }>,
 ) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
     const [payment] = await db
@@ -3576,6 +3697,7 @@ export async function createCustomerSettlement(data: SettlementFormData) {
  */
 export async function duplicateInvoice(invoiceId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) {
       return { success: false, error: "No organization found" };
@@ -3721,60 +3843,64 @@ export async function duplicateSaleOrder(orderId: string) {
     // Get current date
     const currentDate = new Date();
 
-    // Create new sale order (draft) with reset fields
-    const [newOrder] = await db
-      .insert(saleOrders)
-      .values({
-        orgId,
-        orderNumber: newOrderNumber,
-        customerId: originalOrder.customerId,
-        orderBooker: originalOrder.orderBooker,
-        subject: originalOrder.subject
-          ? `[Copy] ${originalOrder.subject}`
-          : null,
-        reference: originalOrder.reference,
-        orderDate: currentDate,
-        deliveryDate: originalOrder.deliveryDate ? currentDate : null,
-        status: "draft", // Always create as draft
-        grossAmount: originalOrder.grossAmount,
-        discountPercentage: originalOrder.discountPercentage,
-        discountAmount: originalOrder.discountAmount,
-        taxAmount: originalOrder.taxAmount,
-        shippingCharges: originalOrder.shippingCharges,
-        roundOff: originalOrder.roundOff,
-        netAmount: originalOrder.netAmount,
-        notes: originalOrder.notes,
-        terms: originalOrder.terms,
-      })
-      .returning();
+    const newOrder = await db.transaction(async (tx) => {
+      // Create new sale order (draft) with reset fields
+      const [order] = await tx
+        .insert(saleOrders)
+        .values({
+          orgId,
+          orderNumber: newOrderNumber,
+          customerId: originalOrder.customerId,
+          orderBooker: originalOrder.orderBooker,
+          subject: originalOrder.subject
+            ? `[Copy] ${originalOrder.subject}`
+            : null,
+          reference: originalOrder.reference,
+          orderDate: currentDate,
+          deliveryDate: originalOrder.deliveryDate ? currentDate : null,
+          status: "draft", // Always create as draft
+          grossAmount: originalOrder.grossAmount,
+          discountPercentage: originalOrder.discountPercentage,
+          discountAmount: originalOrder.discountAmount,
+          taxAmount: originalOrder.taxAmount,
+          shippingCharges: originalOrder.shippingCharges,
+          roundOff: originalOrder.roundOff,
+          netAmount: originalOrder.netAmount,
+          notes: originalOrder.notes,
+          terms: originalOrder.terms,
+        })
+        .returning();
 
-    // Create order items (copy from original)
-    for (const item of originalItems) {
-      await db.insert(orderItems).values({
+      // Create order items (copy from original)
+      for (const item of originalItems) {
+        await tx.insert(orderItems).values({
+          orgId,
+          orderId: order.id,
+          productId: item.productId,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountPercentage: item.discountPercentage,
+          taxRate: item.taxRate,
+          lineTotal: item.lineTotal,
+        });
+      }
+
+      // Create audit log
+      await tx.insert(auditLogs).values({
         orgId,
-        orderId: newOrder.id,
-        productId: item.productId,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountPercentage: item.discountPercentage,
-        taxRate: item.taxRate,
-        lineTotal: item.lineTotal,
+        userId: (await auth()).userId || "system",
+        action: "SALE_ORDER_DUPLICATED",
+        entityType: "sale_order",
+        entityId: order.id,
+        changes: JSON.stringify({
+          originalOrderNumber: originalOrder.orderNumber,
+          newOrderNumber: order.orderNumber,
+          duplicatedFrom: orderId,
+        }),
       });
-    }
 
-    // Create audit log
-    await db.insert(auditLogs).values({
-      orgId,
-      userId: (await auth()).userId || "system",
-      action: "SALE_ORDER_DUPLICATED",
-      entityType: "sale_order",
-      entityId: newOrder.id,
-      changes: JSON.stringify({
-        originalOrderNumber: originalOrder.orderNumber,
-        newOrderNumber: newOrder.orderNumber,
-        duplicatedFrom: orderId,
-      }),
+      return order;
     });
 
     revalidatePath("/sales/orders");

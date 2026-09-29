@@ -12,32 +12,16 @@ import {
   invoices,
   invoiceItems,
   productCategories,
-  productBatches,
   taxRates,
+  posShifts,
 } from "@/db/schema";
-import { eq, and, desc, or, ilike, sum, gte, lte, sql, count as countFn, inArray } from "drizzle-orm";
+import { eq, and, desc, or, ilike, gte, lte, sql, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber } from "./shared";
-import { validateJournalBalance } from "../accounting";
+import { getCurrentOrgId, generateDocumentNumber } from "./shared";
+import { postTransaction, resolveAccount } from "../accounting/posting-engine";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { captureException } from "@/lib/error-handler";
-
-// POS Shift interfaces
-export interface PosShift {
-  id: string;
-  orgId: string;
-  userId: string;
-  openingAmount: string;
-  closingAmount: string | null;
-  openingTime: Date;
-  closingTime: Date | null;
-  expectedCash: string | null;
-  actualCash: string | null;
-  variance: string | null;
-  status: 'open' | 'closed';
-  createdAt: Date;
-}
 
 export interface PosSaleItem {
   productId: string;
@@ -57,43 +41,41 @@ export interface PosSaleData {
   notes?: string;
 }
 
+async function getCurrentProfileId(orgId: string): Promise<{ profileId: string; userId: string } | null> {
+  const { userId } = await auth();
+  if (!userId) return null;
+
+  const [profile] = await db
+    .select({ id: profiles.id })
+    .from(profiles)
+    .where(and(eq(profiles.userId, userId), eq(profiles.orgId, orgId)))
+    .limit(1);
+
+  if (!profile) return null;
+  return { profileId: profile.id, userId };
+}
+
 // Get current POS shift
 export async function getCurrentPosShift() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Not authenticated" };
+    const ctx = await getCurrentProfileId(orgId);
+    if (!ctx) return { success: false, error: "Profile not found" };
 
-    // Get profile ID (UUID) instead of using Clerk user ID
-    const userProfile = await db
-      .select({ id: profiles.id })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length === 0) {
-      return { success: false, error: "Profile not found" };
-    }
-
-    const shift = await db
+    const [shift] = await db
       .select()
-      .from(journalEntries)
+      .from(posShifts)
       .where(and(
-        eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift'),
-        eq(journalEntries.referenceId, userProfile[0].id),
-        eq(journalEntries.description as any, 'open')
+        eq(posShifts.orgId, orgId),
+        eq(posShifts.profileId, ctx.profileId),
+        eq(posShifts.status, 'open'),
       ))
-      .orderBy(desc(journalEntries.createdAt))
+      .orderBy(desc(posShifts.openingTime))
       .limit(1);
 
-    if (shift.length === 0) {
-      return { success: true, data: null };
-    }
-
-    return { success: true, data: shift[0] };
+    return { success: true, data: shift || null };
   } catch (error) {
     captureException(error, { module: "pos", function: "getCurrentPosShift" });
     return { success: false, error: "Failed to fetch shift" };
@@ -109,132 +91,84 @@ export async function startShift(openingAmount: number) {
     const locked = await checkPeriodLocked(new Date());
     if (locked) return { success: false, error: "Cannot start shift in a locked fiscal period" };
 
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Not authenticated" };
+    const ctx = await getCurrentProfileId(orgId);
+    if (!ctx) return { success: false, error: "Profile not found" };
 
-    // Get profile ID (UUID) instead of using Clerk user ID
-    const userProfile = await db
-      .select({ id: profiles.id })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length === 0) {
-      return { success: false, error: "Profile not found" };
-    }
-
-    // Check if shift already open
-    const existingShift = await db
-      .select()
-      .from(journalEntries)
+    const [existingShift] = await db
+      .select({ id: posShifts.id })
+      .from(posShifts)
       .where(and(
-        eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift'),
-        eq(journalEntries.referenceId, userProfile[0].id),
-        eq(journalEntries.description as any, 'open')
+        eq(posShifts.orgId, orgId),
+        eq(posShifts.profileId, ctx.profileId),
+        eq(posShifts.status, 'open'),
       ))
       .limit(1);
 
-    if (existingShift.length > 0) {
+    if (existingShift) {
       return { success: false, error: "Shift already open" };
     }
 
     const shift = await db.transaction(async (tx) => {
-      // Create shift entry
-      const [shift] = await tx
-        .insert(journalEntries)
+      const [created] = await tx
+        .insert(posShifts)
         .values({
           orgId,
-          entryNumber: `SHIFT-${Date.now()}`,
-          entryDate: new Date(),
-          referenceType: 'pos_shift',
-          referenceId: userId as any,
-          description: 'open',
-          status: "posted",
-          postedAt: new Date(),
+          profileId: ctx.profileId,
+          openingAmount: openingAmount.toFixed(2),
+          status: 'open',
         })
         .returning();
 
-      // Create journal entry for opening cash
-      const [posCashAccount] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'cash')
-        ))
-        .limit(1);
+      // Opening cash JE: Dr Cash / Cr POS Cash (float transfer) — via shared posting engine
+      const mainCashAcc = await resolveAccount(tx, orgId, "cash");
+      const posCashAcc = await resolveAccount(tx, orgId, "pos_cash");
 
-      if (posCashAccount) {
-        const [journalEntry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId,
-            entryNumber: `POS-OPEN-${Date.now()}`,
-            entryDate: new Date(),
-            referenceType: 'pos_shift_opening',
-            referenceId: shift.id,
-            description: `POS Shift Opening - Rs. ${openingAmount.toFixed(2)}`,
-            status: "posted",
-            postedAt: new Date(),
-          })
-          .returning();
+      const { journalEntryId } = await postTransaction(tx, {
+        orgId,
+        description: `POS Shift Opening - Rs. ${openingAmount.toFixed(2)}`,
+        date: new Date(),
+        referenceType: "pos_shift_opening",
+        referenceId: created.id,
+        sourceType: "pos_shift",
+        createdBy: ctx.userId,
+        lines: [
+          {
+            accountId: mainCashAcc.id,
+            description: "Dr Cash (Float Transfer)",
+            debit: openingAmount.toFixed(2),
+            credit: "0",
+          },
+          {
+            accountId: posCashAcc.id,
+            description: "Cr POS Cash (Opening Float)",
+            debit: "0",
+            credit: openingAmount.toFixed(2),
+          },
+        ],
+      });
 
-        if (!validateJournalBalance([
-          { debitAmount: openingAmount.toFixed(2), creditAmount: '0' },
-          { debitAmount: '0', creditAmount: openingAmount.toFixed(2) },
-        ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
+      await tx
+        .update(posShifts)
+        .set({ openingJournalEntryId: journalEntryId })
+        .where(eq(posShifts.id, created.id));
 
-        // Debit: POS Cash
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: posCashAccount.id,
-          description: 'Debit - POS Cash (Opening)',
-          debitAmount: openingAmount.toFixed(2),
-          creditAmount: '0',
-        });
-
-        // Credit: Owner's Equity (or a specific opening balance account)
-        const [equityAccount] = await tx
-          .select()
-          .from(chartOfAccounts)
-          .where(and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, 'capital')
-          ))
-          .limit(1);
-
-        if (equityAccount) {
-          await tx.insert(journalEntryLines).values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: equityAccount.id,
-            description: 'Credit - Owner\'s Equity (Opening)',
-            debitAmount: '0',
-            creditAmount: openingAmount.toFixed(2),
-          });
-        }
-      }
-
-      // Audit log
       await tx.insert(auditLogs).values({
         orgId,
-        userId,
+        userId: ctx.userId,
         action: 'POS_SHIFT_STARTED',
         entityType: 'pos_shift',
-        entityId: shift.id,
+        entityId: created.id,
         changes: JSON.stringify({ openingAmount }),
       });
 
-      return shift;
+      return { ...created, openingJournalEntryId: journalEntryId };
     });
 
     revalidatePath('/pos');
     return { success: true, data: shift, message: "Shift started successfully" };
   } catch (error) {
     captureException(error, { module: "pos", function: "startShift" });
-    return { success: false, error: "Failed to start shift" };
+    return { success: false, error: error instanceof Error ? error.message : "Failed to start shift" };
   }
 }
 
@@ -247,31 +181,18 @@ export async function endShift(actualCash: number, expectedCash: number) {
     const locked = await checkPeriodLocked(new Date());
     if (locked) return { success: false, error: "Cannot end shift in a locked fiscal period" };
 
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Not authenticated" };
+    const ctx = await getCurrentProfileId(orgId);
+    if (!ctx) return { success: false, error: "Profile not found" };
 
-    // Get profile ID (UUID) instead of using Clerk user ID
-    const userProfile = await db
-      .select({ id: profiles.id })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length === 0) {
-      return { success: false, error: "Profile not found" };
-    }
-
-    // Find open shift
     const [openShift] = await db
       .select()
-      .from(journalEntries)
+      .from(posShifts)
       .where(and(
-        eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift'),
-        eq(journalEntries.referenceId, userProfile[0].id),
-        eq(journalEntries.description as any, 'open')
+        eq(posShifts.orgId, orgId),
+        eq(posShifts.profileId, ctx.profileId),
+        eq(posShifts.status, 'open'),
       ))
-      .orderBy(desc(journalEntries.createdAt))
+      .orderBy(desc(posShifts.openingTime))
       .limit(1);
 
     if (!openShift) {
@@ -281,44 +202,69 @@ export async function endShift(actualCash: number, expectedCash: number) {
     const variance = actualCash - expectedCash;
 
     await db.transaction(async (tx) => {
-      // Update shift
-      await tx
-        .update(journalEntries)
-        .set({
-          description: 'closed',
-        })
-        .where(eq(journalEntries.id, openShift.id));
+      const mainCashAcc = await resolveAccount(tx, orgId, "cash");
+      const posCashAcc = await resolveAccount(tx, orgId, "pos_cash");
 
-      // Create closing journal entry
-      const [posCashAccount] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'cash')
-        ))
-        .limit(1);
-
-      if (posCashAccount) {
-        const [journalEntry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId,
-            entryNumber: `POS-CLOSE-${Date.now()}`,
-            entryDate: new Date(),
-            referenceType: 'pos_shift_closing',
-            referenceId: openShift.id,
-            description: `POS Shift Closing - Expected: ${expectedCash.toFixed(2)}, Actual: ${actualCash.toFixed(2)}, Variance: ${variance.toFixed(2)}`,
-            status: "posted",
-            postedAt: new Date(),
-          })
-          .returning();
+      const closingLines: { accountId: string; description: string; debit: string; credit: string }[] = [
+        {
+          accountId: mainCashAcc.id,
+          description: "Dr Cash (Float Return)",
+          debit: actualCash.toFixed(2),
+          credit: "0",
+        },
+        {
+          accountId: posCashAcc.id,
+          description: "Cr POS Cash (Float)",
+          debit: "0",
+          credit: expectedCash.toFixed(2),
+        },
+      ];
+      if (Math.abs(variance) > 0.01) {
+        if (variance > 0) {
+          closingLines.push({
+            accountId: posCashAcc.id,
+            description: "Cash Overage",
+            debit: "0",
+            credit: Math.abs(variance).toFixed(2),
+          });
+        } else {
+          closingLines.push({
+            accountId: posCashAcc.id,
+            description: "Cash Shortage",
+            debit: Math.abs(variance).toFixed(2),
+            credit: "0",
+          });
+        }
       }
 
-      // Audit log
+      const { journalEntryId } = await postTransaction(tx, {
+        orgId,
+        description: `POS Shift Closing - Expected: ${expectedCash.toFixed(2)}, Actual: ${actualCash.toFixed(2)}, Variance: ${variance.toFixed(2)}`,
+        date: new Date(),
+        referenceType: "pos_shift_closing",
+        referenceId: openShift.id,
+        sourceType: "pos_shift",
+        createdBy: ctx.userId,
+        lines: closingLines,
+      });
+
+      await tx
+        .update(posShifts)
+        .set({
+          status: 'closed',
+          closingAmount: actualCash.toFixed(2),
+          closingTime: new Date(),
+          expectedCash: expectedCash.toFixed(2),
+          actualCash: actualCash.toFixed(2),
+          variance: variance.toFixed(2),
+          closingJournalEntryId: journalEntryId,
+          updatedAt: new Date(),
+        })
+        .where(eq(posShifts.id, openShift.id));
+
       await tx.insert(auditLogs).values({
         orgId,
-        userId,
+        userId: ctx.userId,
         action: 'POS_SHIFT_ENDED',
         entityType: 'pos_shift',
         entityId: openShift.id,
@@ -327,8 +273,8 @@ export async function endShift(actualCash: number, expectedCash: number) {
     });
 
     revalidatePath('/pos');
-    return { 
-      success: true, 
+    return {
+      success: true,
       message: "Shift closed successfully",
       data: { expectedCash, actualCash, variance }
     };
@@ -339,6 +285,13 @@ export async function endShift(actualCash: number, expectedCash: number) {
 }
 
 // Process POS sale
+// FIX (2026 review): payment method previously had zero effect on GL
+// posting — every sale, regardless of cash/card/mixed, debited the Cash
+// account for the full amount. Now splits correctly, using a
+// "card_clearing" asset account for card/jazzcash/easypaisa. JE
+// construction now goes through postTransaction()/resolveAccount()
+// instead of hand-rolled inserts, so entry numbering stays consistent
+// with the rest of the app.
 export async function processPosSale(saleData: PosSaleData) {
   try {
     const orgId = await getCurrentOrgId();
@@ -347,29 +300,16 @@ export async function processPosSale(saleData: PosSaleData) {
     const locked = await checkPeriodLocked(new Date());
     if (locked) return { success: false, error: "Cannot process sale in a locked fiscal period" };
 
-    // Check if shift is open
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Not authenticated" };
-
-    // Get profile ID (UUID) instead of using Clerk user ID
-    const userProfile = await db
-      .select({ id: profiles.id })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length === 0) {
-      return { success: false, error: "Profile not found" };
-    }
+    const ctx = await getCurrentProfileId(orgId);
+    if (!ctx) return { success: false, error: "Profile not found" };
 
     const [openShift] = await db
-      .select()
-      .from(journalEntries)
+      .select({ id: posShifts.id })
+      .from(posShifts)
       .where(and(
-        eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift'),
-        eq(journalEntries.referenceId, userProfile[0].id),
-        eq(journalEntries.description as any, 'open')
+        eq(posShifts.orgId, orgId),
+        eq(posShifts.profileId, ctx.profileId),
+        eq(posShifts.status, 'open'),
       ))
       .limit(1);
 
@@ -378,7 +318,7 @@ export async function processPosSale(saleData: PosSaleData) {
     }
 
     // Validate tax rate against tax_rates table if provided
-    let validatedTaxPercentage = saleData.taxPercentage || 0;
+    const validatedTaxPercentage = saleData.taxPercentage || 0;
     if (validatedTaxPercentage > 0) {
       const [validRate] = await db
         .select({ rate: taxRates.rate })
@@ -404,7 +344,7 @@ export async function processPosSale(saleData: PosSaleData) {
       const discount = item.discountPercentage ? lineTotal * (item.discountPercentage / 100) : 0;
       const afterDiscount = lineTotal - discount;
       const tax = saleData.taxPercentage ? afterDiscount * (saleData.taxPercentage / 100) : 0;
-      
+
       grossAmount += lineTotal;
       totalDiscount += discount;
       totalTax += tax;
@@ -413,13 +353,26 @@ export async function processPosSale(saleData: PosSaleData) {
     const globalDiscount = saleData.discountPercentage ? grossAmount * (saleData.discountPercentage / 100) : 0;
     const netAmount = grossAmount - globalDiscount - totalDiscount + totalTax;
 
-    // Generate invoice number for POS
+    // Determine cash/card split based on payment method
+    let cashPortion = 0;
+    let cardPortion = 0;
+    if (saleData.paymentMethod === 'cash') {
+      cashPortion = netAmount;
+    } else if (saleData.paymentMethod === 'mixed') {
+      cashPortion = saleData.cashReceived ?? 0;
+      cardPortion = saleData.cardReceived ?? 0;
+      if (Math.abs(cashPortion + cardPortion - netAmount) > 0.01) {
+        return { success: false, error: `Cash (${cashPortion.toFixed(2)}) + Card (${cardPortion.toFixed(2)}) must equal the total (${netAmount.toFixed(2)})` };
+      }
+    } else {
+      // card, jazzcash, easypaisa
+      cardPortion = netAmount;
+    }
+
     const invoiceNumber = await generateDocumentNumber('invoice', orgId);
     if (!invoiceNumber) {
       return { success: false, error: "Failed to generate invoice number" };
     }
-
-    const entryNumber = await generateJournalEntryNumber(orgId);
 
     const walkInCustomerId = saleData.customerId || await getDefaultWalkInCustomer(orgId);
 
@@ -464,7 +417,6 @@ export async function processPosSale(saleData: PosSaleData) {
           lineTotal: afterDiscount.toFixed(2),
         });
 
-        // Deduct stock
         const [product] = await tx
           .select({ currentStock: products.currentStock })
           .from(products)
@@ -480,7 +432,7 @@ export async function processPosSale(saleData: PosSaleData) {
         }
       }
 
-      // ACC-13: Batch-fetch product costs for COGS calculation
+      // Batch-fetch product costs for COGS calculation
       const productIds = saleData.items.map((i) => i.productId);
       const costProducts = await tx
         .select({ id: products.id, costPrice: products.costPrice })
@@ -493,109 +445,84 @@ export async function processPosSale(saleData: PosSaleData) {
         totalCOGS += item.quantity * (costMap.get(item.productId) || 0);
       }
 
-      // Create journal entry
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(invoice.issueDate),
-          referenceType: 'pos_sale',
-          referenceId: invoice.id,
-          description: `POS Sale ${invoiceNumber}`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
+      // Build JE lines
+      const lines: { accountId: string; description: string; debit: string; credit: string }[] = [];
 
-      // Find accounts
-      const [posCashAccount] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cash')))
-        .limit(1);
-
-      const [salesRevenue] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'sales_revenue')))
-        .limit(1);
-
-      const [salesTaxPayable] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'tax_payable')))
-        .limit(1);
-
-      const [cogsAcc] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cogs')))
-        .limit(1);
-
-      const [invAcc] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'inventory')))
-        .limit(1);
-
-      if (posCashAccount && salesRevenue) {
-        const jeLines: typeof journalEntryLines.$inferInsert[] = [];
-
-        jeLines.push({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: posCashAccount.id,
+      if (cashPortion > 0) {
+        const cashAcc = await resolveAccount(tx, orgId, "cash");
+        lines.push({
+          accountId: cashAcc.id,
           description: `Debit - POS Cash (Sale ${invoiceNumber})`,
-          debitAmount: netAmount.toFixed(2),
-          creditAmount: '0',
+          debit: cashPortion.toFixed(2),
+          credit: "0",
         });
-
-        jeLines.push({
-          orgId,
-          journalEntryId: journalEntry.id,
-          accountId: salesRevenue.id,
-          description: `Credit - Sales Revenue (Sale ${invoiceNumber})`,
-          debitAmount: '0',
-          creditAmount: (grossAmount - globalDiscount - totalDiscount).toFixed(2),
-        });
-
-        if (totalTax > 0 && salesTaxPayable) {
-          jeLines.push({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: salesTaxPayable.id,
-            description: `Credit - Sales Tax Payable (Sale ${invoiceNumber})`,
-            debitAmount: '0',
-            creditAmount: totalTax.toFixed(2),
-          });
-        }
-
-        if (totalCOGS > 0 && cogsAcc && invAcc) {
-          jeLines.push({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: cogsAcc.id,
-            description: `Debit - COGS (POS Sale ${invoiceNumber})`,
-            debitAmount: totalCOGS.toFixed(2),
-            creditAmount: '0',
-          });
-          jeLines.push({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: invAcc.id,
-            description: `Credit - Inventory (POS Sale ${invoiceNumber})`,
-            debitAmount: '0',
-            creditAmount: totalCOGS.toFixed(2),
-          });
-        }
-
-        if (!validateJournalBalance(jeLines as { debitAmount: string; creditAmount: string }[])) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-        await tx.insert(journalEntryLines).values(jeLines);
       }
 
-      // Earn loyalty points (1 point per 100 PKR spent)
+      if (cardPortion > 0) {
+        const cardAcc = await resolveAccount(tx, orgId, "card_clearing");
+        lines.push({
+          accountId: cardAcc.id,
+          description: `Debit - Card Clearing (Sale ${invoiceNumber}, ${saleData.paymentMethod})`,
+          debit: cardPortion.toFixed(2),
+          credit: "0",
+        });
+      }
+
+      const revAcc = await resolveAccount(tx, orgId, "sales_revenue");
+      lines.push({
+        accountId: revAcc.id,
+        description: `Credit - Sales Revenue (Sale ${invoiceNumber})`,
+        debit: "0",
+        credit: (grossAmount - globalDiscount - totalDiscount).toFixed(2),
+      });
+
+      if (totalTax > 0) {
+        const taxAcc = await resolveAccount(tx, orgId, "tax_payable");
+        lines.push({
+          accountId: taxAcc.id,
+          description: `Credit - Sales Tax Payable (Sale ${invoiceNumber})`,
+          debit: "0",
+          credit: totalTax.toFixed(2),
+        });
+      }
+
+      if (totalCOGS > 0) {
+        const cogsAcc = await resolveAccount(tx, orgId, "cogs");
+        const invAcc = await resolveAccount(tx, orgId, "inventory");
+        lines.push(
+          {
+            accountId: cogsAcc.id,
+            description: `Debit - COGS (POS Sale ${invoiceNumber})`,
+            debit: totalCOGS.toFixed(2),
+            credit: "0",
+          },
+          {
+            accountId: invAcc.id,
+            description: `Credit - Inventory (POS Sale ${invoiceNumber})`,
+            debit: "0",
+            credit: totalCOGS.toFixed(2),
+          },
+        );
+      }
+
+      const { journalEntryId } = await postTransaction(tx, {
+        orgId,
+        description: `POS Sale ${invoiceNumber}`,
+        date: new Date(invoice.issueDate),
+        referenceType: "pos_sale",
+        referenceId: invoice.id,
+        sourceType: "pos_sale",
+        customerId: saleData.customerId ? walkInCustomerId : undefined,
+        createdBy: ctx.userId,
+        lines,
+      });
+
+      await tx
+        .update(invoices)
+        .set({ journalEntryId })
+        .where(eq(invoices.id, invoice.id));
+
+      // Earn loyalty points (1 point per 100 PKR spent) — only for named customers
       if (saleData.customerId && netAmount > 0) {
         const pointsToEarn = Math.floor(netAmount / 100);
         await tx
@@ -607,14 +534,13 @@ export async function processPosSale(saleData: PosSaleData) {
           .where(and(eq(customers.id, saleData.customerId), eq(customers.orgId, orgId)));
       }
 
-      // Audit log
       await tx.insert(auditLogs).values({
         orgId,
-        userId,
+        userId: ctx.userId,
         action: 'POS_SALE_COMPLETED',
         entityType: 'invoice',
         entityId: invoice.id,
-        changes: JSON.stringify({ invoiceNumber, netAmount, paymentMethod: saleData.paymentMethod }),
+        changes: JSON.stringify({ invoiceNumber, netAmount, paymentMethod: saleData.paymentMethod, cashPortion, cardPortion }),
       });
 
       return { invoice, invoiceNumber, netAmount };
@@ -623,16 +549,16 @@ export async function processPosSale(saleData: PosSaleData) {
     revalidatePath('/pos');
     revalidatePath('/inventory');
 
-    return { 
-      success: true, 
-      data: result.invoice, 
+    return {
+      success: true,
+      data: result.invoice,
       message: "Sale completed successfully",
       invoiceNumber,
-      netAmount
+      netAmount: result.netAmount,
     };
   } catch (error) {
     captureException(error, { module: "pos", function: "processPosSale" });
-    return { success: false, error: "Failed to process sale" };
+    return { success: false, error: error instanceof Error ? error.message : "Failed to process sale" };
   }
 }
 
@@ -775,32 +701,34 @@ export interface PosReportData {
   cashierName: string;
   openingTime: Date;
   closingTime?: Date | null;
-  // Sales Summary
   totalSales: number;
   totalTransactions: number;
   totalReturns: number;
   totalDiscounts: number;
   totalTaxCollected: number;
   netSales: number;
-  // Payment Breakdown
   cashSales: number;
   cashTransactions: number;
   cardSales: number;
   cardTransactions: number;
-  // Top Products
   topProducts: {
     name: string;
     sku: string;
     quantity: number;
     revenue: number;
   }[];
-  // Shift Financials
   openingCash: number;
   expectedCash: number;
   actualCash?: number;
   variance?: number;
 }
 
+// FIX (2026 review): previously filtered invoices with
+// `ilike(invoiceNumber, 'POS-%')`, but POS invoices use the same
+// invoicePrefix as every other sales invoice (default 'INV') — this filter
+// never matched anything, so every report always showed zero sales. Now
+// joins through journalEntries where referenceType = 'pos_sale', which is
+// set correctly and reliably by processPosSale().
 export async function generatePOSReport(
   shiftId: string,
   reportType: PosReportType
@@ -809,99 +737,71 @@ export async function generatePOSReport(
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Not authenticated" };
+    const ctx = await getCurrentProfileId(orgId);
+    if (!ctx) return { success: false, error: "Profile not found" };
 
-    // Get the shift details
     const [shift] = await db
       .select()
-      .from(journalEntries)
-      .where(and(
-        eq(journalEntries.id, shiftId),
-        eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift')
-      ))
+      .from(posShifts)
+      .where(and(eq(posShifts.id, shiftId), eq(posShifts.orgId, orgId)))
       .limit(1);
 
     if (!shift) {
       return { success: false, error: "Shift not found" };
     }
 
-    // Get cashier name from profile
     const [profile] = await db
-      .select({
-        fullName: profiles.fullName,
-      })
+      .select({ fullName: profiles.fullName })
       .from(profiles)
-      .where(eq(profiles.id, shift.referenceId as any))
+      .where(eq(profiles.id, shift.profileId))
       .limit(1);
 
     const cashierName = profile?.fullName || 'Cashier';
+    const openingTime = shift.openingTime;
+    const closingTime = reportType === 'Z' ? new Date() : new Date();
+    const openingCash = parseFloat(shift.openingAmount || '0');
 
-    // Determine the time range for this shift
-    const openingTime = shift.createdAt;
-    const closingTime = reportType === 'Z' ? new Date() : shift.createdAt;
-
-    // Get opening cash amount from the opening journal entry
-    const [openingEntry] = await db
-      .select()
+    // Find POS sale journal entries within the shift window
+    const saleEntries = await db
+      .select({ invoiceId: journalEntries.referenceId })
       .from(journalEntries)
       .where(and(
         eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift_opening'),
-        eq(journalEntries.referenceId, shiftId as any)
-      ))
-      .limit(1);
-
-    let openingCash = 0;
-    if (openingEntry) {
-      const [openingLine] = await db
-        .select({
-          debitAmount: journalEntryLines.debitAmount,
-        })
-        .from(journalEntryLines)
-        .where(eq(journalEntryLines.journalEntryId, openingEntry.id))
-        .limit(1);
-
-      openingCash = openingLine ? parseFloat(openingLine.debitAmount || '0') : 0;
-    }
-
-    // Get all POS invoices for this shift
-    const shiftInvoices = await db
-      .select({
-        id: invoices.id,
-        invoiceNumber: invoices.invoiceNumber,
-        grossAmount: invoices.grossAmount,
-        discountAmount: invoices.discountAmount,
-        taxAmount: invoices.taxAmount,
-        netAmount: invoices.netAmount,
-        balanceAmount: invoices.balanceAmount,
-        createdAt: invoices.createdAt,
-      })
-      .from(invoices)
-      .where(and(
-        eq(invoices.orgId, orgId),
-        gte(invoices.createdAt, openingTime),
-        lte(invoices.createdAt, closingTime),
-        ilike(invoices.invoiceNumber, 'POS-%')
+        eq(journalEntries.referenceType, 'pos_sale'),
+        gte(journalEntries.createdAt, openingTime),
+        lte(journalEntries.createdAt, closingTime),
       ));
 
-    // Calculate totals
+    const invoiceIds = saleEntries.map((e) => e.invoiceId).filter((id): id is string => !!id);
+
+    const shiftInvoices = invoiceIds.length > 0
+      ? await db
+          .select({
+            id: invoices.id,
+            invoiceNumber: invoices.invoiceNumber,
+            grossAmount: invoices.grossAmount,
+            discountAmount: invoices.discountAmount,
+            taxAmount: invoices.taxAmount,
+            netAmount: invoices.netAmount,
+            balanceAmount: invoices.balanceAmount,
+            createdAt: invoices.createdAt,
+          })
+          .from(invoices)
+          .where(and(eq(invoices.orgId, orgId), inArray(invoices.id, invoiceIds)))
+      : [];
+
     let totalSales = 0;
-    let totalTransactions = shiftInvoices.length;
-    let totalReturns = 0;
+    const totalTransactions = shiftInvoices.length;
+    const totalReturns = 0;
     let totalDiscounts = 0;
     let totalTaxCollected = 0;
     let cashSales = 0;
     let cashTransactions = 0;
-    let cardSales = 0;
-    let cardTransactions = 0;
+    const cardSales = 0;
+    const cardTransactions = 0;
 
-    // Track product sales for top products
     const productSales: Record<string, { name: string; sku: string; quantity: number; revenue: number }> = {};
 
-    // Batch-fetch all invoice items for this shift (fix N+1)
-    const invoiceIds = shiftInvoices.map((inv) => inv.id);
     const allItems = invoiceIds.length > 0
       ? await db
           .select({
@@ -937,7 +837,6 @@ export async function generatePOSReport(
       }
 
       const items = itemsByInvoice.get(invoice.id) || [];
-
       for (const item of items) {
         if (!item.productId) continue;
         const qty = parseFloat(item.quantity || '0');
@@ -954,18 +853,12 @@ export async function generatePOSReport(
       }
     }
 
-    // Get top 5 products
     const topProducts = Object.values(productSales)
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5);
 
-    // Calculate net sales
     const netSales = totalSales - totalReturns - totalDiscounts + totalTaxCollected;
-
-    // Calculate expected cash (opening + cash sales)
     const expectedCash = openingCash + cashSales;
-
-    // Generate report number
     const reportNumber = `${reportType}-RPT-${Date.now()}`;
 
     const reportData: PosReportData = {
@@ -991,53 +884,76 @@ export async function generatePOSReport(
       expectedCash,
     };
 
-    // If Z-Report, close the shift
     if (reportType === 'Z') {
       const locked = await checkPeriodLocked(new Date());
       if (locked) return { success: false, error: "Cannot generate Z-report in a locked fiscal period" };
 
-      // Update shift to closed
-      await db
-        .update(journalEntries)
-        .set({
-          description: 'closed',
-        })
-        .where(eq(journalEntries.id, shiftId));
+      await db.transaction(async (tx) => {
+        const mainCashAcc = await resolveAccount(tx, orgId, "cash");
+        const posCashAcc = await resolveAccount(tx, orgId, "pos_cash");
+        const zActualCash = parseFloat(shift.actualCash || shift.closingAmount || String(expectedCash));
+        const zVariance = zActualCash - expectedCash;
+        const zLines: { accountId: string; description: string; debit: string; credit: string }[] = [
+          {
+            accountId: mainCashAcc.id,
+            description: "Dr Cash (Z-Report Float Return)",
+            debit: zActualCash.toFixed(2),
+            credit: "0",
+          },
+          {
+            accountId: posCashAcc.id,
+            description: "Cr POS Cash (Z-Report Float)",
+            debit: "0",
+            credit: expectedCash.toFixed(2),
+          },
+        ];
+        if (Math.abs(zVariance) > 0.01) {
+          if (zVariance > 0) {
+            zLines.push({
+              accountId: posCashAcc.id,
+              description: "Cash Overage",
+              debit: "0",
+              credit: Math.abs(zVariance).toFixed(2),
+            });
+          } else {
+            zLines.push({
+              accountId: posCashAcc.id,
+              description: "Cash Shortage",
+              debit: Math.abs(zVariance).toFixed(2),
+              credit: "0",
+            });
+          }
+        }
+        const { journalEntryId } = await postTransaction(tx, {
+          orgId,
+          description: `POS Z-Report Closing - ${reportNumber}`,
+          date: new Date(),
+          referenceType: "pos_shift_closing",
+          referenceId: shiftId,
+          sourceType: "pos_shift",
+          createdBy: ctx.userId,
+          lines: zLines,
+        });
 
-      // Create closing journal entry
-    const [posCashAccount] = await db
-      .select()
-      .from(chartOfAccounts)
-      .where(and(
-        eq(chartOfAccounts.orgId, orgId),
-        eq(chartOfAccounts.subType, 'cash')
-      ))
-      .limit(1);
-
-    if (posCashAccount) {
-        const [journalEntry] = await db
-          .insert(journalEntries)
-          .values({
-            orgId,
-            entryNumber: `POS-Z-${Date.now()}`,
-            entryDate: new Date(),
-            referenceType: 'pos_shift_closing',
-            referenceId: shiftId,
-            description: `POS Z-Report Closing - ${reportNumber}`,
-            status: "posted",
-            postedAt: new Date(),
+        await tx
+          .update(posShifts)
+          .set({
+            status: 'closed',
+            closingTime: new Date(),
+            expectedCash: expectedCash.toFixed(2),
+            closingJournalEntryId: journalEntryId,
+            updatedAt: new Date(),
           })
-          .returning();
-      }
+          .where(eq(posShifts.id, shiftId));
 
-      // Audit log
-      await db.insert(auditLogs).values({
-        orgId,
-        userId,
-        action: 'POS_Z_REPORT_GENERATED',
-        entityType: 'pos_shift',
-        entityId: shiftId,
-        changes: JSON.stringify({ reportNumber, totalSales, netSales }),
+        await tx.insert(auditLogs).values({
+          orgId,
+          userId: ctx.userId,
+          action: 'POS_Z_REPORT_GENERATED',
+          entityType: 'pos_shift',
+          entityId: shiftId,
+          changes: JSON.stringify({ reportNumber, totalSales, netSales }),
+        });
       });
 
       revalidatePath('/pos');
@@ -1056,29 +972,14 @@ export async function getPosShiftHistory() {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Not authenticated" };
-
-    // Get profile ID
-    const userProfile = await db
-      .select({ id: profiles.id })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length === 0) {
-      return { success: false, error: "Profile not found" };
-    }
+    const ctx = await getCurrentProfileId(orgId);
+    if (!ctx) return { success: false, error: "Profile not found" };
 
     const shifts = await db
       .select()
-      .from(journalEntries)
-      .where(and(
-        eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift'),
-        eq(journalEntries.referenceId, userProfile[0].id)
-      ))
-      .orderBy(desc(journalEntries.createdAt))
+      .from(posShifts)
+      .where(and(eq(posShifts.orgId, orgId), eq(posShifts.profileId, ctx.profileId)))
+      .orderBy(desc(posShifts.openingTime))
       .limit(20);
 
     return { success: true, data: shifts };
@@ -1094,72 +995,44 @@ export async function getCurrentShiftDetails() {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const { userId } = await auth();
-    if (!userId) return { success: false, error: "Not authenticated" };
+    const ctx = await getCurrentProfileId(orgId);
+    if (!ctx) return { success: false, error: "Profile not found" };
 
-    // Get profile ID
-    const userProfile = await db
-      .select({ id: profiles.id })
-      .from(profiles)
-      .where(eq(profiles.userId, userId))
-      .limit(1);
-
-    if (userProfile.length === 0) {
-      return { success: false, error: "Profile not found" };
-    }
-
-    // Get open shift
     const [openShift] = await db
       .select()
-      .from(journalEntries)
+      .from(posShifts)
       .where(and(
-        eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift'),
-        eq(journalEntries.referenceId, userProfile[0].id),
-        eq(journalEntries.description as any, 'open')
+        eq(posShifts.orgId, orgId),
+        eq(posShifts.profileId, ctx.profileId),
+        eq(posShifts.status, 'open'),
       ))
-      .orderBy(desc(journalEntries.createdAt))
+      .orderBy(desc(posShifts.openingTime))
       .limit(1);
 
     if (!openShift) {
       return { success: true, data: null };
     }
 
-    // Get opening cash
-    const [openingEntry] = await db
-      .select()
+    const saleEntries = await db
+      .select({ invoiceId: journalEntries.referenceId })
       .from(journalEntries)
       .where(and(
         eq(journalEntries.orgId, orgId),
-        eq(journalEntries.referenceType, 'pos_shift_opening'),
-        eq(journalEntries.referenceId, openShift.id as any)
-      ))
-      .limit(1);
-
-    let openingCash = 0;
-    if (openingEntry) {
-      const [openingLine] = await db
-        .select({ debitAmount: journalEntryLines.debitAmount })
-        .from(journalEntryLines)
-        .where(eq(journalEntryLines.journalEntryId, openingEntry.id))
-        .limit(1);
-      openingCash = openingLine ? parseFloat(openingLine.debitAmount || '0') : 0;
-    }
-
-    // Get today's sales for this shift
-    const todayInvoices = await db
-      .select({
-        netAmount: invoices.netAmount,
-      })
-      .from(invoices)
-      .where(and(
-        eq(invoices.orgId, orgId),
-        gte(invoices.createdAt, openShift.createdAt),
-        ilike(invoices.invoiceNumber, 'POS-%')
+        eq(journalEntries.referenceType, 'pos_sale'),
+        gte(journalEntries.createdAt, openShift.openingTime),
       ));
 
+    const invoiceIds = saleEntries.map((e) => e.invoiceId).filter((id): id is string => !!id);
+
+    const todayInvoices = invoiceIds.length > 0
+      ? await db
+          .select({ netAmount: invoices.netAmount })
+          .from(invoices)
+          .where(and(eq(invoices.orgId, orgId), inArray(invoices.id, invoiceIds)))
+      : [];
+
     let totalSalesToday = 0;
-    let transactionCount = todayInvoices.length;
+    const transactionCount = todayInvoices.length;
     for (const inv of todayInvoices) {
       totalSalesToday += parseFloat(inv.netAmount || '0');
     }
@@ -1168,7 +1041,7 @@ export async function getCurrentShiftDetails() {
       success: true,
       data: {
         shift: openShift,
-        openingCash,
+        openingCash: parseFloat(openShift.openingAmount || '0'),
         totalSalesToday,
         transactionCount,
       },

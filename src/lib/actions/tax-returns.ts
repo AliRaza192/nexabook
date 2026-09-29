@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { salesTaxReturns, invoices, purchaseInvoices, organizations } from "@/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 import { revalidatePath } from "next/cache";
 import { submitSalesTaxReturnToFBR } from "@/lib/fbr-api";
 
@@ -130,6 +130,7 @@ export async function generateTaxReturn(
 
 export async function submitTaxReturn(returnId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -214,6 +215,7 @@ export async function getTaxReturns() {
 
 export async function deleteTaxReturn(returnId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 

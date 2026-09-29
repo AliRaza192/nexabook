@@ -7,16 +7,18 @@ import {
   jobOrders,
   jobOrderComponents,
   products,
-  journalEntries,
-  journalEntryLines,
   chartOfAccounts,
 } from "@/db/schema";
 import { createAuditLog } from "./audit";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getCurrentOrgId } from "./shared";
-import { validateJournalBalance } from "../accounting";
+import { getCurrentOrgId, requireRole, generateJournalEntryNumber } from "./shared";
+import { postTransaction, resolveAccount } from "../accounting/posting-engine";
 import { checkPeriodLocked } from "./fiscal-periods";
+import { captureException } from "@/lib/error-handler";
+
+export type BomStatus = 'draft' | 'active' | 'archived';
+export type JobOrderStatus = 'draft' | 'in-progress' | 'completed' | 'cancelled';
 
 // ============= BOM Server Actions =============
 
@@ -44,7 +46,7 @@ export interface BomWithDetails {
   quantity: number;
   totalEstimatedCost: string;
   instructions: string | null;
-  status: 'draft' | 'active' | 'archived';
+  status: BomStatus;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -70,14 +72,14 @@ export interface BomWithDetails {
 }
 
 // Get all BOMs for current organization
-export async function getBoms(status?: string) {
+export async function getBoms(status?: BomStatus | 'all') {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
     const conditions = [eq(manufacturingBoms.orgId, orgId), eq(manufacturingBoms.isActive, true)];
     if (status && status !== 'all') {
-      conditions.push(eq(manufacturingBoms.status, status as any));
+      conditions.push(eq(manufacturingBoms.status, status));
     }
 
     const boms = await db
@@ -108,7 +110,7 @@ export async function getBoms(status?: string) {
 
     return { success: true, data: boms };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "getBoms" });
     return { success: false, error: "Failed to fetch BOMs" };
   }
 }
@@ -167,14 +169,19 @@ export async function getBomById(bomId: string): Promise<{ success: boolean; dat
 
     return { success: true, data: { ...bom, bomItems: items } as BomWithDetails };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "getBomById" });
     return { success: false, error: "Failed to fetch BOM" };
   }
 }
 
 // Create BOM
+// FIX (2026 review): totalEstimatedCost was always 0 — the component cost
+// lookup used sql.placeholder() outside a prepared-statement context with
+// eq() against an array, which never matched anything. Now uses inArray()
+// with a proper orgId scope.
 export async function createBom(data: BomFormData) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -186,7 +193,6 @@ export async function createBom(data: BomFormData) {
       return { success: false, error: "At least one component is required" };
     }
 
-    // Calculate total estimated cost
     const componentIds = data.items.map(item => item.componentId);
     const components = await db
       .select({
@@ -194,10 +200,10 @@ export async function createBom(data: BomFormData) {
         costPrice: products.costPrice,
       })
       .from(products)
-      .where(and(eq(products.id, sql.placeholder('componentIds')), eq(products.orgId, orgId)));
+      .where(and(inArray(products.id, componentIds), eq(products.orgId, orgId)));
 
     const costMap = new Map(components.map(c => [c.id, c.costPrice]));
-    
+
     let totalCost = 0;
     for (const item of data.items) {
       const cost = costMap.get(item.componentId);
@@ -206,43 +212,49 @@ export async function createBom(data: BomFormData) {
       }
     }
 
-    // Create BOM
-    const [newBom] = await db
-      .insert(manufacturingBoms)
-      .values({
-        orgId,
-        name: data.name,
-        code: data.code,
-        finishedGoodId: data.finishedGoodId,
-        quantity: data.quantity,
-        totalEstimatedCost: totalCost.toFixed(2),
-        instructions: data.instructions,
-      })
-      .returning();
+    const newBom = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(manufacturingBoms)
+        .values({
+          orgId,
+          name: data.name,
+          code: data.code,
+          finishedGoodId: data.finishedGoodId,
+          quantity: data.quantity,
+          totalEstimatedCost: totalCost.toFixed(2),
+          instructions: data.instructions,
+        })
+        .returning();
 
-    // Create BOM items
-    for (const item of data.items) {
-      await db.insert(bomItems).values({
-        orgId,
-        bomId: newBom.id,
-        componentId: item.componentId,
-        quantityRequired: item.quantityRequired,
-        unit: item.unit || 'Pcs',
-      });
-    }
+      await tx.insert(bomItems).values(
+        data.items.map((item) => ({
+          orgId,
+          bomId: created.id,
+          componentId: item.componentId,
+          quantityRequired: item.quantityRequired,
+          unit: item.unit || 'Pcs',
+        })),
+      );
+
+      return created;
+    });
 
     revalidatePath('/manufacturing/bom');
     await createAuditLog({ action: "BOM_CREATED", entityType: "bom", entityId: newBom.id });
     return { success: true, data: newBom, message: "BOM created successfully" };
-  } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code: string }).code === '23505') {
+      return { success: false, error: "A BOM with this code already exists" };
+    }
+    captureException(error, { module: "manufacturing", function: "createBom" });
     return { success: false, error: "Failed to create BOM" };
   }
 }
 
 // Update BOM status
-export async function updateBomStatus(bomId: string, status: 'draft' | 'active' | 'archived') {
+export async function updateBomStatus(bomId: string, status: BomStatus) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -255,7 +267,7 @@ export async function updateBomStatus(bomId: string, status: 'draft' | 'active' 
     await createAuditLog({ action: "BOM_STATUS_UPDATED", entityType: "bom", entityId: bomId });
     return { success: true, message: "BOM status updated successfully" };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "updateBomStatus" });
     return { success: false, error: "Failed to update BOM status" };
   }
 }
@@ -263,6 +275,7 @@ export async function updateBomStatus(bomId: string, status: 'draft' | 'active' 
 // Delete BOM (soft delete)
 export async function deleteBom(bomId: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -275,7 +288,7 @@ export async function deleteBom(bomId: string) {
     await createAuditLog({ action: "BOM_DELETED", entityType: "bom", entityId: bomId });
     return { success: true, message: "BOM deleted successfully" };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "deleteBom" });
     return { success: false, error: "Failed to delete BOM" };
   }
 }
@@ -290,40 +303,53 @@ export interface JobOrderFormData {
 }
 
 // Get next job order number
+// FIX (2026 review): added retry + jitter, matching the pattern used
+// everywhere else document numbers are generated, now that job_orders has
+// a real unique constraint (migration 0008) to actually catch collisions.
+async function generateJobOrderNumber(orgId: string): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const [lastOrder] = await db
+        .select({ orderNumber: jobOrders.orderNumber })
+        .from(jobOrders)
+        .where(eq(jobOrders.orgId, orgId))
+        .orderBy(desc(jobOrders.createdAt))
+        .limit(1);
+
+      let nextNumber = 1;
+      if (lastOrder?.orderNumber) {
+        const match = lastOrder.orderNumber.match(/(\d+)$/);
+        if (match) nextNumber = parseInt(match[1], 10) + 1;
+      }
+      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
+      return `JO-${String(nextNumber + jitter).padStart(4, '0')}`;
+    } catch {
+      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
+    }
+  }
+  return `JO-${String(Date.now() % 10000).padStart(4, '0')}`;
+}
+
 export async function getNextJobOrderNumber() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-
-    const [lastOrder] = await db
-      .select({ orderNumber: jobOrders.orderNumber })
-      .from(jobOrders)
-      .where(eq(jobOrders.orgId, orgId))
-      .orderBy(desc(jobOrders.createdAt))
-      .limit(1);
-
-    let nextNumber = 1;
-    if (lastOrder?.orderNumber) {
-      const lastNum = parseInt(lastOrder.orderNumber.split('-').pop() || '0');
-      nextNumber = lastNum + 1;
-    }
-
-    return { success: true, data: `JO-${String(nextNumber).padStart(4, '0')}` };
+    return { success: true, data: await generateJobOrderNumber(orgId) };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "getNextJobOrderNumber" });
     return { success: false, error: "Failed to generate order number" };
   }
 }
 
 // Get all job orders
-export async function getJobOrders(status?: string) {
+export async function getJobOrders(status?: JobOrderStatus | 'all') {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
     const conditions = [eq(jobOrders.orgId, orgId)];
     if (status && status !== 'all') {
-      conditions.push(eq(jobOrders.status, status as any));
+      conditions.push(eq(jobOrders.status, status));
     }
 
     const orders = await db
@@ -357,7 +383,7 @@ export async function getJobOrders(status?: string) {
 
     return { success: true, data: orders };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "getJobOrders" });
     return { success: false, error: "Failed to fetch job orders" };
   }
 }
@@ -396,7 +422,7 @@ export async function getJobOrderById(jobOrderId: string) {
 
     return { success: true, data: { ...order, components } };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "getJobOrderById" });
     return { success: false, error: "Failed to fetch job order" };
   }
 }
@@ -404,10 +430,10 @@ export async function getJobOrderById(jobOrderId: string) {
 // Create job order
 export async function createJobOrder(data: JobOrderFormData) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    // Get BOM details
     const [bom] = await db
       .select()
       .from(manufacturingBoms)
@@ -416,64 +442,74 @@ export async function createJobOrder(data: JobOrderFormData) {
 
     if (!bom) return { success: false, error: "BOM not found" };
 
-    // Generate order number
-    const orderNumberResult = await getNextJobOrderNumber();
-    if (!orderNumberResult.success || !orderNumberResult.data) {
-      return { success: false, error: "Failed to generate order number" };
-    }
-    const orderNumber = orderNumberResult.data;
+    const orderNumber = await generateJobOrderNumber(orgId);
 
-    // Create job order
-    const [newOrder] = await db
-      .insert(jobOrders)
-      .values({
-        orgId,
-        bomId: data.bomId,
-        orderNumber,
-        quantityToProduce: data.quantityToProduce,
-        completionDate: data.completionDate || null,
-        instructions: data.instructions,
-      })
-      .returning();
-
-    // Get BOM items and create job order components
     const bomItemsList = await db
       .select()
       .from(bomItems)
       .where(eq(bomItems.bomId, data.bomId));
 
-    for (const item of bomItemsList) {
-      const multiplier = data.quantityToProduce / bom.quantity;
-      const requiredQty = parseFloat(item.quantityRequired) * multiplier;
+    const newOrder = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(jobOrders)
+        .values({
+          orgId,
+          bomId: data.bomId,
+          orderNumber,
+          quantityToProduce: data.quantityToProduce,
+          completionDate: data.completionDate || null,
+          instructions: data.instructions,
+        })
+        .returning();
 
-      await db.insert(jobOrderComponents).values({
-        orgId,
-        jobOrderId: newOrder.id,
-        componentId: item.componentId,
-        requiredQty: requiredQty.toFixed(2),
-        consumedQty: '0',
-      });
-    }
+      const multiplier = data.quantityToProduce / bom.quantity;
+      await tx.insert(jobOrderComponents).values(
+        bomItemsList.map((item) => ({
+          orgId,
+          jobOrderId: created.id,
+          componentId: item.componentId,
+          requiredQty: (parseFloat(item.quantityRequired) * multiplier).toFixed(2),
+          consumedQty: '0',
+        })),
+      );
+
+      return created;
+    });
 
     revalidatePath('/manufacturing/job-orders');
     await createAuditLog({ action: "JOB_ORDER_CREATED", entityType: "jobOrder", entityId: newOrder.id });
     return { success: true, data: newOrder, message: "Job order created successfully" };
-  } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && (error as { code: string }).code === '23505') {
+      return { success: false, error: "A job order with this number already exists — please retry" };
+    }
+    captureException(error, { module: "manufacturing", function: "createJobOrder" });
     return { success: false, error: "Failed to create job order" };
   }
 }
 
 // Complete job order - handles inventory and accounting
+// FIX (2026 review):
+//  - Stock check moved inside the transaction with a row lock (was checked
+//    outside the tx, then blindly updated inside — a TOCTOU race where two
+//    concurrent completions could each pass the check and drive stock
+//    negative).
+//  - JE construction routed through postTransaction()/resolveAccount()
+//    (was hand-rolled with an ad-hoc, non-retrying entry-number generator).
+//  - If the inventory account can't be resolved, this now throws (aborting
+//    the whole transaction) instead of silently moving stock with no
+//    corresponding GL entry while still marking the order "completed".
+//  - orgId scoping added to the BOM/finishedGood lookups (previously relied
+//    only on the job order's own org-scoped bomId for safety).
 export async function completeJobOrder(jobOrderId: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
     const locked = await checkPeriodLocked(new Date());
     if (locked) return { success: false, error: "Cannot complete job order in a locked fiscal period" };
 
-    // Get job order
     const [jobOrder] = await db
       .select()
       .from(jobOrders)
@@ -483,13 +519,10 @@ export async function completeJobOrder(jobOrderId: string) {
     if (!jobOrder) return { success: false, error: "Job order not found" };
     if (jobOrder.status === 'completed') return { success: false, error: "Job order already completed" };
 
-    // Get BOM and finished good
     const [bom] = await db
-      .select({
-        finishedGoodId: manufacturingBoms.finishedGoodId,
-      })
+      .select({ finishedGoodId: manufacturingBoms.finishedGoodId })
       .from(manufacturingBoms)
-      .where(eq(manufacturingBoms.id, jobOrder.bomId))
+      .where(and(eq(manufacturingBoms.id, jobOrder.bomId), eq(manufacturingBoms.orgId, orgId)))
       .limit(1);
 
     if (!bom) return { success: false, error: "BOM not found" };
@@ -499,59 +532,57 @@ export async function completeJobOrder(jobOrderId: string) {
         id: products.id,
         name: products.name,
         costPrice: products.costPrice,
-        currentStock: products.currentStock,
       })
       .from(products)
-      .where(eq(products.id, bom.finishedGoodId))
+      .where(and(eq(products.id, bom.finishedGoodId), eq(products.orgId, orgId)))
       .limit(1);
 
     if (!finishedGood) return { success: false, error: "Finished good not found" };
 
-    // Get job order components — include costPrice for monetary valuation
-    const components = await db
+    const componentIdRows = await db
       .select({
         componentId: jobOrderComponents.componentId,
         requiredQty: jobOrderComponents.requiredQty,
-        component: {
-          id: products.id,
-          name: products.name,
-          currentStock: products.currentStock,
-          costPrice: products.costPrice,
-        },
       })
       .from(jobOrderComponents)
-      .leftJoin(products, eq(jobOrderComponents.componentId, products.id))
       .where(eq(jobOrderComponents.jobOrderId, jobOrderId));
-
-    // Check if all components have sufficient stock
-    for (const comp of components) {
-      const availableStock = comp.component?.currentStock || 0;
-      const required = parseFloat(comp.requiredQty);
-      
-      if (Number(availableStock) < required) {
-        return { 
-          success: false, 
-          error: `Insufficient stock for ${comp.component?.name || 'component'}. Required: ${required}, Available: ${availableStock}` 
-        };
-      }
-    }
 
     const costPrice = finishedGood.costPrice ? parseFloat(finishedGood.costPrice) : 0;
     const qtyToProduce = jobOrder.quantityToProduce;
     const totalValue = costPrice * qtyToProduce;
 
-    await db.transaction(async (tx) => {
-      // 1. Deduct raw materials from stock
-      for (const comp of components) {
-        const required = parseFloat(comp.requiredQty);
+    const result = await db.transaction(async (tx) => {
+      // Re-check stock inside the transaction, with row locks, to close the
+      // TOCTOU window a pre-transaction check leaves open.
+      const componentIds = componentIdRows.map((c) => c.componentId);
+      const lockedComponents = componentIds.length > 0
+        ? await tx
+            .select({ id: products.id, name: products.name, currentStock: products.currentStock, costPrice: products.costPrice })
+            .from(products)
+            .where(and(inArray(products.id, componentIds), eq(products.orgId, orgId)))
+            .for("update")
+        : [];
+      const componentMap = new Map(lockedComponents.map((c) => [c.id, c]));
 
+      for (const row of componentIdRows) {
+        const comp = componentMap.get(row.componentId);
+        const available = parseFloat(comp?.currentStock || "0");
+        const required = parseFloat(row.requiredQty);
+        if (available < required) {
+          throw new Error(`Insufficient stock for ${comp?.name || 'component'}. Required: ${required}, Available: ${available}`);
+        }
+      }
+
+      // 1. Deduct raw materials from stock
+      for (const row of componentIdRows) {
+        const required = parseFloat(row.requiredQty);
         await tx
           .update(products)
           .set({
             currentStock: sql`${products.currentStock} - ${required}`,
-            updatedAt: new Date()
+            updatedAt: new Date(),
           })
-          .where(eq(products.id, comp.componentId));
+          .where(and(eq(products.id, row.componentId), eq(products.orgId, orgId)));
       }
 
       // 2. Add finished goods to stock
@@ -559,127 +590,60 @@ export async function completeJobOrder(jobOrderId: string) {
         .update(products)
         .set({
           currentStock: sql`${products.currentStock} + ${qtyToProduce}`,
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
-        .where(eq(products.id, bom.finishedGoodId));
+        .where(and(eq(products.id, bom.finishedGoodId), eq(products.orgId, orgId)));
 
-      // 3. Create journal entry for the manufacturing
+      // 3. Create journal entry for the manufacturing (if there's value to post)
+      let journalEntryId: string | undefined;
       if (totalValue > 0) {
-        // Generate journal entry number
-        const [lastEntry] = await tx
-          .select({ entryNumber: journalEntries.entryNumber })
-          .from(journalEntries)
-          .where(eq(journalEntries.orgId, orgId))
-          .orderBy(desc(journalEntries.createdAt))
-          .limit(1);
+        const fgAcc = await resolveAccount(tx, orgId, "finished_goods");
+        const rmAcc = await resolveAccount(tx, orgId, "raw_materials_inventory");
+        const cogsAcc = await resolveAccount(tx, orgId, "cogs");
 
-        let entryNumber = 'JE-0001';
-        if (lastEntry?.entryNumber) {
-          const lastNum = parseInt(lastEntry.entryNumber.split('-').pop() || '0');
-          entryNumber = `JE-${String(lastNum + 1).padStart(4, '0')}`;
-        }
-
-        // Create journal entry
-        const [journalEntry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId,
-            entryDate: new Date(),
-            entryNumber,
-            referenceType: 'job_order',
-            referenceId: jobOrderId,
-            description: `Manufacturing: ${finishedGood.name} x ${qtyToProduce} units`,
-            status: "posted",
-            postedAt: new Date(),
-          })
-          .returning();
-
-        // Find Inventory Asset account (assuming it exists in COA)
-        const inventoryAccount = await tx
-          .select({ id: chartOfAccounts.id })
-          .from(chartOfAccounts)
-          .where(and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, 'inventory'),
-            eq(chartOfAccounts.type, 'asset')
-          ))
-          .limit(1);
-
-        if (inventoryAccount.length > 0) {
-          // Calculate total raw material cost and collect validation pairs
-          let totalRawMaterialCost = 0;
-          const validationLines: { debitAmount: string; creditAmount: string }[] = [
-            { debitAmount: totalValue.toFixed(2), creditAmount: '0' },
-          ];
-          for (const comp of components) {
-            const qty = parseFloat(comp.requiredQty);
-            const costPrice = parseFloat(comp.component?.costPrice || '0');
-            const lineValue = qty * costPrice;
-            totalRawMaterialCost += lineValue;
-            validationLines.push({ debitAmount: '0', creditAmount: lineValue.toFixed(2) });
-          }
-
-          const variance = totalValue - totalRawMaterialCost;
-          if (Math.abs(variance) > 0.01) {
-            if (variance > 0) {
-              validationLines.push({ debitAmount: variance.toFixed(2), creditAmount: '0' });
-            } else {
-              validationLines.push({ debitAmount: '0', creditAmount: Math.abs(variance).toFixed(2) });
-            }
-          }
-
-          if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-          // Debit entry for finished goods
-          await tx.insert(journalEntryLines).values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: inventoryAccount[0].id,
+        let totalRawMaterialCost = 0;
+        const lines: { accountId: string; description: string; debit: string; credit: string }[] = [
+          {
+            accountId: fgAcc.id,
             description: `Debit: Finished Goods - ${finishedGood.name}`,
-            debitAmount: totalValue.toFixed(2),
-            creditAmount: '0',
+            debit: totalValue.toFixed(2),
+            credit: "0",
+          },
+        ];
+
+        for (const row of componentIdRows) {
+          const comp = componentMap.get(row.componentId);
+          const qty = parseFloat(row.requiredQty);
+          const compCost = parseFloat(comp?.costPrice || '0');
+          const lineValue = qty * compCost;
+          totalRawMaterialCost += lineValue;
+          lines.push({
+            accountId: rmAcc.id,
+            description: `Credit: Raw Material - ${comp?.name || 'Component'}`,
+            debit: "0",
+            credit: lineValue.toFixed(2),
           });
+        }
 
-          // Credit: Raw Material with monetary value
-          for (const comp of components) {
-            const qty = parseFloat(comp.requiredQty);
-            const costPrice = parseFloat(comp.component?.costPrice || '0');
-            const lineValue = qty * costPrice;
-
-            await tx.insert(journalEntryLines).values({
-              orgId,
-              journalEntryId: journalEntry.id,
-              accountId: inventoryAccount[0].id,
-              description: `Credit: Raw Material - ${comp.component?.name || 'Component'}`,
-              debitAmount: '0',
-              creditAmount: lineValue.toFixed(2),
-            });
-          }
-
-          // Balance the journal entry: if finished goods value differs from
-          // raw material cost, post the difference to the same inventory account
-          if (Math.abs(variance) > 0.01) {
-            if (variance > 0) {
-              await tx.insert(journalEntryLines).values({
-                orgId,
-                journalEntryId: journalEntry.id,
-                accountId: inventoryAccount[0].id,
-                description: `Debit: Manufacturing Value Adjustment`,
-                debitAmount: variance.toFixed(2),
-                creditAmount: '0',
-              });
-            } else {
-              await tx.insert(journalEntryLines).values({
-                orgId,
-                journalEntryId: journalEntry.id,
-                accountId: inventoryAccount[0].id,
-                description: `Credit: Manufacturing Value Adjustment`,
-                debitAmount: '0',
-                creditAmount: Math.abs(variance).toFixed(2),
-              });
-            }
+        const variance = totalValue - totalRawMaterialCost;
+        if (Math.abs(variance) > 0.01) {
+          if (variance > 0) {
+            lines.push({ accountId: cogsAcc.id, description: "Manufacturing Variance", debit: "0", credit: variance.toFixed(2) });
+          } else {
+            lines.push({ accountId: cogsAcc.id, description: "Manufacturing Variance", debit: Math.abs(variance).toFixed(2), credit: "0" });
           }
         }
+
+        const posted = await postTransaction(tx, {
+          orgId,
+          description: `Manufacturing: ${finishedGood.name} x ${qtyToProduce} units`,
+          date: new Date(),
+          referenceType: "job_order",
+          referenceId: jobOrderId,
+          sourceType: "job_order",
+          lines,
+        });
+        journalEntryId = posted.journalEntryId;
       }
 
       // 4. Update job order status to completed
@@ -688,25 +652,45 @@ export async function completeJobOrder(jobOrderId: string) {
         .set({
           status: 'completed',
           completionDate: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
-        .where(eq(jobOrders.id, jobOrderId));
+        .where(and(eq(jobOrders.id, jobOrderId), eq(jobOrders.orgId, orgId)));
+
+      return { journalEntryId };
     });
 
     revalidatePath('/manufacturing/job-orders');
     await createAuditLog({ action: "JOB_ORDER_COMPLETED", entityType: "jobOrder", entityId: jobOrderId });
-    return { success: true, message: "Job order completed successfully. Inventory and accounts updated." };
+    return { success: true, message: "Job order completed successfully. Inventory and accounts updated.", journalEntryId: result.journalEntryId };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
-    return { success: false, error: "Failed to complete job order" };
+    captureException(error, { module: "manufacturing", function: "completeJobOrder" });
+    return { success: false, error: error instanceof Error ? error.message : "Failed to complete job order" };
   }
 }
 
 // Delete job order
+// FIX (2026 review): was an unconditional hard delete — a completed job
+// order (stock already moved, JE already posted) could be deleted with no
+// reversal, leaving the inventory movement and journal entry orphaned.
+// Only draft/in-progress/cancelled orders (nothing posted yet) can be
+// hard-deleted now; completed orders require a reversal flow, which this
+// codebase doesn't have yet for manufacturing (flagged separately).
 export async function deleteJobOrder(jobOrderId: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
+
+    const [order] = await db
+      .select({ status: jobOrders.status })
+      .from(jobOrders)
+      .where(and(eq(jobOrders.id, jobOrderId), eq(jobOrders.orgId, orgId)))
+      .limit(1);
+
+    if (!order) return { success: false, error: "Job order not found" };
+    if (order.status === 'completed') {
+      return { success: false, error: "Cannot delete a completed job order — its stock and accounting effects would be orphaned. A reversal flow is needed for this (not yet implemented)." };
+    }
 
     await db
       .delete(jobOrders)
@@ -716,7 +700,7 @@ export async function deleteJobOrder(jobOrderId: string) {
     await createAuditLog({ action: "JOB_ORDER_DELETED", entityType: "jobOrder", entityId: jobOrderId });
     return { success: true, message: "Job order deleted successfully" };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "deleteJobOrder" });
     return { success: false, error: "Failed to delete job order" };
   }
 }
@@ -730,15 +714,17 @@ export interface DisassembleFormData {
 }
 
 // Disassemble finished goods back to raw materials
+// FIX (2026 review): same JE-routing and orgId-scoping fixes as
+// completeJobOrder above.
 export async function disassembleFinishedGood(data: DisassembleFormData) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
     const locked = await checkPeriodLocked(new Date());
     if (locked) return { success: false, error: "Cannot disassemble in a locked fiscal period" };
 
-    // Find active BOM for this finished good
     const [bom] = await db
       .select()
       .from(manufacturingBoms)
@@ -752,7 +738,6 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
 
     if (!bom) return { success: false, error: "No active BOM found for this product" };
 
-    // Check finished good stock
     const [finishedGood] = await db
       .select({
         id: products.id,
@@ -766,155 +751,132 @@ export async function disassembleFinishedGood(data: DisassembleFormData) {
 
     if (!finishedGood) return { success: false, error: "Finished good not found" };
 
-    const currentStock = finishedGood.currentStock || 0;
-    if (Number(currentStock) < data.quantity) {
-      return { success: false, error: `Insufficient stock. Available: ${currentStock}, Required: ${data.quantity}` };
-    }
-
-    // Get BOM components
     const components = await db
       .select({
         componentId: bomItems.componentId,
         quantityRequired: bomItems.quantityRequired,
-        component: {
-          id: products.id,
-          name: products.name,
-          currentStock: products.currentStock,
-        },
+        component: { id: products.id, name: products.name, costPrice: products.costPrice },
       })
       .from(bomItems)
       .leftJoin(products, eq(bomItems.componentId, products.id))
       .where(eq(bomItems.bomId, bom.id));
 
-    // Calculate multiplier based on disassembly quantity
     const multiplier = data.quantity / bom.quantity;
-
-    // 1. Reduce finished good stock
-    // 2. Add raw materials back to stock
-    // 3. Create journal entry for disassembly
     const costPrice = finishedGood.costPrice ? parseFloat(finishedGood.costPrice) : 0;
     const totalValue = costPrice * data.quantity;
 
-    await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      // Row-lock and re-check finished-good stock inside the tx
+      const [lockedFg] = await tx
+        .select({ currentStock: products.currentStock })
+        .from(products)
+        .where(and(eq(products.id, data.finishedGoodId), eq(products.orgId, orgId)))
+        .for("update");
+
+      if (parseFloat(lockedFg?.currentStock || "0") < data.quantity) {
+        throw new Error(`Insufficient stock. Available: ${lockedFg?.currentStock || 0}, Required: ${data.quantity}`);
+      }
+
       await tx
         .update(products)
-        .set({
-          currentStock: sql`${products.currentStock} - ${data.quantity}`,
-          updatedAt: new Date()
-        })
+        .set({ currentStock: sql`${products.currentStock} - ${data.quantity}`, updatedAt: new Date() })
         .where(and(eq(products.id, data.finishedGoodId), eq(products.orgId, orgId)));
 
       for (const comp of components) {
         const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
-
         await tx
           .update(products)
-          .set({
-            currentStock: sql`${products.currentStock} + ${qtyToAdd}`,
-            updatedAt: new Date()
-          })
+          .set({ currentStock: sql`${products.currentStock} + ${qtyToAdd}`, updatedAt: new Date() })
           .where(and(eq(products.id, comp.componentId), eq(products.orgId, orgId)));
       }
 
+      let journalEntryId: string | undefined;
       if (totalValue > 0) {
-        const [lastEntry] = await tx
-          .select({ entryNumber: journalEntries.entryNumber })
-          .from(journalEntries)
-          .where(eq(journalEntries.orgId, orgId))
-          .orderBy(desc(journalEntries.createdAt))
-          .limit(1);
+        const fgAcc = await resolveAccount(tx, orgId, "finished_goods");
+        const rmAcc = await resolveAccount(tx, orgId, "raw_materials_inventory");
 
-        let entryNumber = 'JE-0001';
-        if (lastEntry?.entryNumber) {
-          const lastNum = parseInt(lastEntry.entryNumber.split('-').pop() || '0');
-          entryNumber = `JE-${String(lastNum + 1).padStart(4, '0')}`;
-        }
-
-        const [journalEntry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId,
-            entryDate: new Date(),
-            entryNumber,
-            referenceType: 'disassembly',
-            description: `Disassembly: ${finishedGood.name} x ${data.quantity} units`,
-            status: "posted",
-            postedAt: new Date(),
-          })
-          .returning();
-
-        const inventoryAccount = await tx
-          .select({ id: chartOfAccounts.id })
-          .from(chartOfAccounts)
-          .where(and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.subType, 'inventory'),
-            eq(chartOfAccounts.type, 'asset')
-          ))
-          .limit(1);
-
-        if (inventoryAccount.length > 0) {
-          const validationLines: { debitAmount: string; creditAmount: string }[] = [
-            { debitAmount: '0', creditAmount: totalValue.toFixed(2) },
-          ];
-          for (const comp of components) {
-            const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
-            validationLines.push({ debitAmount: qtyToAdd.toFixed(2), creditAmount: '0' });
-          }
-          if (!validateJournalBalance(validationLines)) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-          // Credit: Inventory Asset (Finished Goods)
-          await tx.insert(journalEntryLines).values({
-            orgId,
-            journalEntryId: journalEntry.id,
-            accountId: inventoryAccount[0].id,
+        const lines: { accountId: string; description: string; debit: string; credit: string }[] = [
+          {
+            accountId: fgAcc.id,
             description: `Credit: Finished Goods - ${finishedGood.name}`,
-            debitAmount: '0',
-            creditAmount: totalValue.toFixed(2),
-          });
+            debit: "0",
+            credit: totalValue.toFixed(2),
+          },
+        ];
 
-          // Debit entries for raw materials
-          for (const comp of components) {
-            const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
-            await tx.insert(journalEntryLines).values({
-              orgId,
-              journalEntryId: journalEntry.id,
-              accountId: inventoryAccount[0].id,
-              description: `Debit: Raw Material - ${comp.component?.name || 'Component'}`,
-              debitAmount: qtyToAdd.toFixed(2),
-              creditAmount: '0',
-            });
+        let totalRawMaterialValue = 0;
+        for (const comp of components) {
+          const qtyToAdd = parseFloat(comp.quantityRequired) * multiplier;
+          const componentCost = parseFloat(comp.component?.costPrice || "0");
+          const lineValue = qtyToAdd * componentCost;
+          totalRawMaterialValue += lineValue;
+          lines.push({
+            accountId: rmAcc.id,
+            description: `Debit: Raw Material - ${comp.component?.name || 'Component'}`,
+            debit: lineValue.toFixed(2),
+            credit: "0",
+          });
+        }
+
+        const cogsAcc = await resolveAccount(tx, orgId, "cogs");
+        const variance = totalRawMaterialValue - totalValue;
+        if (Math.abs(variance) > 0.01) {
+          if (variance > 0) {
+            lines.push({ accountId: cogsAcc.id, description: "Disassembly Variance", debit: "0", credit: variance.toFixed(2) });
+          } else {
+            lines.push({ accountId: cogsAcc.id, description: "Disassembly Variance", debit: Math.abs(variance).toFixed(2), credit: "0" });
           }
         }
+
+        const posted = await postTransaction(tx, {
+          orgId,
+          description: `Disassembly: ${finishedGood.name} x ${data.quantity} units`,
+          date: new Date(),
+          referenceType: "disassembly",
+          referenceId: data.finishedGoodId,
+          sourceType: "disassembly",
+          lines,
+        });
+        journalEntryId = posted.journalEntryId;
       }
+
+      return { journalEntryId };
     });
 
     revalidatePath('/manufacturing/disassemble');
     await createAuditLog({ action: "FINISHED_GOOD_DISASSEMBLED", entityType: "jobOrder", entityId: data.finishedGoodId });
-    return { success: true, message: "Disassembly completed successfully. Inventory updated." };
+    return { success: true, message: "Disassembly completed successfully. Inventory updated.", journalEntryId: result.journalEntryId };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
-    return { success: false, error: "Failed to disassemble finished good" };
+    captureException(error, { module: "manufacturing", function: "disassembleFinishedGood" });
+    return { success: false, error: error instanceof Error ? error.message : "Failed to disassemble finished good" };
   }
 }
 
 // Explode BOM recursively to get a flat list of base raw materials
-export async function explodeBOM(bomId: string, multiplier: number = 1): Promise<Array<{ productId: string, name: string, sku: string, quantity: number, unit: string }>> {
+// FIX (2026 review): added a visited-set cycle guard — a circular
+// sub-assembly reference (A contains B, B contains A) previously caused
+// unbounded recursion / a stack overflow with no way to recover.
+export async function explodeBOM(
+  bomId: string,
+  multiplier: number = 1,
+  visited: Set<string> = new Set(),
+): Promise<Array<{ productId: string, name: string, sku: string, quantity: number, unit: string }>> {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return [];
 
-    // Get current BOM items
+    if (visited.has(bomId)) {
+      captureException(new Error(`Circular BOM reference detected at ${bomId}`), { module: "manufacturing", function: "explodeBOM" });
+      return [];
+    }
+    const nextVisited = new Set(visited).add(bomId);
+
     const items = await db
       .select({
         componentId: bomItems.componentId,
         quantityRequired: bomItems.quantityRequired,
         unit: bomItems.unit,
-        component: {
-          id: products.id,
-          name: products.name,
-          sku: products.sku,
-        }
+        component: { id: products.id, name: products.name, sku: products.sku },
       })
       .from(bomItems)
       .leftJoin(products, eq(bomItems.componentId, products.id))
@@ -927,12 +889,8 @@ export async function explodeBOM(bomId: string, multiplier: number = 1): Promise
 
       const totalQty = parseFloat(item.quantityRequired) * multiplier;
 
-      // Check if this component has its own active BOM
       const [subBom] = await db
-        .select({
-          id: manufacturingBoms.id,
-          quantity: manufacturingBoms.quantity,
-        })
+        .select({ id: manufacturingBoms.id, quantity: manufacturingBoms.quantity })
         .from(manufacturingBoms)
         .where(and(
           eq(manufacturingBoms.finishedGoodId, item.componentId),
@@ -943,13 +901,10 @@ export async function explodeBOM(bomId: string, multiplier: number = 1): Promise
         .limit(1);
 
       if (subBom) {
-        // Recursively explode the sub-BOM
-        // The multiplier for sub-BOM should be (total required qty of sub-assembly / sub-BOM output quantity)
         const subMultiplier = totalQty / subBom.quantity;
-        const subExploded = await explodeBOM(subBom.id, subMultiplier);
+        const subExploded = await explodeBOM(subBom.id, subMultiplier, nextVisited);
         flatList = [...flatList, ...subExploded];
       } else {
-        // Base raw material
         flatList.push({
           productId: item.componentId,
           name: item.component.name,
@@ -960,7 +915,6 @@ export async function explodeBOM(bomId: string, multiplier: number = 1): Promise
       }
     }
 
-    // Merge duplicates in flat list
     const mergedList = flatList.reduce((acc, current) => {
       const existing = acc.find(item => item.productId === current.productId);
       if (existing) {
@@ -973,30 +927,52 @@ export async function explodeBOM(bomId: string, multiplier: number = 1): Promise
 
     return mergedList;
   } catch (error) {
-    console.error("Error exploding BOM:", error);
+    captureException(error, { module: "manufacturing", function: "explodeBOM" });
     return [];
   }
 }
 
+interface BomHierarchyNode {
+  id: string;
+  name: string;
+  finishedGoodName: string | undefined;
+  quantity: number;
+  children: Array<{
+    productId: string;
+    name: string;
+    sku: string;
+    quantity: number;
+    unit: string | null;
+    isSubAssembly: boolean;
+    children?: BomHierarchyNode['children'];
+  }>;
+}
+
 // Get BOM visual hierarchy (Tree view data)
-export async function getBOMHierarchy(bomId: string): Promise<any> {
+// FIX (2026 review): added the same cycle guard as explodeBOM(), plus a
+// null-check on the recursive call's result (a failed sub-hierarchy lookup
+// previously threw when accessing `.children` on null).
+export async function getBOMHierarchy(bomId: string, visited: Set<string> = new Set()): Promise<BomHierarchyNode | null> {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return null;
+
+    if (visited.has(bomId)) {
+      captureException(new Error(`Circular BOM reference detected at ${bomId}`), { module: "manufacturing", function: "getBOMHierarchy" });
+      return null;
+    }
+    const nextVisited = new Set(visited).add(bomId);
 
     const [bom] = await db
       .select({
         id: manufacturingBoms.id,
         name: manufacturingBoms.name,
         quantity: manufacturingBoms.quantity,
-        finishedGood: {
-          name: products.name,
-          sku: products.sku,
-        }
+        finishedGood: { name: products.name, sku: products.sku },
       })
       .from(manufacturingBoms)
       .leftJoin(products, eq(manufacturingBoms.finishedGoodId, products.id))
-      .where(eq(manufacturingBoms.id, bomId))
+      .where(and(eq(manufacturingBoms.id, bomId), eq(manufacturingBoms.orgId, orgId)))
       .limit(1);
 
     if (!bom) return null;
@@ -1006,21 +982,16 @@ export async function getBOMHierarchy(bomId: string): Promise<any> {
         componentId: bomItems.componentId,
         quantityRequired: bomItems.quantityRequired,
         unit: bomItems.unit,
-        component: {
-          id: products.id,
-          name: products.name,
-          sku: products.sku,
-        }
+        component: { id: products.id, name: products.name, sku: products.sku },
       })
       .from(bomItems)
       .leftJoin(products, eq(bomItems.componentId, products.id))
       .where(eq(bomItems.bomId, bomId));
 
-    const children = [];
+    const children: BomHierarchyNode['children'] = [];
     for (const item of items) {
       if (!item.component) continue;
 
-      // Check if this component has its own BOM
       const [subBom] = await db
         .select({ id: manufacturingBoms.id })
         .from(manufacturingBoms)
@@ -1033,7 +1004,7 @@ export async function getBOMHierarchy(bomId: string): Promise<any> {
         .limit(1);
 
       if (subBom) {
-        const subHierarchy = await getBOMHierarchy(subBom.id);
+        const subHierarchy = await getBOMHierarchy(subBom.id, nextVisited);
         children.push({
           productId: item.componentId,
           name: item.component.name,
@@ -1041,7 +1012,7 @@ export async function getBOMHierarchy(bomId: string): Promise<any> {
           quantity: parseFloat(item.quantityRequired),
           unit: item.unit,
           isSubAssembly: true,
-          children: subHierarchy.children,
+          children: subHierarchy?.children ?? [],
         });
       } else {
         children.push({
@@ -1063,24 +1034,23 @@ export async function getBOMHierarchy(bomId: string): Promise<any> {
       children,
     };
   } catch (error) {
+    captureException(error, { module: "manufacturing", function: "getBOMHierarchy" });
     return null;
   }
 }
 
 // Get products for manufacturing (only products, not services)
-export async function getProducts() {
+export async function getManufacturingProducts() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    // Get all products
     const allProducts = await db
       .select()
       .from(products)
       .where(and(eq(products.orgId, orgId), eq(products.isActive, true)))
       .orderBy(products.name);
 
-    // Get all active BOMs to identify sub-assemblies
     const boms = await db
       .select({ finishedGoodId: manufacturingBoms.finishedGoodId })
       .from(manufacturingBoms)
@@ -1099,8 +1069,7 @@ export async function getProducts() {
 
     return { success: true, data: productsWithBomFlag };
   } catch (error) {
-    console.error("Error in manufacturing.ts:", error);
+    captureException(error, { module: "manufacturing", function: "getManufacturingProducts" });
     return { success: false, error: "Failed to fetch products" };
   }
 }
-

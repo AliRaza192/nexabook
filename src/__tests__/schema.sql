@@ -101,6 +101,7 @@ CREATE TABLE "bank_accounts" (
 	"branch_name" varchar(150),
 	"bank_name" varchar(150),
 	"account_type" varchar(30) DEFAULT 'checking' NOT NULL,
+	"coa_account_id" uuid,
 	"opening_balance" numeric(14, 2) DEFAULT '0' NOT NULL,
 	"current_balance" numeric(14, 2) DEFAULT '0' NOT NULL,
 	"currency" varchar(10) DEFAULT 'PKR',
@@ -858,6 +859,7 @@ CREATE TABLE "organizations" (
 	"stripe_subscription_id" varchar(255),
 	"subscription_status" varchar(50) DEFAULT 'inactive',
 	"subscription_ends_at" timestamp,
+	"eobi_minimum_wage" numeric(12, 2) DEFAULT '40700' NOT NULL,
 	CONSTRAINT "organizations_slug_unique" UNIQUE("slug")
 );
 
@@ -1557,6 +1559,19 @@ CREATE TABLE "tax_rates" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 
+CREATE TABLE "tax_slabs" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid NOT NULL,
+	"fiscal_year" varchar(10) NOT NULL,
+	"min_annual_income" numeric(14, 2) NOT NULL,
+	"max_annual_income" numeric(14, 2),
+	"base_tax" numeric(14, 2) DEFAULT '0' NOT NULL,
+	"rate_percentage" numeric(5, 2) NOT NULL,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	CONSTRAINT "uq_tax_slab_org_year_income" UNIQUE("org_id", "fiscal_year", "min_annual_income")
+);
+
 CREATE TABLE "tickets" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid NOT NULL,
@@ -1706,6 +1721,7 @@ ALTER TABLE "approval_requests" ADD CONSTRAINT "approval_requests_workflow_id_ap
 ALTER TABLE "approval_workflows" ADD CONSTRAINT "approval_workflows_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "attendance" ADD CONSTRAINT "attendance_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "attendance" ADD CONSTRAINT "attendance_employee_id_employees_id_fk" FOREIGN KEY ("employee_id") REFERENCES "public"."employees"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "attendance" ADD CONSTRAINT "uq_attendance_employee_date" UNIQUE("employee_id", "date");
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "bank_accounts" ADD CONSTRAINT "bank_accounts_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "bank_connections" ADD CONSTRAINT "bank_connections_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
@@ -1924,6 +1940,7 @@ ALTER TABLE "tasks" ADD CONSTRAINT "tasks_org_id_organizations_id_fk" FOREIGN KE
 ALTER TABLE "tasks" ADD CONSTRAINT "tasks_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "tasks" ADD CONSTRAINT "tasks_assignee_id_profiles_id_fk" FOREIGN KEY ("assignee_id") REFERENCES "public"."profiles"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "tax_rates" ADD CONSTRAINT "tax_rates_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "tax_slabs" ADD CONSTRAINT "tax_slabs_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "tickets" ADD CONSTRAINT "tickets_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "tickets" ADD CONSTRAINT "tickets_customer_id_customers_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customers"("id") ON DELETE no action ON UPDATE no action;
 ALTER TABLE "tickets" ADD CONSTRAINT "tickets_lead_id_leads_id_fk" FOREIGN KEY ("lead_id") REFERENCES "public"."leads"("id") ON DELETE no action ON UPDATE no action;

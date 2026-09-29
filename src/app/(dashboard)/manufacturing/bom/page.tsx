@@ -44,10 +44,11 @@ import {
   createBom,
   deleteBom,
   updateBomStatus,
-  getProducts,
+  getManufacturingProducts,
   getBOMHierarchy,
   type BomFormData,
   type BomItemInput,
+  type BomStatus,
 } from "@/lib/actions/manufacturing";
 
 interface Product {
@@ -127,7 +128,7 @@ export default function BOMPage() {
   const [loading, setLoading] = useState(true);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | BomStatus>("all");
   const [viewingHierarchy, setViewingHierarchy] = useState<any>(null);
 
   // Form state
@@ -155,7 +156,7 @@ export default function BOMPage() {
     try {
       const [bomsRes, productsRes] = await Promise.all([
         getBoms(statusFilter === "all" ? undefined : statusFilter),
-        getProducts(),
+        getManufacturingProducts(),
       ]);
 
       if (bomsRes.success && bomsRes.data) {
@@ -699,7 +700,7 @@ export default function BOMPage() {
           <div className="flex flex-wrap items-center gap-6">
             <div className="flex items-center gap-3">
               <Label className="text-sm font-medium text-nexabook-700">Status Filter:</Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | BomStatus)}>
                 <SelectTrigger className="w-[180px] h-9">
                   <SelectValue />
                 </SelectTrigger>

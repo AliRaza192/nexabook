@@ -11,7 +11,7 @@ import {
 import { eq, and, desc, ilike, or, sql, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 
 // ==========================================
 // LEAVE TYPES
@@ -51,6 +51,7 @@ export async function getLeaveTypes() {
  */
 export async function createLeaveType(data: LeaveTypeFormData) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -161,6 +162,7 @@ export async function getLeaveApplications(
  */
 export async function createLeaveApplication(data: LeaveApplicationFormData) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -255,6 +257,7 @@ export async function createLeaveApplication(data: LeaveApplicationFormData) {
  */
 export async function approveLeaveApplication(applicationId: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -276,7 +279,7 @@ export async function approveLeaveApplication(applicationId: string) {
         reviewedBy: (await auth()).userId || "system",
         reviewedAt: new Date(),
       })
-      .where(eq(leaveApplications.id, applicationId))
+      .where(and(eq(leaveApplications.id, applicationId), eq(leaveApplications.orgId, orgId)))
       .returning();
 
     // Create audit log
@@ -302,6 +305,7 @@ export async function approveLeaveApplication(applicationId: string) {
  */
 export async function rejectLeaveApplication(applicationId: string, reason: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -324,7 +328,7 @@ export async function rejectLeaveApplication(applicationId: string, reason: stri
         reviewedAt: new Date(),
         rejectionReason: reason,
       })
-      .where(eq(leaveApplications.id, applicationId))
+      .where(and(eq(leaveApplications.id, applicationId), eq(leaveApplications.orgId, orgId)))
       .returning();
 
     // Create audit log

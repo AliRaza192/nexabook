@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/db";
-import { paymentTransactions } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { paymentTransactions, invoices } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { getCurrentOrgId } from "@/lib/actions/shared";
 import { captureException } from "@/lib/error-handler";
 
@@ -21,6 +21,24 @@ export async function POST(request: NextRequest) {
 
     if (gateway !== "jazzcash" && gateway !== "easypaisa") {
       return NextResponse.json({ success: false, error: "Invalid gateway" }, { status: 400 });
+    }
+
+    if (invoiceId) {
+      const [inv] = await db
+        .select({ balanceAmount: invoices.balanceAmount })
+        .from(invoices)
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
+        .limit(1);
+      if (!inv) {
+        return NextResponse.json({ success: false, error: "Invoice not found" }, { status: 404 });
+      }
+      const invoiceBalance = parseFloat(inv.balanceAmount || "0");
+      const requestedAmount = parseFloat(amount.toString());
+      if (requestedAmount > invoiceBalance || requestedAmount <= 0) {
+        return NextResponse.json({ success: false, error: "Amount exceeds outstanding balance" }, { status: 400 });
+      }
+    } else if (parseFloat(amount.toString()) <= 0) {
+      return NextResponse.json({ success: false, error: "Amount must be greater than zero" }, { status: 400 });
     }
 
     const orderRef = `NEX-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

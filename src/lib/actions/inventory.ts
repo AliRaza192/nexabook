@@ -1,11 +1,20 @@
 "use server";
 
 import { db } from "@/db";
+import type { Transaction } from "@/db";
 import { products, productCategories, uoms, uomConversions, warehouses, warehouseStock, stockTransfers, stockTransferItems, stockMovements, productBatches } from "@/db/schema";
 import { eq, and, or, ilike, desc, sql, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentOrgId } from "./shared";
 import { createAuditLog } from "./audit";
+import { postTransaction, resolveAccount } from "@/lib/accounting/posting-engine";
+import { captureException } from "@/lib/error-handler";
+
+// Postgres unique_violation error code
+const UNIQUE_VIOLATION = "23505";
+function isUniqueViolation(error: unknown): boolean {
+  return !!error && typeof error === "object" && "code" in error && (error as { code: string }).code === UNIQUE_VIOLATION;
+}
 
 // Product interfaces
 export interface ProductFormData {
@@ -24,6 +33,7 @@ export interface ProductFormData {
   costPrice: string;
   openingStock: string;
   minStockLevel: string;
+  warehouseId?: string; // NEW: which warehouse the opening stock belongs to
   conversions?: {
     fromUomId: string;
     toUomId: string;
@@ -151,12 +161,17 @@ export async function getProducts(searchQuery?: string, categoryId?: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getProducts" });
     return { success: false, error: "Failed to fetch products" };
   }
 }
 
 // Add a new product
+// FIX (2026 review): opening stock previously only wrote to products.currentStock
+// with no matching warehouseStock row — meaning per-warehouse views (getWarehouseStock,
+// getProductStockByWarehouse) would show 0 while the product's global stock showed
+// the opening quantity. Now, if a warehouseId is provided, the warehouseStock row is
+// created atomically with the product in the same transaction.
 export async function addProduct(data: ProductFormData) {
   try {
     const orgId = await getCurrentOrgId();
@@ -169,68 +184,104 @@ export async function addProduct(data: ProductFormData) {
       return { success: false, error: "Product name and SKU are required" };
     }
 
-    // Check if SKU already exists
-    const existingProduct = await db
-      .select({ id: products.id })
-      .from(products)
-      .where(and(eq(products.orgId, orgId), eq(products.sku, data.sku)))
-      .limit(1);
+    let newProduct: typeof products.$inferSelect;
+    try {
+      newProduct = await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(products)
+          .values({
+            orgId,
+            name: data.name,
+            sku: data.sku,
+            barcode: data.barcode,
+            categoryId: data.categoryId || null,
+            type: data.type,
+            unit: data.unit || 'Pcs',
+            baseUomId: data.baseUomId || null,
+            saleUomId: data.saleUomId || null,
+            description: data.description,
+            isBatchTracked: data.isBatchTracked || false,
+            isSerialTracked: data.isSerialTracked || false,
+            salePrice: data.salePrice,
+            costPrice: data.costPrice,
+            currentStock: data.openingStock,
+            minStockLevel: data.minStockLevel,
+          })
+          .returning();
 
-    if (existingProduct.length > 0) {
-      return { success: false, error: "Product with this SKU already exists" };
+        if (data.conversions && data.conversions.length > 0) {
+          await tx.insert(uomConversions).values(
+            data.conversions.map((conv) => ({
+              orgId,
+              productId: created.id,
+              fromUomId: conv.fromUomId,
+              toUomId: conv.toUomId,
+              conversionFactor: conv.conversionFactor,
+            })),
+          );
+        }
+
+        // Keep per-warehouse stock in sync with the global opening stock.
+        const openingQty = parseFloat(data.openingStock || "0");
+        if (data.warehouseId && openingQty > 0) {
+          await tx.insert(warehouseStock).values({
+            orgId,
+            warehouseId: data.warehouseId,
+            productId: created.id,
+            quantity: openingQty.toFixed(2),
+          });
+
+          await tx.insert(stockMovements).values({
+            orgId,
+            productId: created.id,
+            movementType: "in",
+            reason: "adjustment",
+            quantity: openingQty.toFixed(2),
+            unitCost: data.costPrice || "0",
+            totalValue: (openingQty * parseFloat(data.costPrice || "0")).toFixed(2),
+            referenceType: "product_opening_stock",
+            referenceId: created.id,
+            referenceNumber: data.sku,
+            runningBalance: openingQty.toFixed(2),
+          });
+        }
+
+        const unitCost = parseFloat(data.costPrice || "0");
+        const openingValue = openingQty * unitCost;
+
+        if (openingValue > 0) {
+          const inventoryAcc = await resolveAccount(tx, orgId, "inventory");
+          const equityAcc = await resolveAccount(tx, orgId, "opening_balance_equity");
+
+          await postTransaction(tx, {
+            orgId,
+            description: `Opening stock for ${data.name} (${data.sku})`,
+            date: new Date(),
+            referenceType: "product_opening_stock",
+            referenceId: created.id,
+            sourceType: "product",
+            lines: [
+              { accountId: inventoryAcc.id, description: "Inventory asset", debit: openingValue.toFixed(2), credit: "0" },
+              { accountId: equityAcc.id, description: "Opening balance equity", debit: "0", credit: openingValue.toFixed(2) },
+            ],
+          });
+        }
+
+        return created;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return { success: false, error: "Product with this SKU already exists" };
+      }
+      throw error;
     }
-
-    // Create the product
-    const [newProduct] = await db
-      .insert(products)
-      .values({
-        orgId,
-        name: data.name,
-        sku: data.sku,
-        barcode: data.barcode,
-        categoryId: data.categoryId || null,
-        type: data.type,
-        unit: data.unit || 'Pcs',
-        baseUomId: data.baseUomId || null,
-        saleUomId: data.saleUomId || null,
-        description: data.description,
-        isBatchTracked: data.isBatchTracked || false,
-        isSerialTracked: data.isSerialTracked || false,
-        salePrice: data.salePrice,
-        costPrice: data.costPrice,
-        currentStock: data.openingStock,
-        minStockLevel: data.minStockLevel,
-      })
-      .returning();
-
-    // Handle conversions
-    if (data.conversions && data.conversions.length > 0) {
-      const conversionsToInsert = data.conversions.map((conv) => ({
-        orgId,
-        productId: newProduct.id,
-        fromUomId: conv.fromUomId,
-        toUomId: conv.toUomId,
-        conversionFactor: conv.conversionFactor,
-      }));
-
-      await db.insert(uomConversions).values(conversionsToInsert);
-    }
-
-    // TODO: Link to 'Inventory Asset' account in COA
-    // This would create a journal entry to debit Inventory Asset account
-    // and credit Opening Balance Equity account for the opening stock value
-    // Example:
-    // if (data.openingStock > 0 && data.costPrice) {
-    //   const totalValue = data.openingStock * parseFloat(data.costPrice);
-    //   await createInventoryJournalEntry(orgId, newProduct.id, totalValue);
-    // }
 
     revalidatePath('/inventory');
-    
+
     await createAuditLog({ action: "PRODUCT_CREATED", entityType: "product", entityId: newProduct.id });
     return { success: true, data: newProduct, message: "Product added successfully" };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "addProduct" });
     return { success: false, error: "Failed to add product" };
   }
 }
@@ -251,7 +302,7 @@ export async function getCategories() {
 
     return { success: true, data: cats };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getCategories" });
     return { success: false, error: "Failed to fetch categories" };
   }
 }
@@ -268,35 +319,29 @@ export async function addCategory(data: CategoryFormData) {
       return { success: false, error: "Category name is required" };
     }
 
-    // Check if category already exists
-    const existingCategory = await db
-      .select({ id: productCategories.id })
-      .from(productCategories)
-      .where(and(
-        eq(productCategories.orgId, orgId),
-        eq(productCategories.name, data.name)
-      ))
-      .limit(1);
-
-    if (existingCategory.length > 0) {
-      return { success: false, error: "Category already exists" };
+    let newCategory: typeof productCategories.$inferSelect;
+    try {
+      [newCategory] = await db
+        .insert(productCategories)
+        .values({
+          orgId,
+          name: data.name,
+          description: data.description,
+        })
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return { success: false, error: "Category already exists" };
+      }
+      throw error;
     }
 
-    const [newCategory] = await db
-      .insert(productCategories)
-      .values({
-        orgId,
-        name: data.name,
-        description: data.description,
-      })
-      .returning();
-
     revalidatePath('/inventory');
-    
+
     await createAuditLog({ action: "CATEGORY_CREATED", entityType: "category", entityId: newCategory.id });
     return { success: true, data: newCategory, message: "Category added successfully" };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "addCategory" });
     return { success: false, error: "Failed to add category" };
   }
 }
@@ -321,7 +366,7 @@ export async function getProductById(productId: string) {
 
     return { success: true, data: product };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getProductById" });
     return { success: false, error: "Failed to fetch product" };
   }
 }
@@ -350,11 +395,19 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
     if (data.costPrice !== undefined) updateData.costPrice = data.costPrice;
     if (data.minStockLevel !== undefined) updateData.minStockLevel = data.minStockLevel;
 
-    const [updatedProduct] = await db
-      .update(products)
-      .set(updateData)
-      .where(and(eq(products.id, productId), eq(products.orgId, orgId)))
-      .returning();
+    let updatedProduct: typeof products.$inferSelect | undefined;
+    try {
+      [updatedProduct] = await db
+        .update(products)
+        .set(updateData)
+        .where(and(eq(products.id, productId), eq(products.orgId, orgId)))
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return { success: false, error: "Product with this SKU already exists" };
+      }
+      throw error;
+    }
 
     if (!updatedProduct) {
       return { success: false, error: "Product not found" };
@@ -363,7 +416,7 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
     // Handle conversions update (delete and re-insert for simplicity in this prototype)
     if (data.conversions !== undefined) {
       await db.delete(uomConversions).where(eq(uomConversions.productId, productId));
-      
+
       if (data.conversions.length > 0) {
         const conversionsToInsert = data.conversions.map((conv) => ({
           orgId,
@@ -378,11 +431,11 @@ export async function updateProduct(productId: string, data: Partial<ProductForm
     }
 
     revalidatePath('/inventory');
-    
+
     await createAuditLog({ action: "PRODUCT_UPDATED", entityType: "product", entityId: productId });
     return { success: true, data: updatedProduct, message: "Product updated successfully" };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "updateProduct" });
     return { success: false, error: "Failed to update product" };
   }
 }
@@ -403,7 +456,7 @@ export async function getUoms() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getUoms" });
     return { success: false, error: "Failed to fetch UOMs" };
   }
 }
@@ -430,11 +483,11 @@ export async function addUom(data: UomFormData) {
       .returning();
 
     revalidatePath('/inventory');
-    
+
     await createAuditLog({ action: "UOM_CREATED", entityType: "uom", entityId: newUom.id });
     return { success: true, data: newUom, message: "UOM added successfully" };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "addUom" });
     return { success: false, error: "Failed to add UOM" };
   }
 }
@@ -473,9 +526,51 @@ export async function convertToBaseUnit(productId: string, quantity: number, cur
 
     return quantity;
   } catch (error) {
-    console.error("Conversion error:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "convertToBaseUnit" });
     return quantity;
   }
+}
+
+/**
+ * Same conversion logic as convertToBaseUnit(), but runs inside an existing
+ * transaction. Needed because transferStock() previously had a comment saying
+ * "we don't have it in tx scope easily" and silently skipped conversion,
+ * moving the wrong quantity whenever a transfer used a non-base UOM.
+ */
+async function convertToBaseUnitInTx(
+  tx: Transaction,
+  orgId: string,
+  productId: string,
+  quantity: number,
+  currentUomId: string,
+): Promise<number> {
+  const [product] = await tx
+    .select({ baseUomId: products.baseUomId })
+    .from(products)
+    .where(and(eq(products.id, productId), eq(products.orgId, orgId)))
+    .limit(1);
+
+  if (!product || !product.baseUomId || product.baseUomId === currentUomId) {
+    return quantity;
+  }
+
+  const [conversion] = await tx
+    .select({ conversionFactor: uomConversions.conversionFactor })
+    .from(uomConversions)
+    .where(
+      and(
+        eq(uomConversions.productId, productId),
+        eq(uomConversions.fromUomId, currentUomId),
+        eq(uomConversions.toUomId, product.baseUomId),
+      ),
+    )
+    .limit(1);
+
+  if (conversion) {
+    return quantity * parseFloat(conversion.conversionFactor);
+  }
+
+  return quantity;
 }
 
 // Delete product (soft delete by setting isActive to false)
@@ -492,11 +587,11 @@ export async function deleteProduct(productId: string) {
       .where(and(eq(products.id, productId), eq(products.orgId, orgId)));
 
     revalidatePath('/inventory');
-    
+
     await createAuditLog({ action: "PRODUCT_DELETED", entityType: "product", entityId: productId });
     return { success: true, message: "Product deleted successfully" };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "deleteProduct" });
     return { success: false, error: "Failed to delete product" };
   }
 }
@@ -522,7 +617,7 @@ export async function getAvailableBatches(productId: string, warehouseId: string
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getAvailableBatches" });
     return { success: false, error: "Failed to fetch available batches" };
   }
 }
@@ -533,8 +628,8 @@ export async function autoSelectBatch(productId: string, warehouseId: string, me
     const orgId = await getCurrentOrgId();
     if (!orgId) return null;
 
-    let orderBy = method === 'FEFO' 
-      ? [asc(productBatches.expiryDate)] 
+    const orderBy = method === 'FEFO'
+      ? [asc(productBatches.expiryDate)]
       : [asc(productBatches.createdAt)];
 
     const [batch] = await db
@@ -553,12 +648,15 @@ export async function autoSelectBatch(productId: string, warehouseId: string, me
 
     return batch || null;
   } catch (error) {
+    captureException(error, { module: "inventory", function: "autoSelectBatch" });
     return null;
   }
 }
 
 // Update batch stock (Helper for Sales/Purchases)
-export async function updateBatchStock(tx: any, batchId: string, quantityChange: number) {
+// FIX (2026 review): tx typed as `any` before — now uses the real Transaction
+// type from db/index.ts so misuse is caught at compile time.
+export async function updateBatchStock(tx: Transaction, batchId: string, quantityChange: number) {
   const [existing] = await tx
     .select()
     .from(productBatches)
@@ -610,12 +708,14 @@ export async function getExpiryReport() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getExpiryReport" });
     return { success: false, error: "Failed to fetch expiry report" };
   }
 }
 
 // Get inventory stats
+// FIX (2026 review): was fetching every product and filtering in memory.
+// Now aggregates at the SQL level, which scales past a few thousand SKUs.
 export async function getInventoryStats() {
   try {
     const orgId = await getCurrentOrgId();
@@ -623,52 +723,40 @@ export async function getInventoryStats() {
       return { success: false, error: "No organization found" };
     }
 
-    const allProducts = await db
+    const [row] = await db
       .select({
-        currentStock: products.currentStock,
-        minStockLevel: products.minStockLevel,
-        salePrice: products.salePrice,
-        costPrice: products.costPrice,
+        totalItems: sql<number>`count(*)::int`,
+        lowStockItems: sql<number>`count(*) filter (
+          where ${products.currentStock}::numeric > 0
+          and ${products.currentStock}::numeric <= ${products.minStockLevel}::numeric
+        )::int`,
+        outOfStockItems: sql<number>`count(*) filter (
+          where coalesce(${products.currentStock}::numeric, 0) = 0
+        )::int`,
+        totalStockValue: sql<number>`coalesce(sum(
+          coalesce(${products.currentStock}::numeric, 0) * coalesce(${products.costPrice}::numeric, 0)
+        ), 0)::numeric`,
       })
       .from(products)
       .where(and(eq(products.orgId, orgId), eq(products.isActive, true)));
 
-    const totalItems = allProducts.length;
-
-    const lowStockItems = allProducts.filter(
-      (p) => p.currentStock !== null &&
-             p.minStockLevel !== null &&
-             p.currentStock <= p.minStockLevel &&
-              parseFloat(p.currentStock) > 0
-    ).length;
-
-    const outOfStockItems = allProducts.filter(
-      (p) => parseFloat(p.currentStock || "0") === 0
-    ).length;
-
-    // Calculate total stock value using cost price
-    const totalStockValue = allProducts.reduce((sum, p) => {
-      const stock = parseFloat(p.currentStock || "0");
-      const cost = p.costPrice ? parseFloat(p.costPrice) : 0;
-      return sum + (stock * cost);
-    }, 0);
-
     return {
       success: true,
       data: {
-        totalItems,
-        lowStockItems,
-        outOfStockItems,
-        totalStockValue,
+        totalItems: row?.totalItems || 0,
+        lowStockItems: row?.lowStockItems || 0,
+        outOfStockItems: row?.outOfStockItems || 0,
+        totalStockValue: Number(row?.totalStockValue || 0),
       },
     };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getInventoryStats" });
     return { success: false, error: "Failed to fetch inventory stats" };
   }
 }
 
 // Get low stock products (items at or below min stock level)
+// FIX (2026 review): filtering moved to SQL (was fetch-all + in-memory filter).
 export async function getLowStockProducts() {
   try {
     const orgId = await getCurrentOrgId();
@@ -688,21 +776,14 @@ export async function getLowStockProducts() {
       .where(
         and(
           eq(products.orgId, orgId),
-          eq(products.isActive, true)
+          eq(products.isActive, true),
+          sql`${products.currentStock}::numeric <= ${products.minStockLevel}::numeric`,
         )
-      )
-      .execute();
+      );
 
-    // Filter in memory for low stock items
-    const filtered = lowStockProducts.filter(
-      (p) => p.currentStock !== null && 
-             p.minStockLevel !== null && 
-             p.currentStock <= p.minStockLevel
-    );
-
-    return { success: true, data: filtered };
+    return { success: true, data: lowStockProducts };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getLowStockProducts" });
     return { success: false, error: "Failed to fetch low stock products" };
   }
 }
@@ -721,7 +802,7 @@ export async function getWarehouses() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getWarehouses" });
     return { success: false, error: "Failed to fetch warehouses" };
   }
 }
@@ -756,19 +837,26 @@ export async function addWarehouse(data: WarehouseFormData) {
     await createAuditLog({ action: "WAREHOUSE_CREATED", entityType: "warehouse", entityId: newWarehouse.id });
     return { success: true, data: newWarehouse, message: "Warehouse added successfully" };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "addWarehouse" });
     return { success: false, error: "Failed to add warehouse" };
   }
 }
 
 // Get stock for a specific warehouse and product
+// FIX (2026 review): had NO orgId scoping at all — any authenticated user who
+// knew or guessed a warehouseId/productId pair could read another org's stock
+// level. Now scoped via warehouseStock.orgId directly.
 export async function getWarehouseStock(productId: string, warehouseId: string) {
   try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
     const [stock] = await db
       .select({ quantity: warehouseStock.quantity })
       .from(warehouseStock)
       .where(
         and(
+          eq(warehouseStock.orgId, orgId),
           eq(warehouseStock.productId, productId),
           eq(warehouseStock.warehouseId, warehouseId)
         )
@@ -777,7 +865,7 @@ export async function getWarehouseStock(productId: string, warehouseId: string) 
 
     return { success: true, data: stock?.quantity || "0" };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getWarehouseStock" });
     return { success: false, error: "Failed to fetch warehouse stock" };
   }
 }
@@ -799,19 +887,26 @@ export async function getProductStockByWarehouse(productId: string) {
         warehouseStock,
         and(
           eq(warehouses.id, warehouseStock.warehouseId),
-          eq(warehouseStock.productId, productId)
+          eq(warehouseStock.productId, productId),
+          eq(warehouseStock.orgId, orgId),
         )
       )
       .where(and(eq(warehouses.orgId, orgId), eq(warehouses.isActive, true)));
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "getProductStockByWarehouse" });
     return { success: false, error: "Failed to fetch product stock by warehouse" };
   }
 }
 
 // Transfer stock between warehouses
+// FIX (2026 review):
+//  - fromWarehouseId/toWarehouseId are now verified to belong to the caller's
+//    org before anything is written (previously trusted blindly — IDOR risk).
+//  - UOM conversion is now actually performed inside the transaction (was a
+//    silent no-op before, moving the raw entered quantity regardless of unit).
+//  - orgId now written on warehouseStock and stockTransferItems rows.
 export async function transferStock(data: StockTransferFormData) {
   try {
     const orgId = await getCurrentOrgId();
@@ -819,6 +914,19 @@ export async function transferStock(data: StockTransferFormData) {
 
     if (data.fromWarehouseId === data.toWarehouseId) {
       return { success: false, error: "Source and destination warehouses must be different" };
+    }
+
+    const orgWarehouses = await db
+      .select({ id: warehouses.id })
+      .from(warehouses)
+      .where(
+        and(
+          eq(warehouses.orgId, orgId),
+          or(eq(warehouses.id, data.fromWarehouseId), eq(warehouses.id, data.toWarehouseId)),
+        ),
+      );
+    if (orgWarehouses.length !== 2) {
+      return { success: false, error: "One or both warehouses do not belong to your organization" };
     }
 
     const result = await db.transaction(async (tx) => {
@@ -837,18 +945,17 @@ export async function transferStock(data: StockTransferFormData) {
         .returning();
 
       for (const item of data.items) {
-        const quantity = parseFloat(item.quantity);
-        
-        // Convert to base unit if uomId is provided
-        let baseQuantity = quantity;
+        const enteredQuantity = parseFloat(item.quantity);
+
+        // Actually perform the UOM -> base-unit conversion now (was a no-op before).
+        let baseQuantity = enteredQuantity;
         if (item.uomId) {
-           // We need convertToBaseUnit logic but we don't have it in tx scope easily
-           // For now using the simple quantity or assuming it's already in base unit
-           // In a real app we'd fetch conversion factor here
+          baseQuantity = await convertToBaseUnitInTx(tx, orgId, item.productId, enteredQuantity, item.uomId);
         }
 
         // 2. Add Stock Transfer Items
         await tx.insert(stockTransferItems).values({
+          orgId,
           transferId: transfer.id,
           productId: item.productId,
           uomId: item.uomId,
@@ -859,7 +966,11 @@ export async function transferStock(data: StockTransferFormData) {
         const [fromStock] = await tx
           .select()
           .from(warehouseStock)
-          .where(and(eq(warehouseStock.warehouseId, data.fromWarehouseId), eq(warehouseStock.productId, item.productId)))
+          .where(and(
+            eq(warehouseStock.orgId, orgId),
+            eq(warehouseStock.warehouseId, data.fromWarehouseId),
+            eq(warehouseStock.productId, item.productId),
+          ))
           .limit(1);
 
         if (!fromStock || parseFloat(fromStock.quantity) < baseQuantity) {
@@ -877,7 +988,11 @@ export async function transferStock(data: StockTransferFormData) {
         const [toStock] = await tx
           .select()
           .from(warehouseStock)
-          .where(and(eq(warehouseStock.warehouseId, data.toWarehouseId), eq(warehouseStock.productId, item.productId)))
+          .where(and(
+            eq(warehouseStock.orgId, orgId),
+            eq(warehouseStock.warehouseId, data.toWarehouseId),
+            eq(warehouseStock.productId, item.productId),
+          ))
           .limit(1);
 
         const destNewQty = toStock
@@ -890,6 +1005,7 @@ export async function transferStock(data: StockTransferFormData) {
             .where(eq(warehouseStock.id, toStock.id));
         } else {
           await tx.insert(warehouseStock).values({
+            orgId,
             warehouseId: data.toWarehouseId,
             productId: item.productId,
             quantity: destNewQty,
@@ -932,17 +1048,23 @@ export async function transferStock(data: StockTransferFormData) {
     await createAuditLog({ action: "STOCK_TRANSFERRED", entityType: "stockTransfer", entityId: result.id });
     return { success: true, data: result, message: "Stock transferred successfully" };
   } catch (error) {
-    console.error("Error in inventory.ts:", error instanceof Error ? error.message : error);
+    captureException(error, { module: "inventory", function: "transferStock" });
     return { success: false, error: error instanceof Error ? error.message : "Failed to transfer stock" };
   }
 }
 
 // Update warehouse stock (Helper for Sales/Purchases)
-export async function updateWarehouseStock(tx: any, warehouseId: string, productId: string, quantityChange: number) {
+// FIX (2026 review): tx was `any`, no orgId scoping/param — now properly
+// typed and org-scoped so callers can't accidentally touch another org's row.
+export async function updateWarehouseStock(tx: Transaction, orgId: string, warehouseId: string, productId: string, quantityChange: number) {
   const [existing] = await tx
     .select()
     .from(warehouseStock)
-    .where(and(eq(warehouseStock.warehouseId, warehouseId), eq(warehouseStock.productId, productId)))
+    .where(and(
+      eq(warehouseStock.orgId, orgId),
+      eq(warehouseStock.warehouseId, warehouseId),
+      eq(warehouseStock.productId, productId),
+    ))
     .limit(1);
 
   if (existing) {
@@ -961,6 +1083,7 @@ export async function updateWarehouseStock(tx: any, warehouseId: string, product
       throw new Error(`No stock for ${prod?.name || 'product'} in the selected warehouse`);
     }
     await tx.insert(warehouseStock).values({
+      orgId,
       warehouseId,
       productId,
       quantity: quantityChange.toFixed(2),

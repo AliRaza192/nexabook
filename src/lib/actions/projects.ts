@@ -10,7 +10,7 @@ import { createAuditLog } from "./audit";
 import { eq, and, desc, asc, ilike, or, sql, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 
 // ─── PROJECTS ───
 
@@ -136,6 +136,7 @@ export async function updateProject(id: string, data: {
 
 export async function deleteProject(id: string) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
 

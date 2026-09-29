@@ -6,19 +6,20 @@ import {
   attendance,
   payrollRuns,
   payslips,
-  journalEntries,
-  journalEntryLines,
-  chartOfAccounts,
+  organizations,
   auditLogs,
   profiles,
+  taxSlabs,
 } from "@/db/schema";
-import { eq, and, desc, asc, ilike, or, sql, gte, lte } from "drizzle-orm";
+import { eq, and, desc, ilike, or, sql, gte, lte, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
 import { checkPeriodLocked } from "./fiscal-periods";
-import { validateJournalBalance } from "../accounting";
+import { postTransaction, resolveAccount } from "../accounting/posting-engine";
 import { captureException } from "@/lib/error-handler";
+
+const VALID_EMPLOYEE_STATUSES = ["Active", "On Leave", "Terminated"] as const;
 
 // Helper: Get current user name
 async function getCurrentUserName(): Promise<string | null> {
@@ -73,6 +74,10 @@ export type EmployeeFormData = {
   emergencyPhone?: string;
 }
 
+function validateEmployeeStatus(status: string): status is typeof VALID_EMPLOYEE_STATUSES[number] {
+  return (VALID_EMPLOYEE_STATUSES as readonly string[]).includes(status);
+}
+
 // Get all employees
 export async function getEmployees(status?: string, searchQuery?: string, department?: string) {
   try {
@@ -107,7 +112,7 @@ export async function getEmployees(status?: string, searchQuery?: string, depart
 
     return { success: true, data: result };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "getEmployees" });
+    captureException(error, { module: "hr-payroll", function: "getEmployees" });
     return { success: false, error: "Failed to fetch employees" };
   }
 }
@@ -128,19 +133,27 @@ export async function getEmployee(id: string) {
 
     return { success: true, data: result[0] };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "getEmployee" });
+    captureException(error, { module: "hr-payroll", function: "getEmployee" });
     return { success: false, error: "Failed to fetch employee" };
   }
 }
 
 // Create employee
+// FIX (2026 review): added requireRole (was completely open — any
+// authenticated user could create employees with arbitrary salary figures)
+// and status validated against the schema's allowed values.
 export async function createEmployee(data: EmployeeFormData) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Not authenticated" };
+
+    if (!validateEmployeeStatus(data.status)) {
+      return { success: false, error: `Invalid status: must be one of ${VALID_EMPLOYEE_STATUSES.join(", ")}` };
+    }
 
     const [newEmployee] = await db
       .insert(employees)
@@ -175,7 +188,6 @@ export async function createEmployee(data: EmployeeFormData) {
       })
       .returning();
 
-    // Audit log
     await db.insert(auditLogs).values({
       orgId,
       userId,
@@ -188,7 +200,7 @@ export async function createEmployee(data: EmployeeFormData) {
     revalidatePath('/hr-payroll/employees');
     return { success: true, data: newEmployee, message: "Employee created successfully" };
   } catch (error: unknown) {
-    if (error instanceof Error && 'code' in error && (error as { code: string }).code === '23505') { // Unique violation
+    if (error instanceof Error && 'code' in error && (error as { code: string }).code === '23505') {
       return { success: false, error: "Employee code already exists" };
     }
     captureException(error, { module: "hr-payroll", function: "createEmployee" });
@@ -199,11 +211,16 @@ export async function createEmployee(data: EmployeeFormData) {
 // Update employee
 export async function updateEmployee(id: string, data: EmployeeFormData) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
     const { userId } = await auth();
     if (!userId) return { success: false, error: "Not authenticated" };
+
+    if (!validateEmployeeStatus(data.status)) {
+      return { success: false, error: `Invalid status: must be one of ${VALID_EMPLOYEE_STATUSES.join(", ")}` };
+    }
 
     const [updatedEmployee] = await db
       .update(employees)
@@ -241,7 +258,6 @@ export async function updateEmployee(id: string, data: EmployeeFormData) {
 
     if (!updatedEmployee) return { success: false, error: "Employee not found" };
 
-    // Audit log
     await db.insert(auditLogs).values({
       orgId,
       userId,
@@ -265,6 +281,7 @@ export async function updateEmployee(id: string, data: EmployeeFormData) {
 // Delete employee (soft delete)
 export async function deleteEmployee(id: string) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -276,7 +293,6 @@ export async function deleteEmployee(id: string) {
       .set({ isActive: false, status: 'Terminated', exitDate: new Date(), updatedAt: new Date() })
       .where(and(eq(employees.id, id), eq(employees.orgId, orgId)));
 
-    // Audit log
     await db.insert(auditLogs).values({
       orgId,
       userId,
@@ -289,7 +305,7 @@ export async function deleteEmployee(id: string) {
     revalidatePath('/hr-payroll/employees');
     return { success: true, message: "Employee removed successfully" };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "removeEmployee" });
+    captureException(error, { module: "hr-payroll", function: "deleteEmployee" });
     return { success: false, error: "Failed to remove employee" };
   }
 }
@@ -339,14 +355,19 @@ export async function getAttendance(startDate: string, endDate: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "getAttendance" });
+    captureException(error, { module: "hr-payroll", function: "getAttendance" });
     return { success: false, error: "Failed to fetch attendance" };
   }
 }
 
 // Mark attendance for a day
+// FIX (2026 review): the onConflictDoUpdate target (employeeId, date) had no
+// matching unique constraint in the schema — every call would throw
+// "no unique or exclusion constraint matching the ON CONFLICT specification".
+// Migration 0007 adds uq_attendance_employee_date; this now works as intended.
 export async function markAttendance(records: AttendanceRecord[]) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -356,18 +377,16 @@ export async function markAttendance(records: AttendanceRecord[]) {
     for (const record of records) {
       const checkIn = record.checkIn ? new Date(record.checkIn) : null;
       const checkOut = record.checkOut ? new Date(record.checkOut) : null;
-      
-      // Calculate working hours
+
       let workingHours = null;
       if (checkIn && checkOut) {
         workingHours = ((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60)).toFixed(2);
       }
 
-      // Calculate late minutes
       let lateMinutes = 0;
       if (record.status === 'Late' && checkIn) {
         const expectedTime = new Date(record.date);
-        expectedTime.setHours(9, 0, 0, 0); // 9 AM expected
+        expectedTime.setHours(9, 0, 0, 0);
         lateMinutes = Math.max(0, Math.floor((checkIn.getTime() - expectedTime.getTime()) / (1000 * 60)));
       }
 
@@ -401,7 +420,7 @@ export async function markAttendance(records: AttendanceRecord[]) {
     revalidatePath('/hr-payroll/attendance');
     return { success: true, message: `Attendance marked for ${records.length} employees` };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "markAttendance" });
+    captureException(error, { module: "hr-payroll", function: "markAttendance" });
     return { success: false, error: "Failed to mark attendance" };
   }
 }
@@ -439,13 +458,74 @@ export interface PayrollCalculation {
   totalWorkingDays: number;
 }
 
+/**
+ * FIX (2026 review): replaces the hardcoded 5-bracket table (which predates
+ * the FY2026-27 slabs effective 1 July 2026 — confirmed via Finance Act 2026
+ * coverage: 7 brackets, top-rate threshold raised to Rs 7M, 9% surcharge
+ * abolished for salaried individuals). The exact new bracket boundaries and
+ * rates were NOT available from a single authoritative source at review
+ * time, so rather than guess a table for a legally binding payroll
+ * calculation, slabs are now read from the org-configurable `taxSlabs`
+ * table (migration 0007). Seed it from the official FBR/Finance Act 2026
+ * document for the org's applicable fiscal year before running payroll.
+ */
+async function calculateIncomeTax(orgId: string, annualSalary: number, fiscalYear: string): Promise<number> {
+  const slabs = await db
+    .select()
+    .from(taxSlabs)
+    .where(and(
+      eq(taxSlabs.orgId, orgId),
+      eq(taxSlabs.fiscalYear, fiscalYear),
+      eq(taxSlabs.isActive, true),
+    ))
+    .orderBy(asc(taxSlabs.minAnnualIncome));
+
+  if (slabs.length === 0) {
+    // No configured slabs for this fiscal year — fail loudly rather than
+    // silently using a stale/guessed table.
+    throw new Error(
+      `No income tax slabs configured for fiscal year ${fiscalYear}. Please add them under Settings > Tax Slabs before running payroll.`
+    );
+  }
+
+  let applicable = slabs[0];
+  for (const slab of slabs) {
+    const min = parseFloat(slab.minAnnualIncome);
+    const max = slab.maxAnnualIncome ? parseFloat(slab.maxAnnualIncome) : Infinity;
+    if (annualSalary >= min && annualSalary < max) {
+      applicable = slab;
+      break;
+    }
+  }
+
+  const base = parseFloat(applicable.baseTax);
+  const rate = parseFloat(applicable.ratePercentage);
+  const min = parseFloat(applicable.minAnnualIncome);
+  const monthlyTax = (base + (annualSalary - min) * (rate / 100)) / 12;
+  return Math.max(0, monthlyTax);
+}
+
 // Get payroll calculations for a month
+// FIX (2026 review): EOBI now calculated on the org's configured statutory
+// minimum wage (organizations.eobiMinimumWage), not on basic salary — this
+// was factually wrong per current EOBI rules (contribution is fixed to the
+// government-notified minimum wage regardless of actual salary). Income tax
+// now routed through calculateIncomeTax() / configurable taxSlabs.
 export async function getPayrollCalculations(month: number, year: number) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    // Get all active employees
+    const [org] = await db
+      .select({ eobiMinimumWage: organizations.eobiMinimumWage })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+    const eobiMinimumWage = parseFloat(org?.eobiMinimumWage || "40700");
+
+    // Fiscal year label used for slab lookup — Pakistani FY runs Jul-Jun.
+    const fiscalYear = month >= 7 ? `${year}-${String(year + 1).slice(-2)}` : `${year - 1}-${String(year).slice(-2)}`;
+
     const activeEmployees = await db
       .select()
       .from(employees)
@@ -460,10 +540,9 @@ export async function getPayrollCalculations(month: number, year: number) {
       return { success: false, error: "No active employees found" };
     }
 
-    // Get attendance for the month
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59);
-    
+
     const attendanceRecords = await db
       .select()
       .from(attendance)
@@ -473,7 +552,6 @@ export async function getPayrollCalculations(month: number, year: number) {
         lte(attendance.date, endDate)
       ));
 
-    // Calculate payroll for each employee
     const calculations: PayrollCalculation[] = [];
 
     for (const emp of activeEmployees) {
@@ -482,10 +560,9 @@ export async function getPayrollCalculations(month: number, year: number) {
       const medicalAllowance = parseFloat(emp.medicalAllowance || '0');
       const conveyanceAllowance = parseFloat(emp.conveyanceAllowance || '0');
       const otherAllowances = parseFloat(emp.otherAllowances || '0');
-      const eobiDeduction = parseFloat(emp.eobiDeduction || '0');
-      const incomeTaxDeduction = parseFloat(emp.incomeTaxDeduction || '0');
+      const eobiDeductionOverride = parseFloat(emp.eobiDeduction || '0');
+      const incomeTaxOverride = parseFloat(emp.incomeTaxDeduction || '0');
 
-      // Get attendance stats for this employee
       const empAttendance = attendanceRecords.filter(a => a.employeeId === emp.id);
       const presentDays = empAttendance.filter(a => a.status === 'Present' || a.status === 'Late').length;
       const absentDays = empAttendance.filter(a => a.status === 'Absent').length;
@@ -493,49 +570,30 @@ export async function getPayrollCalculations(month: number, year: number) {
       const unpaidLeaveDays = empAttendance.filter(a => a.status === 'Half Day').length * 0.5;
       const totalWorkingDays = 26; // Standard working days in Pakistan
 
-      // Calculate overtime
       const totalOvertime = empAttendance.reduce((sum, a) => sum + parseFloat(a.overtime || '0'), 0);
-      const overtimeRate = basicSalary / (totalWorkingDays * 8) * 1.5; // 1.5x hourly rate
+      const overtimeRate = basicSalary / (totalWorkingDays * 8) * 1.5;
       const overtimePay = totalOvertime * overtimeRate;
 
-      // Calculate unpaid leave deduction
       const perDaySalary = basicSalary / totalWorkingDays;
       const unpaidLeaveDeduction = (absentDays * 0.5 + unpaidLeaveDays) * perDaySalary;
 
-      // Calculate income tax (Pakistan tax slabs - simplified)
-      let incomeTax = incomeTaxDeduction;
-      if (incomeTaxDeduction === 0 && basicSalary > 0) {
+      let incomeTax = incomeTaxOverride;
+      if (incomeTaxOverride === 0 && basicSalary > 0) {
         const annualSalary = basicSalary * 12;
-        if (annualSalary <= 600000) {
-          incomeTax = 0;
-        } else if (annualSalary <= 1200000) {
-          incomeTax = (annualSalary - 600000) * 0.025 / 12;
-        } else if (annualSalary <= 2200000) {
-          incomeTax = (15000 + (annualSalary - 1200000) * 0.15) / 12;
-        } else if (annualSalary <= 3200000) {
-          incomeTax = (165000 + (annualSalary - 2200000) * 0.25) / 12;
-        } else {
-          incomeTax = (415000 + (annualSalary - 3200000) * 0.35) / 12;
-        }
+        incomeTax = await calculateIncomeTax(orgId, annualSalary, fiscalYear);
       }
 
-      // Auto EOBI calculation (1% of basic, capped at minimum wage ceiling Rs. 25,000)
-      const EOBI_MIN_WAGE_CEILING = 25000;
-      const eobiBase = Math.min(basicSalary, EOBI_MIN_WAGE_CEILING);
-      const autoEobiDeduction = eobiBase * 0.01; // Employee share: 1%
-      const finalEobiDeduction = eobiDeduction > 0 ? eobiDeduction : autoEobiDeduction;
+      // EOBI: 1% of the statutory minimum wage — fixed regardless of actual
+      // salary. An explicit per-employee override (emp.eobiDeduction) still
+      // takes precedence if set.
+      const autoEobiDeduction = eobiMinimumWage * 0.01;
+      const finalEobiDeduction = eobiDeductionOverride > 0 ? eobiDeductionOverride : autoEobiDeduction;
 
-      // Auto Provident Fund calculation (8.33% of basic)
       const PF_RATE = 0.0833;
       const providentFund = basicSalary * PF_RATE;
 
-      // Total earnings
       const totalEarnings = basicSalary + houseRent + medicalAllowance + conveyanceAllowance + otherAllowances + overtimePay;
-      
-      // Total deductions
       const totalDeductions = finalEobiDeduction + incomeTax + providentFund + unpaidLeaveDeduction;
-
-      // Net salary
       const netSalary = totalEarnings - totalDeductions;
 
       calculations.push({
@@ -573,11 +631,18 @@ export async function getPayrollCalculations(month: number, year: number) {
     return { success: true, data: calculations };
   } catch (error) {
     captureException(error, { module: "hr-payroll", function: "getPayrollCalculations" });
-    return { success: false, error: "Failed to calculate payroll" };
+    return { success: false, error: error instanceof Error ? error.message : "Failed to calculate payroll" };
   }
 }
 
 // Generate and approve payroll
+// FIX (2026 review): JE construction now routed through
+// postTransaction()/resolveAccount() (was hand-rolled, independent of and
+// divergent from accounting.ts's postPayrollToLedger). EOBI and income tax
+// are now posted as two separate liability lines instead of being merged
+// into one ambiguous "totalTax" line. If required accounts are missing, this
+// now throws (aborting the whole transaction) instead of silently skipping
+// the JE while still marking the run "Posted".
 export async function generateAndApprovePayroll(month: number, year: number, calculations: PayrollCalculation[]) {
   try {
     await requireRole(["admin", "accountant"]);
@@ -592,7 +657,6 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
 
     const userName = await getCurrentUserName();
 
-    // Check if payroll already exists for this month
     const existingPayroll = await db
       .select()
       .from(payrollRuns)
@@ -607,17 +671,19 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
       return { success: false, error: "Payroll already exists and has been approved for this month" };
     }
 
-    // Calculate totals
     const totalGross = calculations.reduce((sum, c) => sum + c.totalEarnings, 0);
     const totalDeductions = calculations.reduce((sum, c) => sum + c.totalDeductions, 0);
     const totalNet = calculations.reduce((sum, c) => sum + c.netSalary, 0);
+    const totalEobi = calculations.reduce((sum, c) => sum + c.eobiDeduction, 0);
+    const totalIncomeTax = calculations.reduce((sum, c) => sum + c.incomeTax, 0);
+    const totalProvidentFund = calculations.reduce((sum, c) => sum + c.providentFund, 0);
+    const totalUnpaidLeave = calculations.reduce((sum, c) => sum + c.unpaidLeaveDeduction, 0);
 
     let payrollRunId = '';
     let journalEntryId = '';
 
     await db.transaction(async (tx) => {
       if (existingPayroll.length > 0) {
-        // Update existing draft
         payrollRunId = existingPayroll[0].id;
         await tx
           .update(payrollRuns)
@@ -633,12 +699,10 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
           })
           .where(eq(payrollRuns.id, payrollRunId));
 
-        // Delete old payslips
         await tx
           .delete(payslips)
           .where(eq(payslips.payrollRunId, payrollRunId));
       } else {
-        // Create new payroll run
         const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
         const [payrollRun] = await tx
           .insert(payrollRuns)
@@ -661,7 +725,6 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
         payrollRunId = payrollRun.id;
       }
 
-      // Create payslips — batch insert (fix N+1)
       if (calculations.length > 0) {
         await tx.insert(payslips).values(calculations.map((calc) => ({
           orgId,
@@ -697,106 +760,77 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
         })));
       }
 
-      // Create journal entry
-      const entryNumber = `PAYROLL-${year}-${String(month).padStart(2, '0')}-${Date.now()}`;
-      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const salaryExpense = await resolveAccount(tx, orgId, "salary_expense");
+      const salariesPayable = await resolveAccount(tx, orgId, "salaries_payable");
 
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(year, month - 1, 1),
-          referenceType: 'payroll',
-          referenceId: payrollRunId,
-          description: `Payroll for ${monthNames[month - 1]} ${year} - Total: PKR ${totalNet.toFixed(2)}`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
+      const salaryExpenseAmount = totalGross - totalUnpaidLeave;
 
-      journalEntryId = journalEntry.id;
+      const lines: { accountId: string; description: string; debit: string; credit: string }[] = [
+        {
+          accountId: salaryExpense.id,
+          description: "Salaries & Wages Expense",
+          debit: salaryExpenseAmount.toFixed(2),
+          credit: "0",
+        },
+        {
+          accountId: salariesPayable.id,
+          description: "Net Salaries Payable",
+          debit: "0",
+          credit: totalNet.toFixed(2),
+        },
+      ];
 
-      // Find accounts
-      const [salaryExpenseAccount] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'salary_expense')
-        ))
-        .limit(1);
-
-      const [salariesPayableAccount] = await tx
-        .select()
-        .from(chartOfAccounts)
-        .where(and(
-          eq(chartOfAccounts.orgId, orgId),
-          eq(chartOfAccounts.subType, 'salaries_payable')
-        ))
-        .limit(1);
-
-      // Create journal entry lines
-      if (salaryExpenseAccount && salariesPayableAccount) {
-        const totalTax = calculations.reduce((sum, c) => sum + c.incomeTax + c.eobiDeduction, 0);
-
-        const lineAmounts: { debitAmount: string; creditAmount: string }[] = [
-          { debitAmount: totalGross.toFixed(2), creditAmount: '0' },
-          { debitAmount: '0', creditAmount: totalNet.toFixed(2) },
-        ];
-        if (totalTax > 0) {
-          lineAmounts.push({ debitAmount: '0', creditAmount: totalTax.toFixed(2) });
-        }
-        if (!validateJournalBalance(lineAmounts)) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-        // Debit: Salaries & Wages Expense
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId,
-          accountId: salaryExpenseAccount.id,
-          description: `Debit - Salaries & Wages Expense (${monthNames[month - 1]} ${year})`,
-          debitAmount: totalGross.toFixed(2),
-          creditAmount: '0',
+      if (totalEobi > 0) {
+        const eobiPayable = await resolveAccount(tx, orgId, "eobi_payable");
+        lines.push({
+          accountId: eobiPayable.id,
+          description: "EOBI Payable",
+          debit: "0",
+          credit: (totalEobi * 2).toFixed(2),
         });
 
-        // Credit: Salaries Payable
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId,
-          accountId: salariesPayableAccount.id,
-          description: `Credit - Salaries Payable (${monthNames[month - 1]} ${year})`,
-          debitAmount: '0',
-          creditAmount: totalNet.toFixed(2),
+        const eobiExpense = await resolveAccount(tx, orgId, "eobi_expense");
+        lines.push({
+          accountId: eobiExpense.id,
+          description: "EOBI Expense (Employer Share)",
+          debit: totalEobi.toFixed(2),
+          credit: "0",
         });
-
-        // Credit: Tax Deductions Payable (if applicable)
-        if (totalTax > 0) {
-          const [taxPayableAccount] = await tx
-            .select()
-            .from(chartOfAccounts)
-            .where(and(
-              eq(chartOfAccounts.orgId, orgId),
-              or(
-                eq(chartOfAccounts.subType, 'income_tax_payable'),
-                eq(chartOfAccounts.subType, 'tax_payable')
-              )
-            ))
-            .limit(1);
-
-          if (taxPayableAccount) {
-            await tx.insert(journalEntryLines).values({
-              orgId,
-              journalEntryId,
-              accountId: taxPayableAccount.id,
-              description: `Credit - Tax Deductions Payable (${monthNames[month - 1]} ${year})`,
-              debitAmount: '0',
-              creditAmount: totalTax.toFixed(2),
-            });
-          }
-        }
       }
 
-      // Update payroll run with journal entry ID
+      if (totalIncomeTax > 0) {
+        const incomeTaxPayable = await resolveAccount(tx, orgId, "income_tax_payable");
+        lines.push({
+          accountId: incomeTaxPayable.id,
+          description: "Income Tax Withheld Payable",
+          debit: "0",
+          credit: totalIncomeTax.toFixed(2),
+        });
+      }
+
+      if (totalProvidentFund > 0) {
+        const pfPayable = await resolveAccount(tx, orgId, "pf_payable");
+        lines.push({
+          accountId: pfPayable.id,
+          description: "Provident Fund Payable",
+          debit: "0",
+          credit: totalProvidentFund.toFixed(2),
+        });
+      }
+
+      const { journalEntryId: entryId } = await postTransaction(tx, {
+        orgId,
+        description: `Payroll for month ${month}/${year} - Total: PKR ${totalNet.toFixed(2)}`,
+        date: new Date(year, month - 1, 1),
+        referenceType: "payroll",
+        referenceId: payrollRunId,
+        sourceType: "payroll",
+        createdBy: userId,
+        lines,
+      });
+
+      journalEntryId = entryId;
+
       await tx
         .update(payrollRuns)
         .set({
@@ -806,7 +840,6 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
         })
         .where(eq(payrollRuns.id, payrollRunId));
 
-      // Audit log
       await tx.insert(auditLogs).values({
         orgId,
         userId,
@@ -827,13 +860,12 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
     };
   } catch (error) {
     captureException(error, { module: "hr-payroll", function: "generateAndApprovePayroll" });
-    return { success: false, error: "Failed to process payroll" };
+    return { success: false, error: error instanceof Error ? error.message : "Failed to process payroll" };
   }
 }
 
 // ============ Payroll Run Actions ============
 
-// Get all payroll runs
 export async function getPayrollRuns() {
   try {
     const orgId = await getCurrentOrgId();
@@ -847,12 +879,11 @@ export async function getPayrollRuns() {
 
     return { success: true, data: result };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "getPayrollRuns" });
+    captureException(error, { module: "hr-payroll", function: "getPayrollRuns" });
     return { success: false, error: "Failed to fetch payroll runs" };
   }
 }
 
-// Get payslips for a payroll run
 export async function getPayslips(payrollRunId: string) {
   try {
     const orgId = await getCurrentOrgId();
@@ -866,12 +897,11 @@ export async function getPayslips(payrollRunId: string) {
 
     return { success: true, data: result };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "getPayslips" });
+    captureException(error, { module: "hr-payroll", function: "getPayslips" });
     return { success: false, error: "Failed to fetch payslips" };
   }
 }
 
-// Get single payslip
 export async function getPayslip(id: string) {
   try {
     const orgId = await getCurrentOrgId();
@@ -887,7 +917,7 @@ export async function getPayslip(id: string) {
 
     return { success: true, data: result[0] };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "getPayslip" });
+    captureException(error, { module: "hr-payroll", function: "getPayslip" });
     return { success: false, error: "Failed to fetch payslip" };
   }
 }
@@ -895,18 +925,67 @@ export async function getPayslip(id: string) {
 // Mark payslip as paid
 export async function markPayslipPaid(id: string, paymentMethod: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    await db
-      .update(payslips)
-      .set({
-        isPaid: true,
-        paymentDate: new Date(),
-        paymentMethod,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(payslips.id, id), eq(payslips.orgId, orgId)));
+    const [payslip] = await db
+      .select()
+      .from(payslips)
+      .where(and(eq(payslips.id, id), eq(payslips.orgId, orgId)))
+      .limit(1);
+    if (!payslip) return { success: false, error: "Payslip not found" };
+    if (payslip.isPaid) return { success: false, error: "Already paid" };
+
+    const { userId } = await auth();
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(payslips)
+        .set({
+          isPaid: true,
+          paymentDate: new Date(),
+          paymentMethod,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(payslips.id, id), eq(payslips.orgId, orgId)));
+
+      const salariesPayable = await resolveAccount(tx, orgId, "salaries_payable");
+      const cashAcc = await resolveAccount(tx, orgId, "cash");
+
+      await postTransaction(tx, {
+        orgId,
+        description: `Payroll Payment - ${payslip.employeeName}`,
+        date: new Date(),
+        referenceType: "payroll_payment",
+        referenceId: id,
+        sourceType: "payroll",
+        createdBy: userId || "system",
+        lines: [
+          {
+            accountId: salariesPayable.id,
+            description: "Dr Salaries Payable",
+            debit: payslip.netSalary,
+            credit: "0",
+          },
+          {
+            accountId: cashAcc.id,
+            description: "Cr Cash",
+            debit: "0",
+            credit: payslip.netSalary,
+          },
+        ],
+      });
+
+      await tx.insert(auditLogs).values({
+        orgId,
+        userId: userId || "system",
+        action: "PAYSLIP_PAID",
+        entityType: "payslip",
+        entityId: id,
+        changes: JSON.stringify({ netSalary: payslip.netSalary, paymentMethod }),
+      });
+    });
 
     revalidatePath('/hr-payroll/reports');
     return { success: true, message: "Payslip marked as paid" };
@@ -916,7 +995,6 @@ export async function markPayslipPaid(id: string, paymentMethod: string) {
   }
 }
 
-// Get departments
 export async function getDepartments() {
   try {
     const orgId = await getCurrentOrgId();
@@ -935,8 +1013,78 @@ export async function getDepartments() {
 
     return { success: true, data: departments };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "getDepartments" });
+    captureException(error, { module: "hr-payroll", function: "getDepartments" });
     return { success: false, error: "Failed to fetch departments" };
+  }
+}
+
+// ==================== TAX SLAB CONFIGURATION ====================
+
+export interface TaxSlabInput {
+  fiscalYear: string; // e.g. "2026-27"
+  minAnnualIncome: string;
+  maxAnnualIncome?: string; // omit for the top, unbounded bracket
+  baseTax: string;
+  ratePercentage: string;
+}
+
+// Replace all slabs for a given fiscal year in one atomic operation —
+// avoids ending up with a half-old, half-new table if a save is interrupted.
+export async function saveTaxSlabs(fiscalYear: string, slabs: TaxSlabInput[]) {
+  try {
+    await requireRole(["admin", "accountant"]);
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    if (!fiscalYear || slabs.length === 0) {
+      return { success: false, error: "Fiscal year and at least one slab are required" };
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(taxSlabs)
+        .where(and(eq(taxSlabs.orgId, orgId), eq(taxSlabs.fiscalYear, fiscalYear)));
+
+      await tx.insert(taxSlabs).values(
+        slabs.map((s) => ({
+          orgId,
+          fiscalYear,
+          minAnnualIncome: s.minAnnualIncome,
+          maxAnnualIncome: s.maxAnnualIncome || null,
+          baseTax: s.baseTax,
+          ratePercentage: s.ratePercentage,
+          isActive: true,
+        })),
+      );
+    });
+
+    revalidatePath('/hr-payroll/settings/tax-slabs');
+    return { success: true, message: `Saved ${slabs.length} tax slabs for FY ${fiscalYear}` };
+  } catch (error) {
+    captureException(error, { module: "hr-payroll", function: "saveTaxSlabs" });
+    return { success: false, error: "Failed to save tax slabs" };
+  }
+}
+
+export async function getTaxSlabs(fiscalYear: string) {
+  try {
+    const orgId = await getCurrentOrgId();
+    if (!orgId) return { success: false, error: "No organization found" };
+
+    const result = await db
+      .select()
+      .from(taxSlabs)
+      .where(and(
+        eq(taxSlabs.orgId, orgId),
+        eq(taxSlabs.fiscalYear, fiscalYear),
+        eq(taxSlabs.isActive, true),
+      ))
+      .orderBy(asc(taxSlabs.minAnnualIncome));
+
+    return { success: true, data: result };
+  } catch (error) {
+    captureException(error, { module: "hr-payroll", function: "getTaxSlabs" });
+    return { success: false, error: "Failed to fetch tax slabs" };
   }
 }
 
@@ -950,16 +1098,18 @@ export interface BankFileRow {
   amount: number;
 }
 
+// FIX (2026 review): added requireRole — this exports employee bank account
+// numbers to a downloadable CSV and had no access control.
 export async function generateBankFile(payrollRunId: string): Promise<{
   success: boolean;
   data?: { csv: string; skippedCount: number; totalAmount: number };
   error?: string;
 }> {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    // Get payslips for this payroll run
     const payslipList = await db
       .select({
         employeeName: payslips.employeeName,
@@ -976,13 +1126,11 @@ export async function generateBankFile(payrollRunId: string): Promise<{
         )
       );
 
-    // Filter out employees without bank details
     const validPayslips = payslipList.filter(
       (p) => p.bankName && p.accountNumber
     );
     const skippedCount = payslipList.length - validPayslips.length;
 
-    // Generate CSV
     const headers = ["Employee Name", "Bank Name", "Account Number", "Amount"];
     const rows = validPayslips.map((p) => [
       p.employeeName,
@@ -1006,7 +1154,7 @@ export async function generateBankFile(payrollRunId: string): Promise<{
       },
     };
   } catch (error) {
-    captureException(error, { module: "hr-payroll.ts", function: "generateBankFile" });
+    captureException(error, { module: "hr-payroll", function: "generateBankFile" });
     return { success: false, error: "Failed to generate bank file" };
   }
 }

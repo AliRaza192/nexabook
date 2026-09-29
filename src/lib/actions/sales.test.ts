@@ -54,6 +54,7 @@ const mockDb = {
   insert: vi.fn(() => chainable()),
   update: vi.fn(() => chainable()),
   delete: vi.fn(() => chainable()),
+  transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(mockDb)),
   query: {},
 };
 

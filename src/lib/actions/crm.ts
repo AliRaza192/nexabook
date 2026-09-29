@@ -9,10 +9,15 @@ import {
   customers,
 } from "@/db/schema";
 import { createAuditLog } from "./audit";
-import { eq, and, or, ilike, desc, gte, lte, sql, inArray } from "drizzle-orm";
+import { eq, and, or, ilike, desc, gte, lte, sql, inArray, SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
+import { captureException } from "@/lib/error-handler";
+
+export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost';
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed' | 'reopened';
+export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 // ==================== LEADS ACTIONS ====================
 
@@ -23,7 +28,7 @@ export interface LeadFormData {
   company?: string;
   designation?: string;
   source?: string;
-  status?: 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost';
+  status?: LeadStatus;
   estimatedValue?: string;
   assignedTo?: string;
   notes?: string;
@@ -47,53 +52,36 @@ export interface LeadWithCustomer {
   convertedCustomer?: { id: string; name: string } | null;
 }
 
-// Generate lead reference number
-async function generateLeadNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ id: leads.id })
-        .from(leads)
-        .where(eq(leads.orgId, orgId))
-        .orderBy(desc(leads.createdAt))
-        .limit(1);
-
-      let nextNumber = result.length + 1;
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `LEAD-${String(nextNumber + jitter).padStart(5, '0')}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `LEAD-${String(Date.now() % 100000).padStart(5, '0')}`;
-}
-
 // Get all leads
+// FIX (2026 review): search now filters at the SQL level (was fetch-all +
+// in-memory JS filter).
 export async function getLeads(searchQuery?: string, statusFilter?: string) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const conditions = [eq(leads.orgId, orgId)];
+    const conditions: SQL[] = [eq(leads.orgId, orgId)];
 
     if (statusFilter && statusFilter !== 'all') {
-      conditions.push(eq(leads.status, statusFilter as any));
+      conditions.push(eq(leads.status, statusFilter as LeadStatus));
     }
-
-    let result = await db
-      .select()
-      .from(leads)
-      .where(conditions.length > 1 ? and(...conditions) : conditions[0])
-      .orderBy(desc(leads.createdAt));
 
     if (searchQuery) {
-      result = result.filter(lead =>
-        lead.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (lead.company && lead.company.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (lead.phone && lead.phone.includes(searchQuery))
+      conditions.push(
+        or(
+          ilike(leads.name, `%${searchQuery}%`),
+          ilike(leads.email, `%${searchQuery}%`),
+          ilike(leads.company, `%${searchQuery}%`),
+          ilike(leads.phone, `%${searchQuery}%`),
+        )!
       );
     }
+
+    const result = await db
+      .select()
+      .from(leads)
+      .where(and(...conditions))
+      .orderBy(desc(leads.createdAt));
 
     // Enrich with converted customer info — batch-fetch via inArray
     const convertedIds = result
@@ -116,7 +104,7 @@ export async function getLeads(searchQuery?: string, statusFilter?: string) {
 
     return { success: true, data: leadsWithCustomer };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getLeads" });
     return { success: false, error: "Failed to fetch leads" };
   }
 }
@@ -140,14 +128,14 @@ export async function getLeadById(leadId: string) {
       const [cust] = await db
         .select({ id: customers.id, name: customers.name })
         .from(customers)
-        .where(eq(customers.id, lead.convertedToCustomerId!))
+        .where(eq(customers.id, lead.convertedToCustomerId))
         .limit(1);
       convertedCustomer = cust || null;
     }
 
     return { success: true, data: { ...lead, convertedCustomer } };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getLeadById" });
     return { success: false, error: "Failed to fetch lead" };
   }
 }
@@ -155,6 +143,7 @@ export async function getLeadById(leadId: string) {
 // Create lead
 export async function createLead(data: LeadFormData) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -183,7 +172,7 @@ export async function createLead(data: LeadFormData) {
     await createAuditLog({ action: "LEAD_CREATED", entityType: "lead", entityId: newLead.id });
     return { success: true, data: newLead, message: "Lead created successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "createLead" });
     return { success: false, error: "Failed to create lead" };
   }
 }
@@ -220,14 +209,16 @@ export async function updateLead(leadId: string, data: Partial<LeadFormData>) {
     await createAuditLog({ action: "LEAD_UPDATED", entityType: "lead", entityId: leadId });
     return { success: true, data: updatedLead, message: "Lead updated successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "updateLead" });
     return { success: false, error: "Failed to update lead" };
   }
 }
 
 // Delete lead
+// FIX (2026 review): added requireRole — was open to any authenticated user.
 export async function deleteLead(leadId: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -240,12 +231,16 @@ export async function deleteLead(leadId: string) {
     await createAuditLog({ action: "LEAD_DELETED", entityType: "lead", entityId: leadId });
     return { success: true, message: "Lead deleted successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "deleteLead" });
     return { success: false, error: "Failed to delete lead" };
   }
 }
 
 // Convert lead to customer
+// FIX (2026 review): customer creation and lead update now happen in a
+// single transaction — previously two independent sequential writes, so a
+// failure between them could leave a customer created with the lead never
+// marked converted (and a retry would create a duplicate customer).
 export async function convertLeadToCustomer(leadId: string, customerData?: { address?: string; city?: string }) {
   try {
     const orgId = await getCurrentOrgId();
@@ -260,45 +255,47 @@ export async function convertLeadToCustomer(leadId: string, customerData?: { add
     if (!lead) return { success: false, error: "Lead not found" };
     if (lead.isConverted) return { success: false, error: "Lead is already converted" };
 
-    // Create customer from lead
-    const [newCustomer] = await db
-      .insert(customers)
-      .values({
-        orgId,
-        name: lead.name,
-        email: lead.email || undefined,
-        phone: lead.phone || undefined,
-        address: customerData?.address || lead.company || undefined,
-        city: customerData?.city || undefined,
-        balance: '0',
-        openingBalance: '0',
-      })
-      .returning();
+    const result = await db.transaction(async (tx) => {
+      const [newCustomer] = await tx
+        .insert(customers)
+        .values({
+          orgId,
+          name: lead.name,
+          email: lead.email || undefined,
+          phone: lead.phone || undefined,
+          address: customerData?.address || lead.company || undefined,
+          city: customerData?.city || undefined,
+          balance: '0',
+          openingBalance: '0',
+        })
+        .returning();
 
-    // Update lead as converted
-    const [updatedLead] = await db
-      .update(leads)
-      .set({
-        isConverted: true,
-        convertedToCustomerId: newCustomer.id,
-        status: 'won',
-      })
-      .where(eq(leads.id, leadId))
-      .returning();
+      const [updatedLead] = await tx
+        .update(leads)
+        .set({
+          isConverted: true,
+          convertedToCustomerId: newCustomer.id,
+          status: 'won',
+        })
+        .where(eq(leads.id, leadId))
+        .returning();
+
+      return { lead: updatedLead, customer: newCustomer };
+    });
 
     revalidatePath('/crm/leads');
     revalidatePath('/sales/customers');
 
     await createAuditLog({ action: "LEAD_CONVERTED", entityType: "lead", entityId: leadId });
-    return { success: true, data: { lead: updatedLead, customer: newCustomer }, message: "Lead converted to customer successfully" };
+    return { success: true, data: result, message: "Lead converted to customer successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "convertLeadToCustomer" });
     return { success: false, error: "Failed to convert lead to customer" };
   }
 }
 
 // Update lead status
-export async function updateLeadStatus(leadId: string, status: 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost') {
+export async function updateLeadStatus(leadId: string, status: LeadStatus) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
@@ -317,7 +314,7 @@ export async function updateLeadStatus(leadId: string, status: 'new' | 'contacte
     await createAuditLog({ action: "LEAD_STATUS_UPDATED", entityType: "lead", entityId: leadId });
     return { success: true, data: updatedLead, message: "Lead status updated" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "updateLeadStatus" });
     return { success: false, error: "Failed to update lead status" };
   }
 }
@@ -356,7 +353,7 @@ export async function getLeadStats() {
       data: { totalLeads, wonLeads, pipelineValue, wonThisMonth },
     };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getLeadStats" });
     return { success: false, error: "Failed to fetch lead stats" };
   }
 }
@@ -368,7 +365,7 @@ export interface TicketFormData {
   leadId?: string;
   subject: string;
   description: string;
-  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  priority?: TicketPriority;
   assignedTo?: string;
   notes?: string;
 }
@@ -388,8 +385,7 @@ async function generateTicketNumber(orgId: string): Promise<string> {
       if (result.length > 0 && result[0].ticketNumber) {
         const match = result[0].ticketNumber.match(/\d+$/);
         if (match) {
-          const lastNumber = parseInt(match[0]);
-          nextNumber = lastNumber + 1;
+          nextNumber = parseInt(match[0], 10) + 1;
         }
       }
 
@@ -403,21 +399,30 @@ async function generateTicketNumber(orgId: string): Promise<string> {
 }
 
 // Get all tickets
+// FIX (2026 review): search filtering moved to SQL (was fetch-all + JS filter).
 export async function getTickets(searchQuery?: string, statusFilter?: string, priorityFilter?: string) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const conditions = [eq(tickets.orgId, orgId)];
+    const conditions: SQL[] = [eq(tickets.orgId, orgId)];
 
     if (statusFilter && statusFilter !== 'all') {
-      conditions.push(eq(tickets.status, statusFilter as any));
+      conditions.push(eq(tickets.status, statusFilter as TicketStatus));
     }
     if (priorityFilter && priorityFilter !== 'all') {
-      conditions.push(eq(tickets.priority, priorityFilter as any));
+      conditions.push(eq(tickets.priority, priorityFilter as TicketPriority));
+    }
+    if (searchQuery) {
+      conditions.push(
+        or(
+          ilike(tickets.ticketNumber, `%${searchQuery}%`),
+          ilike(tickets.subject, `%${searchQuery}%`),
+        )!
+      );
     }
 
-    let result = await db
+    const result = await db
       .select({
         id: tickets.id,
         ticketNumber: tickets.ticketNumber,
@@ -434,20 +439,12 @@ export async function getTickets(searchQuery?: string, statusFilter?: string, pr
       .from(tickets)
       .leftJoin(customers, eq(tickets.customerId, customers.id))
       .leftJoin(leads, eq(tickets.leadId, leads.id))
-      .where(conditions.length > 1 ? and(...conditions) : conditions[0])
+      .where(and(...conditions))
       .orderBy(desc(tickets.createdAt));
-
-    if (searchQuery) {
-      result = result.filter(t =>
-        t.ticketNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (t.customer?.name && t.customer.name.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    }
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getTickets" });
     return { success: false, error: "Failed to fetch tickets" };
   }
 }
@@ -468,7 +465,7 @@ export async function getTicketById(ticketId: string) {
 
     return { success: true, data: ticket };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getTicketById" });
     return { success: false, error: "Failed to fetch ticket" };
   }
 }
@@ -476,6 +473,7 @@ export async function getTicketById(ticketId: string) {
 // Create ticket
 export async function createTicket(data: TicketFormData) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -505,13 +503,13 @@ export async function createTicket(data: TicketFormData) {
     await createAuditLog({ action: "TICKET_CREATED", entityType: "ticket", entityId: newTicket.id });
     return { success: true, data: newTicket, message: "Ticket created successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "createTicket" });
     return { success: false, error: "Failed to create ticket" };
   }
 }
 
 // Update ticket
-export async function updateTicket(ticketId: string, data: Partial<TicketFormData> & { status?: string }) {
+export async function updateTicket(ticketId: string, data: Partial<TicketFormData> & { status?: TicketStatus }) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
@@ -538,7 +536,7 @@ export async function updateTicket(ticketId: string, data: Partial<TicketFormDat
     await createAuditLog({ action: "TICKET_UPDATED", entityType: "ticket", entityId: ticketId });
     return { success: true, data: updatedTicket, message: "Ticket updated successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "updateTicket" });
     return { success: false, error: "Failed to update ticket" };
   }
 }
@@ -546,6 +544,7 @@ export async function updateTicket(ticketId: string, data: Partial<TicketFormDat
 // Delete ticket
 export async function deleteTicket(ticketId: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -558,7 +557,7 @@ export async function deleteTicket(ticketId: string) {
     await createAuditLog({ action: "TICKET_DELETED", entityType: "ticket", entityId: ticketId });
     return { success: true, message: "Ticket deleted successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "deleteTicket" });
     return { success: false, error: "Failed to delete ticket" };
   }
 }
@@ -588,7 +587,7 @@ export async function resolveTicket(ticketId: string) {
     await createAuditLog({ action: "TICKET_RESOLVED", entityType: "ticket", entityId: ticketId });
     return { success: true, data: updatedTicket, message: "Ticket resolved successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "resolveTicket" });
     return { success: false, error: "Failed to resolve ticket" };
   }
 }
@@ -616,7 +615,6 @@ export async function getTicketStats() {
       return t.resolvedAt.toDateString() === today.toDateString();
     }).length;
 
-    // Calculate average resolution time for resolved tickets
     const resolvedTickets = allTickets.filter(t => t.resolvedAt && ['resolved', 'closed'].includes(t.status));
     let avgResolutionHours = 0;
     if (resolvedTickets.length > 0) {
@@ -632,7 +630,7 @@ export async function getTicketStats() {
       data: { openTickets, resolvedToday, avgResolutionHours, totalTickets: allTickets.length },
     };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getTicketStats" });
     return { success: false, error: "Failed to fetch ticket stats" };
   }
 }
@@ -652,34 +650,14 @@ export interface CrmEventFormData {
   notes?: string;
 }
 
-// Generate event number
-async function generateEventNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ id: crmEvents.id })
-        .from(crmEvents)
-        .where(eq(crmEvents.orgId, orgId))
-        .orderBy(desc(crmEvents.createdAt))
-        .limit(1);
-
-      let nextNumber = result.length + 1;
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `EVT-${String(nextNumber + jitter).padStart(5, '0')}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `EVT-${String(Date.now() % 100000).padStart(5, '0')}`;
-}
-
 // Get all CRM events
+// FIX (2026 review): search moved to SQL level.
 export async function getCrmEvents(searchQuery?: string, typeFilter?: string, statusFilter?: string, dateRange?: { from: Date; to: Date }) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const conditions = [eq(crmEvents.orgId, orgId)];
+    const conditions: SQL[] = [eq(crmEvents.orgId, orgId)];
 
     if (typeFilter && typeFilter !== 'all') {
       conditions.push(eq(crmEvents.eventType, typeFilter));
@@ -688,15 +666,19 @@ export async function getCrmEvents(searchQuery?: string, typeFilter?: string, st
       conditions.push(eq(crmEvents.status, statusFilter));
     }
     if (dateRange) {
+      conditions.push(gte(crmEvents.scheduledAt, dateRange.from));
+      conditions.push(lte(crmEvents.scheduledAt, dateRange.to));
+    }
+    if (searchQuery) {
       conditions.push(
-        and(
-          gte(crmEvents.scheduledAt, dateRange.from),
-          lte(crmEvents.scheduledAt, dateRange.to)
-        ) as any
+        or(
+          ilike(crmEvents.title, `%${searchQuery}%`),
+          ilike(crmEvents.location, `%${searchQuery}%`),
+        )!
       );
     }
 
-    let result = await db
+    const result = await db
       .select({
         id: crmEvents.id,
         title: crmEvents.title,
@@ -715,20 +697,12 @@ export async function getCrmEvents(searchQuery?: string, typeFilter?: string, st
       .from(crmEvents)
       .leftJoin(customers, eq(crmEvents.customerId, customers.id))
       .leftJoin(leads, eq(crmEvents.leadId, leads.id))
-      .where(conditions.length > 1 ? and(...conditions) : conditions[0])
+      .where(and(...conditions))
       .orderBy(desc(crmEvents.scheduledAt));
-
-    if (searchQuery) {
-      result = result.filter(e =>
-        e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (e.customer?.name && e.customer.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (e.location && e.location.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    }
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getCrmEvents" });
     return { success: false, error: "Failed to fetch events" };
   }
 }
@@ -749,7 +723,7 @@ export async function getCrmEventById(eventId: string) {
 
     return { success: true, data: event };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getCrmEventById" });
     return { success: false, error: "Failed to fetch event" };
   }
 }
@@ -761,6 +735,7 @@ export async function createCrmEvent(data: CrmEventFormData) {
     if (!orgId) return { success: false, error: "No organization found" };
 
     if (!data.title) return { success: false, error: "Title is required" };
+    if (!data.eventType) return { success: false, error: "Event type is required" };
 
     const { userId } = await auth();
 
@@ -788,7 +763,7 @@ export async function createCrmEvent(data: CrmEventFormData) {
     await createAuditLog({ action: "EVENT_CREATED", entityType: "event", entityId: newEvent.id });
     return { success: true, data: newEvent, message: "Event created successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "createCrmEvent" });
     return { success: false, error: "Failed to create event" };
   }
 }
@@ -824,7 +799,7 @@ export async function updateCrmEvent(eventId: string, data: Partial<CrmEventForm
     await createAuditLog({ action: "EVENT_UPDATED", entityType: "event", entityId: eventId });
     return { success: true, data: updatedEvent, message: "Event updated successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "updateCrmEvent" });
     return { success: false, error: "Failed to update event" };
   }
 }
@@ -832,6 +807,7 @@ export async function updateCrmEvent(eventId: string, data: Partial<CrmEventForm
 // Delete CRM event
 export async function deleteCrmEvent(eventId: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -844,7 +820,7 @@ export async function deleteCrmEvent(eventId: string) {
     await createAuditLog({ action: "EVENT_DELETED", entityType: "event", entityId: eventId });
     return { success: true, message: "Event deleted successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "deleteCrmEvent" });
     return { success: false, error: "Failed to delete event" };
   }
 }
@@ -862,34 +838,14 @@ export interface CrmCallFormData {
   followUpDate?: Date;
 }
 
-// Generate call number
-async function generateCallNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ id: crmCalls.id })
-        .from(crmCalls)
-        .where(eq(crmCalls.orgId, orgId))
-        .orderBy(desc(crmCalls.createdAt))
-        .limit(1);
-
-      let nextNumber = result.length + 1;
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `CALL-${String(nextNumber + jitter).padStart(5, '0')}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `CALL-${String(Date.now() % 100000).padStart(5, '0')}`;
-}
-
 // Get all CRM calls
+// FIX (2026 review): search moved to SQL level.
 export async function getCrmCalls(searchQuery?: string, typeFilter?: string, outcomeFilter?: string, dateRange?: { from: Date; to: Date }) {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const conditions = [eq(crmCalls.orgId, orgId)];
+    const conditions: SQL[] = [eq(crmCalls.orgId, orgId)];
 
     if (typeFilter && typeFilter !== 'all') {
       conditions.push(eq(crmCalls.callType, typeFilter));
@@ -898,15 +854,19 @@ export async function getCrmCalls(searchQuery?: string, typeFilter?: string, out
       conditions.push(eq(crmCalls.outcome, outcomeFilter));
     }
     if (dateRange) {
+      conditions.push(gte(crmCalls.createdAt, dateRange.from));
+      conditions.push(lte(crmCalls.createdAt, dateRange.to));
+    }
+    if (searchQuery) {
       conditions.push(
-        and(
-          gte(crmCalls.createdAt, dateRange.from),
-          lte(crmCalls.createdAt, dateRange.to)
-        ) as any
+        or(
+          ilike(crmCalls.subject, `%${searchQuery}%`),
+          ilike(crmCalls.summary, `%${searchQuery}%`),
+        )!
       );
     }
 
-    let result = await db
+    const result = await db
       .select({
         id: crmCalls.id,
         callType: crmCalls.callType,
@@ -923,20 +883,12 @@ export async function getCrmCalls(searchQuery?: string, typeFilter?: string, out
       .from(crmCalls)
       .leftJoin(customers, eq(crmCalls.customerId, customers.id))
       .leftJoin(leads, eq(crmCalls.leadId, leads.id))
-      .where(conditions.length > 1 ? and(...conditions) : conditions[0])
+      .where(and(...conditions))
       .orderBy(desc(crmCalls.createdAt));
-
-    if (searchQuery) {
-      result = result.filter(c =>
-        c.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.customer?.name && c.customer.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (c.summary && c.summary.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    }
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getCrmCalls" });
     return { success: false, error: "Failed to fetch calls" };
   }
 }
@@ -957,7 +909,7 @@ export async function getCrmCallById(callId: string) {
 
     return { success: true, data: call };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getCrmCallById" });
     return { success: false, error: "Failed to fetch call" };
   }
 }
@@ -969,6 +921,7 @@ export async function createCrmCall(data: CrmCallFormData) {
     if (!orgId) return { success: false, error: "No organization found" };
 
     if (!data.subject) return { success: false, error: "Subject is required" };
+    if (!data.callType) return { success: false, error: "Call type is required" };
 
     const { userId } = await auth();
 
@@ -994,7 +947,7 @@ export async function createCrmCall(data: CrmCallFormData) {
     await createAuditLog({ action: "CALL_CREATED", entityType: "call", entityId: newCall.id });
     return { success: true, data: newCall, message: "Call logged successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "createCrmCall" });
     return { success: false, error: "Failed to log call" };
   }
 }
@@ -1028,7 +981,7 @@ export async function updateCrmCall(callId: string, data: Partial<CrmCallFormDat
     await createAuditLog({ action: "CALL_UPDATED", entityType: "call", entityId: callId });
     return { success: true, data: updatedCall, message: "Call updated successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "updateCrmCall" });
     return { success: false, error: "Failed to update call" };
   }
 }
@@ -1036,6 +989,7 @@ export async function updateCrmCall(callId: string, data: Partial<CrmCallFormDat
 // Delete CRM call
 export async function deleteCrmCall(callId: string) {
   try {
+    await requireRole(["admin", "manager"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -1048,7 +1002,7 @@ export async function deleteCrmCall(callId: string) {
     await createAuditLog({ action: "CALL_DELETED", entityType: "call", entityId: callId });
     return { success: true, message: "Call deleted successfully" };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "deleteCrmCall" });
     return { success: false, error: "Failed to delete call" };
   }
 }
@@ -1088,14 +1042,13 @@ export async function getCallStats() {
       data: { totalCallsToday, avgDuration, connectedRate },
     };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getCallStats" });
     return { success: false, error: "Failed to fetch call stats" };
   }
 }
 
 // ==================== CUSTOMER/LEAD DROPDOWN ACTIONS ====================
 
-// Get customers for dropdown
 export async function getCustomersForDropdown() {
   try {
     const orgId = await getCurrentOrgId();
@@ -1109,12 +1062,11 @@ export async function getCustomersForDropdown() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getCustomersForDropdown" });
     return { success: false, error: "Failed to fetch customers" };
   }
 }
 
-// Get leads for dropdown
 export async function getLeadsForDropdown() {
   try {
     const orgId = await getCurrentOrgId();
@@ -1128,7 +1080,7 @@ export async function getLeadsForDropdown() {
 
     return { success: true, data: result };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getLeadsForDropdown" });
     return { success: false, error: "Failed to fetch leads" };
   }
 }
@@ -1164,7 +1116,6 @@ export async function getCrmDashboardData(): Promise<{ success: boolean; data?: 
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    // Get all leads
     const allLeads = await db
       .select({
         id: leads.id,
@@ -1187,7 +1138,6 @@ export async function getCrmDashboardData(): Promise<{ success: boolean; data?: 
 
     const recentLeads = allLeads.slice(0, 5);
 
-    // Get open tickets
     const openTicketsResult = await db
       .select({ id: tickets.id })
       .from(tickets)
@@ -1197,7 +1147,6 @@ export async function getCrmDashboardData(): Promise<{ success: boolean; data?: 
       ));
     const openTickets = openTicketsResult.length;
 
-    // Get scheduled events (upcoming)
     const now = new Date();
     const upcomingEventsResult = await db
       .select({
@@ -1227,7 +1176,6 @@ export async function getCrmDashboardData(): Promise<{ success: boolean; data?: 
         gte(crmEvents.scheduledAt, now)
       ));
 
-    // Tickets by priority
     const allTickets = await db
       .select({ priority: tickets.priority })
       .from(tickets)
@@ -1257,7 +1205,7 @@ export async function getCrmDashboardData(): Promise<{ success: boolean; data?: 
       },
     };
   } catch (error) {
-    console.error("Error in crm.ts:", error);
+    captureException(error, { module: "crm", function: "getCrmDashboardData" });
     return { success: false, error: "Failed to fetch CRM dashboard data" };
   }
 }

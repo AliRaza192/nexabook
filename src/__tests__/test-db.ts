@@ -16,12 +16,17 @@ const deferredTriggerSql = fs.readFileSync(
   path.join(__dirname, "../../migrations/0002_deferred_journal_balance_trigger.sql"),
   "utf8"
 );
+const posShiftsSql = fs.readFileSync(
+  path.join(__dirname, "../../migrations/0006_pos_shifts_table.sql"),
+  "utf8"
+);
 
 export async function createTestDb() {
   const client = await PGlite.create();
   await client.exec(schemaSql);
   await client.exec(triggerSql);
   await client.exec(deferredTriggerSql);
+  await client.exec(posShiftsSql);
 
   const db = drizzle(client, { schema });
 
@@ -47,7 +52,8 @@ export async function createTestDb() {
     ('${revAccId}','${orgId}','4000','Sales Revenue','income','sales_revenue'),
     ('${arAccId}','${orgId}','1100','Accounts Receivable','asset','accounts_receivable'),
     ('${apAccId}','${orgId}','2000','Accounts Payable','liability','accounts_payable'),
-    ('${taxAccId}','${orgId}','2100','Tax Payable','liability','tax_payable')
+    ('${taxAccId}','${orgId}','2100','Tax Payable','liability','tax_payable'),
+    ('00000000-0000-0000-0000-000000000017','${orgId}','3010','Opening Balance Equity','equity','opening_balance_equity')
   `);
 
   await client.query(`INSERT INTO customers (id, org_id, name) VALUES ('${custId}','${orgId}','Walk-in Customer')`);

@@ -13,7 +13,7 @@ import {
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 import { validateJournalBalance } from "../accounting";
 
 // ==========================================
@@ -265,6 +265,7 @@ export async function updateStockCountItems(
 
 export async function completeStockCount(stockCountId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 

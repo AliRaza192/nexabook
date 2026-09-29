@@ -109,7 +109,30 @@ export const organizations = pgTable('organizations', {
   stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
   subscriptionStatus: varchar('subscription_status', { length: 50 }).default('inactive'),
   subscriptionEndsAt: timestamp('subscription_ends_at'),
+
+  // EOBI is computed on the government-notified minimum wage (org-configurable
+  // per province/year), never on basic salary.
+  eobiMinimumWage: decimal('eobi_minimum_wage', { precision: 12, scale: 2 }).notNull().default('40700'),
 });
+
+// Configurable income tax slabs — replaces the hardcoded (pre-July-2026) table.
+// Seed from the official FBR/Finance Act document for the org's fiscal year.
+export const taxSlabs = pgTable('tax_slabs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  fiscalYear: varchar('fiscal_year', { length: 10 }).notNull(),
+  minAnnualIncome: decimal('min_annual_income', { precision: 14, scale: 2 }).notNull(),
+  maxAnnualIncome: decimal('max_annual_income', { precision: 14, scale: 2 }),
+  baseTax: decimal('base_tax', { precision: 14, scale: 2 }).notNull().default('0'),
+  ratePercentage: decimal('rate_percentage', { precision: 5, scale: 2 }).notNull(),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  unique('uq_tax_slab_org_year_income').on(table.orgId, table.fiscalYear, table.minAnnualIncome),
+]);
+
+export type TaxSlab = typeof taxSlabs.$inferSelect;
+export type NewTaxSlab = typeof taxSlabs.$inferInsert;
 
 export const organizationsRelations = relations(organizations, ({ one, many }) => ({
   parent: one(organizations, {
@@ -243,7 +266,9 @@ subType: varchar('sub_type', { length: 50 }),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueOrgSubType: unique('uq_coa_org_subtype').on(table.orgId, table.subType),
+}));
 
 // Budgets
 export const budgets = pgTable("budgets", {
@@ -272,7 +297,13 @@ export const productCategories = pgTable('product_categories', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  // NEW: prevents duplicate category names per org at the DB level.
+  // Trade-off: soft-deleted (isActive=false) rows still reserve the name.
+  // A partial index (WHERE is_active) would avoid that but needs raw SQL;
+  // flagged as a follow-up rather than silently engineered in here.
+  uniqueOrgName: unique('uq_category_org_name').on(table.orgId, table.name),
+}));
 
 // Price Lists
 export const priceLists = pgTable("price_lists", {
@@ -320,8 +351,14 @@ export const warehouses = pgTable('warehouses', {
 });
 
 // Warehouse Stock
+// FIX (2026 review): added orgId — this table had no tenant scoping at all,
+// meaning any authenticated user who knew/guessed a warehouseId could read
+// or (via the app layer) influence another org's stock levels. All queries
+// against this table must now filter on orgId directly, not rely solely on
+// an implicit join through warehouses.
 export const warehouseStock = pgTable('warehouse_stock', {
   id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
   warehouseId: uuid('warehouse_id').references(() => warehouses.id).notNull(),
   productId: uuid('product_id').references(() => products.id).notNull(),
   quantity: decimal('quantity', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -390,7 +427,13 @@ export const products = pgTable('products', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  // NEW: prevents duplicate SKUs per org — addProduct() previously only did
+  // an application-level check-then-insert, which is a race condition.
+  // Trade-off: soft-deleted (isActive=false) products still reserve the SKU
+  // (see productCategories note above — same rationale).
+  uniqueOrgSku: unique('uq_product_org_sku').on(table.orgId, table.sku),
+}));
 
 // UOM Conversions
 export const uomConversions = pgTable('uom_conversions', {
@@ -419,8 +462,12 @@ export const stockTransfers = pgTable('stock_transfers', {
 });
 
 // Stock Transfer Items
+// FIX (2026 review): added orgId for consistency with every other line-item
+// table in this schema (invoiceItems, orderItems, grnItems, etc. all have
+// it). Previously this was the only line-item table without it.
 export const stockTransferItems = pgTable('stock_transfer_items', {
   id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
   transferId: uuid('transfer_id').references(() => stockTransfers.id).notNull(),
   productId: uuid('product_id').references(() => products.id).notNull(),
   uomId: uuid('uom_id').references(() => uoms.id),
@@ -556,7 +603,9 @@ export const customers = pgTable('customers', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueOrgName: unique('uq_customer_org_name').on(table.orgId, table.name),
+}));
 
 // Product Attributes (custom fields like Size, Color, Weight)
 export const productAttributes = pgTable('product_attributes', {
@@ -742,7 +791,7 @@ export const employees = pgTable('employees', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').references(() => organizations.id).notNull(),
   userId: varchar('user_id', { length: 255 }), // Links to profile if user has account
-  employeeCode: varchar('employee_code', { length: 50 }).notNull().unique(),
+  employeeCode: varchar('employee_code', { length: 50 }).notNull(),
   fullName: varchar('full_name', { length: 255 }).notNull(),
   email: varchar('email', { length: 255 }),
   phone: varchar('phone', { length: 20 }),
@@ -772,7 +821,9 @@ export const employees = pgTable('employees', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueOrgEmployeeCode: unique('uq_employee_org_code').on(table.orgId, table.employeeCode),
+}));
 
 // Attendance
 export const attendance = pgTable('attendance', {
@@ -810,7 +861,9 @@ export const payrollRuns = pgTable('payroll_runs', {
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueOrgMonthYear: unique('uq_payroll_run_org_month_year').on(table.orgId, table.month, table.year),
+}));
 
 // Payslips
 export const payslips = pgTable('payslips', {
@@ -912,6 +965,46 @@ export const journalEntries = pgTable('journal_entries', {
 }, (table) => ({
   uniqueEntryNumber: unique('uq_journal_entries_entry_number').on(table.orgId, table.entryNumber),
 }));
+
+// ==========================================
+// POS SHIFTS (dedicated table — was previously
+// jury-rigged into journalEntries, which caused a
+// UUID-vs-Clerk-string type mismatch and made the
+// PosShift interface's fields unqueryable)
+// ==========================================
+export const posShiftStatusEnum = pgEnum('pos_shift_status', ['open', 'closed']);
+
+export const posShifts = pgTable('pos_shifts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').references(() => organizations.id).notNull(),
+  profileId: uuid('profile_id').references(() => profiles.id).notNull(),
+  openingAmount: decimal('opening_amount', { precision: 12, scale: 2 }).notNull().default('0'),
+  closingAmount: decimal('closing_amount', { precision: 12, scale: 2 }),
+  openingTime: timestamp('opening_time').notNull().defaultNow(),
+  closingTime: timestamp('closing_time'),
+  expectedCash: decimal('expected_cash', { precision: 12, scale: 2 }),
+  actualCash: decimal('actual_cash', { precision: 12, scale: 2 }),
+  variance: decimal('variance', { precision: 12, scale: 2 }),
+  status: posShiftStatusEnum('status').notNull().default('open'),
+  openingJournalEntryId: uuid('opening_journal_entry_id').references(() => journalEntries.id),
+  closingJournalEntryId: uuid('closing_journal_entry_id').references(() => journalEntries.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const posShiftsRelations = relations(posShifts, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [posShifts.orgId],
+    references: [organizations.id],
+  }),
+  profile: one(profiles, {
+    fields: [posShifts.profileId],
+    references: [profiles.id],
+  }),
+}));
+
+export type PosShift = typeof posShifts.$inferSelect;
+export type NewPosShift = typeof posShifts.$inferInsert;
 
 // ==========================================
 // TAX RATES TABLE
@@ -1497,7 +1590,11 @@ export const deliveryNotes = pgTable('delivery_notes', {
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  // NEW — was missing entirely; app-level retry+jitter numbering had no
+  // constraint to actually catch a collision against.
+  uniqueDeliveryNumber: unique('uq_delivery_note_org_number').on(table.orgId, table.deliveryNumber),
+}));
 
 // Delivery Note Items
 export const deliveryNoteItems = pgTable('delivery_note_items', {
@@ -1565,7 +1662,9 @@ export const salesReturns = pgTable('sales_returns', {
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueReturnNumber: unique('uq_sales_return_org_number').on(table.orgId, table.returnNumber),
+}));
 
 // Sales Return Items
 export const salesReturnItems = pgTable('sales_return_items', {
@@ -1671,7 +1770,9 @@ export const purchaseReturns = pgTable('purchase_returns', {
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueReturnNumber: unique('uq_purchase_return_org_number').on(table.orgId, table.returnNumber),
+}));
 
 // Purchase Return Items
 export const purchaseReturnItems = pgTable('purchase_return_items', {
@@ -1703,7 +1804,9 @@ export const customerPayments = pgTable('customer_payments', {
   journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniquePaymentNumber: unique('uq_customer_payment_org_number').on(table.orgId, table.paymentNumber),
+}));
 
 // Customer Payment Allocations (Settlement)
 export const customerPaymentAllocations = pgTable('customer_payment_allocations', {
@@ -1729,7 +1832,9 @@ export const vendorPayments = pgTable('vendor_payments', {
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniquePaymentNumber: unique('uq_vendor_payment_org_number').on(table.orgId, table.paymentNumber),
+}));
 
 // Vendor Payment Allocations (Settlement)
 export const vendorPaymentAllocations = pgTable('vendor_payment_allocations', {
@@ -1758,7 +1863,9 @@ export const settlements = pgTable('settlements', {
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueSettlementNumber: unique('uq_settlement_org_number').on(table.orgId, table.settlementNumber),
+}));
 
 // Settlement Lines
 export const settlementLines = pgTable('settlement_lines', {
@@ -1788,6 +1895,7 @@ export const bankAccounts = pgTable('bank_accounts', {
   branchName: varchar('branch_name', { length: 150 }),
   bankName: varchar('bank_name', { length: 150 }),
   accountType: varchar('account_type', { length: 30 }).notNull().default('checking'), // checking, savings, cash
+  coaAccountId: uuid('coa_account_id').references((): any => chartOfAccounts.id),
   openingBalance: decimal('opening_balance', { precision: 14, scale: 2 }).notNull().default('0'),
   currentBalance: decimal('current_balance', { precision: 14, scale: 2 }).notNull().default('0'),
   currency: varchar('currency', { length: 10 }).default('PKR'),
@@ -1798,7 +1906,9 @@ export const bankAccounts = pgTable('bank_accounts', {
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueOrgAccountNumber: unique('uq_bank_account_org_number').on(table.orgId, table.accountNumber),
+}));
 
 // Bank Statements (for reconciliation)
 export const bankStatements = pgTable('bank_statements', {
@@ -1882,7 +1992,9 @@ export const bankDeposits = pgTable('bank_deposits', {
   approvedAt: timestamp('approved_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueDepositNumber: unique('uq_bank_deposit_org_number').on(table.orgId, table.depositNumber),
+}));
 
 // Funds Transfers
 export const fundsTransfers = pgTable('funds_transfers', {
@@ -1901,7 +2013,9 @@ export const fundsTransfers = pgTable('funds_transfers', {
   approvedAt: timestamp('approved_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueTransferNumber: unique('uq_funds_transfer_org_number').on(table.orgId, table.transferNumber),
+}));
 
 // Other Collections & Payments (Misc Contacts)
 export const miscContacts = pgTable('misc_contacts', {
@@ -1921,7 +2035,9 @@ export const miscContacts = pgTable('misc_contacts', {
   approvedAt: timestamp('approved_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueReferenceNumber: unique('uq_misc_contact_org_number').on(table.orgId, table.referenceNumber),
+}));
 
 // ==========================================
 // FIXED ASSETS TABLES
@@ -2049,7 +2165,9 @@ export const stockCounts = pgTable('stock_counts', {
   completedBy: varchar('completed_by', { length: 255 }),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueCountNumber: unique('uq_stock_count_org_number').on(table.orgId, table.countNumber),
+}));
 
 // Stock Count Items (Lines)
 export const stockCountItems = pgTable('stock_count_items', {
@@ -2111,7 +2229,9 @@ export const creditDebitNotes = pgTable('credit_debit_notes', {
   approvedAt: timestamp('approved_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueNoteNumber: unique('uq_credit_debit_note_org_number').on(table.orgId, table.noteNumber),
+}));
 
 // Credit/Debit Note Line Items
 export const creditDebitNoteLines = pgTable('credit_debit_note_lines', {
@@ -2153,7 +2273,9 @@ export const pdcInstruments = pgTable('pdc_instruments', {
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueInstrumentNumber: unique('uq_pdc_instrument_org_number').on(table.orgId, table.instrumentNumber),
+}));
 
 // ==========================================
 // OTHER CONTACT SETTLEMENT TABLES
@@ -2217,7 +2339,9 @@ export const stockAdjustments = pgTable('stock_adjustments', {
   approvedAt: timestamp('approved_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueAdjustmentNumber: unique('uq_stock_adjustment_org_number').on(table.orgId, table.adjustmentNumber),
+}));
 
 // Stock Adjustment Lines
 export const stockAdjustmentLines = pgTable('stock_adjustment_lines', {
@@ -2872,122 +2996,23 @@ export const fiscalPeriods = pgTable('fiscal_periods', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  uniqueOrgDateRange: unique('uq_fiscal_period_org_dates').on(table.orgId, table.startDate, table.endDate),
+}));
 
 export const fiscalPeriodEnum = pgEnum('fiscal_period_status', ['open', 'locked']);
 
-// Export complete schema
-export const schema = {
-  organizations,
-  organizationsRelations,
-  profiles,
-  chartOfAccounts,
-  productCategories,
-  products,
-  customers,
-  invoices,
-  invoiceItems,
-  saleOrders,
-  orderItems,
-  employees,
-  attendance,
-  payrollRuns,
-  payslips,
-  auditLogs,
-  journalEntries,
-  journalEntryLines,
-  vendors,
-  purchaseInvoices,
-  purchaseItems,
-  expenses,
-  manufacturingBoms,
-  bomItems,
-  jobOrders,
-  jobOrderComponents,
-  // CRM
-  leads,
-  tickets,
-  crmEvents,
-  crmCalls,
-  // Sales
-  quotations,
-  quotationItems,
-  deliveryNotes,
-  deliveryNoteItems,
-  recurringInvoices,
-  recurringInvoiceItems,
-  salesReturns,
-  salesReturnItems,
-  // Purchases
-  purchaseOrders,
-  purchaseOrderItems,
-  goodReceivingNotes,
-  grnItems,
-  purchaseReturns,
-  purchaseReturnItems,
-  // Payments & Settlements
-  customerPayments,
-  customerPaymentAllocations,
-  vendorPayments,
-  vendorPaymentAllocations,
-  settlements,
-  settlementLines,
-  // Banking & Advanced Accounts
-  bankAccounts,
-  bankStatements,
-  bankConnections,
-  bankConnectionsRelations,
-  bankDeposits,
-  fundsTransfers,
-  miscContacts,
-  creditDebitNotes,
-  creditDebitNoteLines,
-  pdcInstruments,
-  miscContactSettlements,
-  // Fixed Assets
-  fixedAssets,
-  depreciationLogs,
-  fixedAssetsRelations,
-  depreciationLogsRelations,
-  // Leave Management
-  leaveTypes,
-  leaveApplications,
-  leaveTypesRelations,
-  leaveApplicationsRelations,
-  // Physical Stock Count
-  stockCounts,
-  stockCountItems,
-  stockCountsRelations,
-  stockCountItemsRelations,
-  // Inventory Depth
-  stockMovements,
-  stockAdjustments,
-  stockAdjustmentLines,
-  stockValuationLogs,
-  // Product Attributes
-  productAttributes,
-  productAttributesRelations,
-  // Cost Centers
-  costCenters,
-  costCentersRelations,
-  // Sales Tax Returns
-  salesTaxReturns,
-  salesTaxReturnsRelations,
-  // Webhooks
-  webhookEndpoints,
-  webhookDeliveries,
-  webhookEndpointsRelations,
-  webhookDeliveriesRelations,
-  // Project Management
-  projects,
-  projectsRelations,
-  tasks,
-  tasksRelations,
-  timesheets,
-  timesheetsRelations,
-  fiscalPeriods,
-};
-
+// NOTE (2026 review): the previous inline `export const schema = {...}` object
+// that used to live here has been removed. It was dead code — confirmed via
+// src/db/index.ts, which uses `import * as schema from './schema'` (the
+// auto-generated namespace object), never this hand-maintained one. The
+// hand-maintained version was missing 50+ tables and several relations
+// (taxRates, budgets, priceLists, uoms, warehouses, warehouseStock,
+// productBatches, serialNumbers, stockTransfers, exchangeRates,
+// paymentTransactions, chatMessages, digitalFteProducts, and more), which
+// would have silently broken relational queries (`db.query.x.findMany`) had
+// anything actually been consuming it. Nothing in the app referenced it, so
+// removing it is a safe cleanup, not a behavior change.
 
 export const journalEntriesRelations = relations(journalEntries, ({ one, many }) => ({
   organization: one(organizations, {

@@ -3,7 +3,7 @@
 import { db } from "@/db";
 import { exchangeRates } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 
 export interface ExchangeRateFormData {
   fromCurrency: string;
@@ -55,6 +55,7 @@ export async function getExchangeRate(fromCurrency: string, date?: string) {
 
 export async function createExchangeRate(data: ExchangeRateFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 

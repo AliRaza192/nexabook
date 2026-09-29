@@ -35,6 +35,19 @@ export async function POST(request: NextRequest) {
       if (!inv || inv.status === "paid" || inv.status === "cancelled") {
         return NextResponse.json({ success: false, error: "Invoice is not payable" }, { status: 400 });
       }
+
+      const invoiceBalance = parseFloat(inv.balanceAmount || "0");
+      const requestedAmount = parseFloat(amount.toString());
+      if (requestedAmount > invoiceBalance || requestedAmount <= 0) {
+        return NextResponse.json(
+          { success: false, error: `Invalid amount. Outstanding balance: Rs. ${invoiceBalance.toFixed(2)}` },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (!invoiceId && parseFloat(amount.toString()) <= 0) {
+      return NextResponse.json({ success: false, error: "Amount must be greater than zero" }, { status: 400 });
     }
 
     const orderRef = `PORTAL-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

@@ -8,7 +8,7 @@ import {
 import { eq, and, desc, ilike, or, asc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 import { validateJournalBalance } from "../accounting";
 import { checkPeriodLocked } from "./fiscal-periods";
 
@@ -233,6 +233,7 @@ export async function getStockAdjustmentById(adjustmentId: string) {
 
 export async function addStockAdjustment(data: StockAdjustmentFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -295,6 +296,7 @@ export async function addStockAdjustment(data: StockAdjustmentFormData) {
 
 export async function approveStockAdjustment(adjustmentId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 

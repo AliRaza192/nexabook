@@ -176,6 +176,9 @@ describe("W4-GATE: Wave 4 functional regression tests", () => {
       `INSERT INTO tax_rates (id, org_id, name, rate, tax_type, is_active) VALUES ('${U.tax1}','${ids.orgId}','GST 17%','17','GST',true)`
     );
     await db.execute(
+      `INSERT INTO pos_shifts (id, org_id, profile_id, opening_amount, status) VALUES ('${U.shiftJe2}','${ids.orgId}','${ids.profileId}','0','open')`
+    );
+    await db.execute(
       `INSERT INTO journal_entries (id, org_id, entry_number, entry_date, status, reference_type, reference_id, description) VALUES ('${U.shiftJe2}','${ids.orgId}','JE-SHIFT-W4-2','2026-08-31','posted','pos_shift','${ids.profileId}','open')`
     );
     await db.execute(

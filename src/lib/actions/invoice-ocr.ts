@@ -190,9 +190,10 @@ export async function processMultipleInvoiceImages(
 export async function saveExtractedInvoice(
   extractedData: ExtractedInvoiceData,
   vendorId: string,
-  orgId: string
 ): Promise<{ success: boolean; invoiceId?: string; error?: string }> {
   try {
+  const orgId = await getCurrentOrgId();
+  if (!orgId) return { success: false, error: "No organization found" };
   // Create purchase invoice
   const [invoice] = await db
     .insert(purchaseInvoices)

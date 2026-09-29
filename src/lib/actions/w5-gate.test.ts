@@ -136,6 +136,9 @@ describe("W5-GATE: N+1 query batch regression tests", () => {
 
     const shiftJeId = hexUuid("c10000", 0);
     await db.execute(
+      `INSERT INTO pos_shifts (id, org_id, profile_id, opening_amount, status, opening_time) VALUES ('${shiftJeId}','${ids.orgId}','${ids.profileId}','0','open','2026-08-31 09:00:00')`
+    );
+    await db.execute(
       `INSERT INTO journal_entries (id, org_id, entry_number, entry_date, status, reference_type, reference_id, description) VALUES ('${shiftJeId}','${ids.orgId}','JE-SHIFT-W5','2026-08-31','posted','pos_shift','${ids.profileId}','open')`
     );
 

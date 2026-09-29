@@ -21,6 +21,7 @@ import {
   getMiscContacts, addMiscContact, approveMiscContact,
   createContraEntry,
   type BankAccountFormData, type BankDepositFormData, type FundsTransferFormData, type MiscContactFormData,
+  type MiscContactType, type PaymentMethod,
 } from "@/lib/actions/banking";
 import { getBankAccounts as getAccountsForDropdown } from "@/lib/actions/banking";
 
@@ -140,10 +141,10 @@ export default function BankingPage() {
   const handleAddMiscContact = async (formData: FormData) => {
     setSubmitting(true);
     const data: MiscContactFormData = {
-      contactType: formData.get("contactType") as string,
+      contactType: formData.get("contactType") as MiscContactType,
       partyName: formData.get("partyName") as string,
       amount: formData.get("amount") as string,
-      paymentMethod: formData.get("paymentMethod") as string,
+      paymentMethod: formData.get("paymentMethod") as PaymentMethod,
       bankAccountId: formData.get("bankAccountId") as string,
       transactionDate: formData.get("transactionDate") as string,
       reference: formData.get("reference") as string,

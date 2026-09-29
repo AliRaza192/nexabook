@@ -3,7 +3,7 @@
 import { db } from "@/db";
 import { costCenters, journalEntryLines, journalEntries, chartOfAccounts } from "@/db/schema";
 import { eq, and, sql, gte, lte } from "drizzle-orm";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "./audit";
 
@@ -51,6 +51,7 @@ export async function createCostCenter(data: {
   description?: string;
 }) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -75,6 +76,7 @@ export async function updateCostCenter(id: string, data: {
   isActive?: boolean;
 }) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 

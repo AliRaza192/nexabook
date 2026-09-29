@@ -29,10 +29,20 @@ const chainable = () => {
     orderBy: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
     values: vi.fn().mockReturnThis(),
-    returning: vi.fn().mockResolvedValue([]),
+    returning: vi.fn().mockResolvedValue([{ id: "je_test_1" }]),
     onConflictDoNothing: vi.fn().mockReturnThis(),
     groupBy: vi.fn().mockReturnThis(),
-    then: vi.fn((resolve: any) => resolve([])),
+    then: vi.fn((resolve: any) =>
+      resolve([
+        {
+          id: "payslip_123",
+          orgId: "org_A",
+          isPaid: false,
+          netSalary: "50000",
+          employeeName: "Test Employee",
+        },
+      ])
+    ),
   };
   return self;
 };
@@ -43,6 +53,7 @@ const mockDb = {
   update: vi.fn(() => chainable()),
   delete: vi.fn(() => chainable()),
   query: {},
+  transaction: vi.fn(async (fn: any) => fn(mockDb)),
 };
 
 vi.mock("@/db", () => ({ db: mockDb }));

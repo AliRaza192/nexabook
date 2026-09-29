@@ -14,7 +14,7 @@ import {
   reconciliationPatterns,
 } from "@/db/schema";
 import { eq, and, desc, gte, lte, sql, ilike } from "drizzle-orm";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 import { calculateKeywordOverlap, matchWithPatterns } from "@/lib/bank-matching";
 import { revalidatePath } from "next/cache";
 
@@ -66,6 +66,7 @@ export async function createBankStatement(data: {
   lines: Omit<StatementLine, "id" | "matched" | "matchedTransactionId" | "matchedType">[];
 }) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -125,6 +126,7 @@ function parseDate(dateStr: string): string {
 
 export async function parseBankStatementCSV(csvContent: string, bankAccountId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const lines = csvContent.split("\n").filter(l => l.trim());
     if (lines.length < 2) return { success: false, error: "CSV must have a header row and at least one data row" };
 
@@ -182,6 +184,7 @@ export async function autoMatchTransactions(
   dateTo: string,
 ) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -275,6 +278,7 @@ export async function saveMatchResult(
   status: "matched" | "reconciled" = "matched",
 ) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -294,6 +298,7 @@ export async function saveMatchResult(
 
 export async function deleteBankStatement(id: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -315,6 +320,7 @@ export async function finalizeReconciliation(
   bookBalance: number,
 ) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -370,6 +376,7 @@ export async function finalizeReconciliation(
 
 export async function undoReconciliation(statementId: string, reason: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -493,6 +500,7 @@ export async function smartMatchTransactions(
   error?: string;
 }> {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -709,6 +717,7 @@ export async function saveReconciliationPattern(
   bookDescription: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 

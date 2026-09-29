@@ -46,6 +46,7 @@ const mockDb = {
   update: vi.fn(() => chainable()),
   delete: vi.fn(() => chainable()),
   query: {},
+  transaction: vi.fn(async (cb: (tx: any) => Promise<unknown>) => cb(mockDb)),
 };
 
 vi.mock("@/db", () => ({ db: mockDb }));
@@ -83,7 +84,7 @@ describe("SEC-11: MiscContactSettlement IDOR isolation", () => {
     mockDb.select.mockReturnValue(selectChain);
 
     const updateChain = chainable();
-    updateChain.where.mockResolvedValue(undefined);
+    updateChain.returning.mockResolvedValueOnce([{ id: "bank_1" }]);
     mockDb.update.mockReturnValue(updateChain);
 
     const { approveMiscContactSettlement } = await import("./adjustments");

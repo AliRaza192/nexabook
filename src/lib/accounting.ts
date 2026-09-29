@@ -5,7 +5,8 @@ import {
   chartOfAccounts,
   payrollRuns,
 } from "@/db/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
+import { postTransaction, resolveAccount } from "./accounting/posting-engine";
 
 // ─────────────────────────────────────────
 // VALIDATION HELPERS
@@ -184,6 +185,20 @@ export async function getProfitAndLoss(
 // BALANCE SHEET
 // ─────────────────────────────────────────
 
+// FIX (2026 review): previously only summed asset/liability/equity accounts.
+// Under double-entry, every transaction balances across ALL account types —
+// e.g. "Dr AR / Cr Sales Revenue" increases an asset with no corresponding
+// equity/liability line. Excluding income/expense accounts meant Assets could
+// never equal Liabilities + Equity once any revenue or expense was posted,
+// and totalEquity itself understated the org's real position.
+//
+// No period-closing mechanism exists in this codebase (confirmed) — net
+// income is never swept into retained_earnings. So the correct fix for a
+// live/perpetual balance sheet is to fold the full, ever-accumulating net
+// income (income − expense, from inception through asOfDate) into equity as
+// a single synthetic line. It is explicitly labeled "(Accumulated,
+// Unclosed)" rather than "(Current Period)" because, absent closing entries,
+// it is not scoped to a period — it is the running total since inception.
 export async function getBalanceSheet(orgId: string, asOfDate?: Date) {
   const dateFilter = asOfDate
     ? sql`${journalEntries.entryDate} <= ${asOfDate}`
@@ -219,6 +234,7 @@ export async function getBalanceSheet(orgId: string, asOfDate?: Date) {
   let totalAssets = 0;
   let totalLiabilities = 0;
   let totalEquity = 0;
+  let accumulatedNetIncome = 0;
   const assets: { name: string; amount: number }[] = [];
   const liabilities: { name: string; amount: number }[] = [];
   const equity: { name: string; amount: number }[] = [];
@@ -238,7 +254,16 @@ export async function getBalanceSheet(orgId: string, asOfDate?: Date) {
     } else if (account.type === "equity") {
       const amount = credit - debit;
       if (amount !== 0) { equity.push({ name: account.name, amount }); totalEquity += amount; }
+    } else if (account.type === "income") {
+      accumulatedNetIncome += credit - debit;
+    } else if (account.type === "expense") {
+      accumulatedNetIncome -= debit - credit;
     }
+  }
+
+  if (Math.abs(accumulatedNetIncome) >= 0.01) {
+    equity.push({ name: "Retained Earnings (Accumulated, Unclosed)", amount: accumulatedNetIncome });
+    totalEquity += accumulatedNetIncome;
   }
 
   return {
@@ -254,6 +279,16 @@ export async function getBalanceSheet(orgId: string, asOfDate?: Date) {
 //   CR: Salaries Payable   (net)
 //   CR: EOBI Payable       (eobi)
 //   CR: Income Tax Payable (tax)
+//
+// FIX (2026 review): was hand-rolling JE construction with its own
+// "JV-{year}-{padded}" number generator, which had the same
+// count-based delete-causes-duplicate flaw fixed elsewhere in
+// generateJournalEntryNumber(), and used a different number format
+// (JV- instead of JE-) than every other journal entry in the system.
+// Now routed through the shared postTransaction()/resolveAccount()
+// path — consistent numbering, consistent balance validation, and
+// tenant-scoped account resolution, matching every other financial
+// write in the app.
 // ─────────────────────────────────────────
 
 export async function postPayrollToLedger(
@@ -265,67 +300,62 @@ export async function postPayrollToLedger(
   totalIncomeTax: number,
   userId: string
 ): Promise<string> {
-  const subTypes = ["salary_expense", "salaries_payable", "eobi_payable", "income_tax_payable"] as const;
-
-  const accounts = await db
-    .select()
-    .from(chartOfAccounts)
-    .where(and(eq(chartOfAccounts.orgId, orgId), inArray(chartOfAccounts.subType, subTypes)));
-
-  const accountMap = new Map(accounts.map((a) => [a.subType, a]));
-  const getAccount = (subType: string) => {
-    const acc = accountMap.get(subType);
-    if (!acc) throw new Error(`Account not found: ${subType}`);
-    return acc;
-  };
-
-  const salaryExpense   = getAccount("salary_expense");
-  const salariesPayable = getAccount("salaries_payable");
-  const eobiPayable     = getAccount("eobi_payable");
-  const incomeTaxPayable = getAccount("income_tax_payable");
-
-  const year = new Date().getFullYear();
-  const [countResult] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(journalEntries)
-    .where(eq(journalEntries.orgId, orgId));
-  const jvNumber = `JV-${year}-${String(Number(countResult.count) + 1).padStart(5, "0")}`;
-
-  let journalEntryId = "";
-
-  await db.transaction(async (tx) => {
-    const [entry] = await tx
-      .insert(journalEntries)
-      .values({
-        orgId,
-        entryNumber: jvNumber,
-        entryDate: new Date(),
-        description: "Payroll Posted",
-        referenceType: "payroll",
-        referenceId: payrollRunId,
-        status: "posted",
-        sourceType: "payroll",
-        createdBy: userId,
-        postedAt: new Date(),
-      })
-      .returning();
-
-    journalEntryId = entry.id;
+  const journalEntryId = await db.transaction(async (tx) => {
+    const salaryExpense = await resolveAccount(tx, orgId, "salary_expense");
+    const salariesPayable = await resolveAccount(tx, orgId, "salaries_payable");
 
     const lines = [
-      { orgId, journalEntryId: entry.id, accountId: salaryExpense.id, debitAmount: totalGross.toFixed(2), creditAmount: "0.00", description: "Salaries Expense" },
-      { orgId, journalEntryId: entry.id, accountId: salariesPayable.id, debitAmount: "0.00", creditAmount: totalNet.toFixed(2), description: "Net Salaries Payable" },
+      {
+        accountId: salaryExpense.id,
+        description: "Salaries Expense",
+        debit: totalGross.toFixed(2),
+        credit: "0.00",
+      },
+      {
+        accountId: salariesPayable.id,
+        description: "Net Salaries Payable",
+        debit: "0.00",
+        credit: totalNet.toFixed(2),
+      },
     ];
 
-    if (totalEobi > 0) lines.push({ orgId, journalEntryId: entry.id, accountId: eobiPayable.id, debitAmount: "0.00", creditAmount: totalEobi.toFixed(2), description: "EOBI Payable" });
-    if (totalIncomeTax > 0) lines.push({ orgId, journalEntryId: entry.id, accountId: incomeTaxPayable.id, debitAmount: "0.00", creditAmount: totalIncomeTax.toFixed(2), description: "Income Tax Payable" });
+    if (totalEobi > 0) {
+      const eobiPayable = await resolveAccount(tx, orgId, "eobi_payable");
+      lines.push({
+        accountId: eobiPayable.id,
+        description: "EOBI Payable",
+        debit: "0.00",
+        credit: totalEobi.toFixed(2),
+      });
+    }
 
-    if (!validateJournalBalance(lines)) throw new Error("Journal entry out of balance: total debits must equal total credits for this transaction.");
-    await tx.insert(journalEntryLines).values(lines);
+    if (totalIncomeTax > 0) {
+      const incomeTaxPayable = await resolveAccount(tx, orgId, "income_tax_payable");
+      lines.push({
+        accountId: incomeTaxPayable.id,
+        description: "Income Tax Payable",
+        debit: "0.00",
+        credit: totalIncomeTax.toFixed(2),
+      });
+    }
 
-    await tx.update(payrollRuns)
-      .set({ journalEntryId: entry.id, status: "Posted" })
+    const { journalEntryId: entryId } = await postTransaction(tx, {
+      orgId,
+      description: "Payroll Posted",
+      date: new Date(),
+      referenceType: "payroll",
+      referenceId: payrollRunId,
+      sourceType: "payroll",
+      createdBy: userId,
+      lines,
+    });
+
+    await tx
+      .update(payrollRuns)
+      .set({ journalEntryId: entryId, status: "Posted" })
       .where(eq(payrollRuns.id, payrollRunId));
+
+    return entryId;
   });
 
   return journalEntryId;

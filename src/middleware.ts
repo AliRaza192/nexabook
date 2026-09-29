@@ -1,31 +1,33 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { rateLimit } from "@/lib/rate-limit";
+import crypto from "crypto";
 
 const isPublicRoute = createRouteMatcher([
   "/",
   "/login(.*)",
   "/register(.*)",
-  "/portal(.*)",
-  "/vendor-portal(.*)",
-  "/api/webhooks(.*)",
-  "/api/portal-pay(.*)",
-  "/api/portal-statement(.*)",
-  "/api/payments(.*)",
-  "/api/cron(.*)",
-  "/api/csrf",
-  "/api/stripe/webhook(.*)",
+  "/portal/[token]",
+  "/vendor-portal/[token]",
+  "/api/webhooks/[id]",
+  "/api/portal-pay",
+  "/api/portal-statement",
+  "/api/payments/callback",
+  "/api/payments/initiate",
+  "/api/cron/(.*)",
+  "/api/stripe/webhook",
 ]);
 
 const csrfExemptRoutes = createRouteMatcher([
-  "/api/webhooks(.*)",
-  "/api/portal-pay(.*)",
-  "/api/portal-statement(.*)",
-  "/api/payments(.*)",
-  "/api/cron(.*)",
-  "/api/chat(.*)",
-  "/api/mobile(.*)",
-  "/api/stripe/webhook(.*)",
+  "/api/webhooks/[id]",
+  "/api/portal-pay",
+  "/api/portal-statement",
+  "/api/payments/callback",
+  "/api/payments/initiate",
+  "/api/cron/(.*)",
+  "/api/chat",
+  "/api/mobile/(.*)",
+  "/api/stripe/webhook",
 ]);
 
 function isMutationMethod(method: string): boolean {
@@ -37,14 +39,15 @@ export default clerkMiddleware(async (auth, req) => {
     await auth.protect();
   }
 
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown";
-
   if (req.nextUrl.pathname.startsWith("/api/")) {
-    // Rate limiting
-    const result = await rateLimit(ip, 30, 60_000);
+    const { userId } = await auth();
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown";
+    const rateLimitKey = userId || `ip:${ip}`;
+
+    const result = await rateLimit(rateLimitKey, 60, 60_000);
     if (!result.success) {
       return NextResponse.json(
         { error: "Too many requests. Please try again later." },
@@ -52,11 +55,18 @@ export default clerkMiddleware(async (auth, req) => {
       );
     }
 
-    // CSRF validation for state-changing requests
     if (isMutationMethod(req.method) && !csrfExemptRoutes(req)) {
       const cookieToken = req.cookies.get("csrf-token")?.value;
       const headerToken = req.headers.get("x-csrf-token");
-      if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+      if (!cookieToken || !headerToken) {
+        return NextResponse.json(
+          { error: "CSRF token missing" },
+          { status: 403 }
+        );
+      }
+      const a = Buffer.from(cookieToken);
+      const b = Buffer.from(headerToken);
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
         return NextResponse.json(
           { error: "Invalid CSRF token" },
           { status: 403 }

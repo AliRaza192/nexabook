@@ -20,10 +20,64 @@
     --accent-foreground: 0 0% 100%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
+
+    /* NEW: semantic states — success (paid/posted/approved), warning
+       (pending/due-soon), info (neutral notices). Fixes the pre-existing
+       bug where .badge-success used blue instead of green. */
+    --success: 142 71% 35%; /* Green-700, accessible on white */
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%; /* Amber-600 */
+    --warning-foreground: 0 0% 100%;
+    --info: 217 91% 60%; /* same blue as accent — deliberate, one blue in the app */
+    --info-foreground: 0 0% 100%;
+
+    /* NEW: fixed chart series palette — reuse the SAME index for the SAME
+       category on every chart (e.g. chart-1 = revenue everywhere). */
+    --chart-1: 217 91% 60%; /* blue — revenue/primary metric */
+    --chart-2: 142 71% 35%; /* green — success/positive */
+    --chart-3: 32 95% 44%;  /* amber — warning/pending */
+    --chart-4: 262 83% 58%; /* violet — secondary metric */
+    --chart-5: 189 94% 38%; /* teal — tertiary metric */
+
     --border: 215 15% 88%; /* Slate-200 */
     --input: 215 15% 90%;
     --ring: 217 91% 60%; /* Blue-600 */
     --radius: 0.5rem;
+  }
+
+  /* NEW: dark mode palette. Placeholder pending confirmation of whether
+     dark mode is actually exposed anywhere — swap on request. */
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 215 20% 92%;
+    --card: 222 40% 11%;
+    --card-foreground: 215 20% 92%;
+    --popover: 222 40% 11%;
+    --popover-foreground: 215 20% 92%;
+    --primary: 215 20% 92%;
+    --primary-foreground: 222 47% 8%;
+    --secondary: 222 30% 16%;
+    --secondary-foreground: 215 20% 92%;
+    --muted: 222 30% 16%;
+    --muted-foreground: 215 15% 65%;
+    --accent: 217 91% 65%;
+    --accent-foreground: 222 47% 8%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 60% 45%;
+    --success-foreground: 222 47% 8%;
+    --warning: 32 90% 55%;
+    --warning-foreground: 222 47% 8%;
+    --info: 217 91% 65%;
+    --info-foreground: 222 47% 8%;
+    --chart-1: 217 91% 65%;
+    --chart-2: 142 60% 45%;
+    --chart-3: 32 90% 55%;
+    --chart-4: 262 83% 65%;
+    --chart-5: 189 85% 48%;
+    --border: 222 25% 20%;
+    --input: 222 25% 20%;
+    --ring: 217 91% 65%;
   }
 }
 
@@ -101,17 +155,22 @@
            focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 outline-none transition-all;
   }
 
-  /* Status Badges */
+  /* Status Badges — FIXED: success is now green (was blue), info added
+     separately for neutral/blue notices. Old blue-as-success was a bug. */
   .badge-success {
-    @apply bg-blue-50 text-blue-700 border border-blue-200;
+    @apply bg-success/10 text-success border border-success/20;
   }
 
   .badge-warning {
-    @apply bg-amber-50 text-amber-700 border border-amber-200;
+    @apply bg-warning/10 text-warning border border-warning/20;
   }
 
   .badge-danger {
-    @apply bg-red-50 text-red-700 border border-red-200;
+    @apply bg-destructive/10 text-destructive border border-destructive/20;
+  }
+
+  .badge-info {
+    @apply bg-info/10 text-info border border-info/20;
   }
 
   /* Print Hidden Utility */
@@ -528,4 +587,3 @@
     }
   }
 }
-

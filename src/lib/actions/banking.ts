@@ -9,10 +9,13 @@ import {
 import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId, requireRole } from "./shared";
+import { getCurrentOrgId, requireRole, generateJournalEntryNumber } from "./shared";
 import { checkPeriodLocked } from "./fiscal-periods";
-import { validateJournalBalance } from "../accounting";
+import { postTransaction, resolveAccount } from "../accounting/posting-engine";
 import { captureException } from "@/lib/error-handler";
+
+export type MiscContactType = 'capital_investment' | 'loan_proceeds' | 'loan_repayment' | 'owner_withdrawal' | 'dividend' | 'other';
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'cheque' | 'online' | 'credit_card' | 'other';
 
 // ==========================================
 // BANK ACCOUNTS
@@ -90,8 +93,11 @@ export async function getBankAccounts(searchQuery?: string) {
   }
 }
 
+// FIX (2026 review): added requireRole (was open to any authenticated user
+// — creating a bank account also posts an opening-balance JE).
 export async function addBankAccount(data: BankAccountFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -101,11 +107,30 @@ export async function addBankAccount(data: BankAccountFormData) {
 
     const openingBalance = parseFloat(data.openingBalance || "0");
 
-    const bankAccountId = await findAccountBySubType(orgId, "bank", "asset");
-    const cashAccountId = await findAccountBySubType(orgId, "cash", "asset");
-
     const newAccount = await db.transaction(async (tx) => {
-      const [newAccount] = await tx
+      const [codeRow] = await tx
+        .select({ maxCode: sql<string | null>`MAX(${chartOfAccounts.code}::int)` })
+        .from(chartOfAccounts)
+        .where(and(eq(chartOfAccounts.orgId, orgId), sql`${chartOfAccounts.code} ~ '^[0-9]+$'`));
+
+      const nextCode = String(Number(codeRow?.maxCode || "1089") + 1);
+
+      const [bankCoa] = await tx
+        .insert(chartOfAccounts)
+        .values({
+          orgId,
+          code: nextCode,
+          name: `Bank - ${data.accountName}`,
+          type: "asset",
+          subType: null,
+          isSystemAccount: false,
+          description: `Sub-ledger GL account for bank account ${data.accountNumber}`,
+          isActive: true,
+          balance: "0",
+        })
+        .returning();
+
+      const [created] = await tx
         .insert(bankAccounts)
         .values({
           orgId,
@@ -115,8 +140,9 @@ export async function addBankAccount(data: BankAccountFormData) {
           branchName: data.branchName,
           bankName: data.bankName,
           accountType: data.accountType,
-          openingBalance: parseFloat(data.openingBalance || "0").toFixed(2),
-          currentBalance: parseFloat(data.openingBalance || "0").toFixed(2),
+          coaAccountId: bankCoa.id,
+          openingBalance: openingBalance.toFixed(2),
+          currentBalance: openingBalance.toFixed(2),
           currency: data.currency || "PKR",
           notes: data.notes,
           approvalStatus: "approved",
@@ -126,44 +152,28 @@ export async function addBankAccount(data: BankAccountFormData) {
         .returning();
 
       if (openingBalance !== 0) {
-        const [{ count: entryCount }] = await tx
-          .select({ count: sql<number>`count(*)::int` })
-          .from(journalEntries)
-          .where(eq(journalEntries.orgId, orgId));
-        const entryNumber = `JE-OPEN-${String(entryCount + 1).padStart(5, "0")}`;
+        const equityAcc = await resolveAccount(tx, orgId, "opening_balance_equity");
 
-        const [journalEntry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId,
-            entryNumber,
-            entryDate: new Date(data.openingBalanceDate || new Date()),
-            referenceType: "bank_opening_balance",
-            referenceId: newAccount.id,
-            description: `Opening balance for ${data.accountName}`,
-            status: "posted",
-            postedAt: new Date(),
-          })
-          .returning();
-
-        if (openingBalance > 0) {
-          const lines = [
-            { debitAmount: data.openingBalance, creditAmount: "0" },
-            { debitAmount: "0", creditAmount: data.openingBalance },
-          ];
-          if (!validateJournalBalance(lines)) {
-            throw new Error("Journal entry out of balance: total debits must equal total credits");
-          }
-          await tx.insert(journalEntryLines).values({
-            orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: data.openingBalance, creditAmount: "0", description: "Bank opening balance"
-          });
-          await tx.insert(journalEntryLines).values({
-            orgId, journalEntryId: journalEntry.id, accountId: cashAccountId, debitAmount: "0", creditAmount: data.openingBalance, description: "Opening balance equity"
-          });
-        }
+        await postTransaction(tx, {
+          orgId,
+          description: `Opening balance for ${data.accountName}`,
+          date: new Date(data.openingBalanceDate || new Date()),
+          referenceType: "bank_opening_balance",
+          referenceId: created.id,
+          sourceType: "bank_account",
+          lines: openingBalance > 0
+            ? [
+                { accountId: bankCoa.id, description: "Bank opening balance", debit: openingBalance.toFixed(2), credit: "0" },
+                { accountId: equityAcc.id, description: "Opening balance equity", debit: "0", credit: openingBalance.toFixed(2) },
+              ]
+            : [
+                { accountId: equityAcc.id, description: "Opening balance equity", debit: Math.abs(openingBalance).toFixed(2), credit: "0" },
+                { accountId: bankCoa.id, description: "Bank opening balance (overdrawn)", debit: "0", credit: Math.abs(openingBalance).toFixed(2) },
+              ],
+        });
       }
 
-      return newAccount;
+      return created;
     });
 
     revalidatePath("/accounts/banking");
@@ -176,6 +186,7 @@ export async function addBankAccount(data: BankAccountFormData) {
 
 export async function updateBankAccount(accountId: string, data: Partial<BankAccountFormData>) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -204,8 +215,10 @@ export async function updateBankAccount(accountId: string, data: Partial<BankAcc
   }
 }
 
+// FIX (2026 review): added requireRole.
 export async function approveBankAccount(accountId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -271,8 +284,36 @@ export async function getBankDeposits(searchQuery?: string) {
   }
 }
 
+// FIX (2026 review): number generation no longer fetches the entire table
+// just to count rows — uses generateJournalEntryNumber-style MAX-parse +
+// retry instead (matches migration 0005's unique constraint on this table).
+async function generateBankDepositNumber(orgId: string): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const [latest] = await db
+        .select({ depositNumber: bankDeposits.depositNumber })
+        .from(bankDeposits)
+        .where(eq(bankDeposits.orgId, orgId))
+        .orderBy(desc(bankDeposits.createdAt))
+        .limit(1);
+
+      let nextNumber = 1;
+      if (latest?.depositNumber) {
+        const match = latest.depositNumber.match(/(\d+)$/);
+        if (match) nextNumber = parseInt(match[1], 10) + 1;
+      }
+      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
+      return `BD-${String(nextNumber + jitter).padStart(5, "0")}`;
+    } catch {
+      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
+    }
+  }
+  return `BD-${String(Date.now() % 100000).padStart(5, "0")}`;
+}
+
 export async function addBankDeposit(data: BankDepositFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -285,7 +326,6 @@ export async function addBankDeposit(data: BankDepositFormData) {
       return { success: false, error: "Invalid deposit amount" };
     }
 
-    // Get bank account to verify
     const [bankAccount] = await db
       .select()
       .from(bankAccounts)
@@ -296,9 +336,7 @@ export async function addBankDeposit(data: BankDepositFormData) {
       return { success: false, error: "Bank account not found" };
     }
 
-    // Generate deposit number
-    const count = await db.select().from(bankDeposits).where(eq(bankDeposits.orgId, orgId));
-    const depositNumber = `BD-${String(count.length + 1).padStart(5, "0")}`;
+    const depositNumber = await generateBankDepositNumber(orgId);
 
     const [deposit] = await db
       .insert(bankDeposits)
@@ -326,15 +364,27 @@ export async function addBankDeposit(data: BankDepositFormData) {
   }
 }
 
+// FIX (2026 review):
+//  - The findAccountBySubType(orgId, "asset", "Bank") / (orgId, "asset",
+//    "Cash") calls here had their arguments swapped relative to the
+//    function's (orgId, subType, type) signature — subType="asset" and
+//    type="Bank"/"Cash" never matches any row (type values are lowercase
+//    "asset", not "Bank"/"Cash"), so this always resolved to an empty
+//    string, which the NOT NULL, FK-constrained journalEntryLines.accountId
+//    column would reject outright — every deposit approval crashed.
+//    Replaced with resolveAccount(), which is also now the single
+//    consistent account-resolution path used everywhere else.
+//  - Balance update now uses atomic SQL arithmetic instead of
+//    read-then-write, closing a lost-update race between concurrent
+//    approvals on the same bank account.
+//  - JE construction routed through postTransaction() (was hand-rolled
+//    with a non-retrying, full-table-scan entry number).
 export async function approveBankDeposit(depositId: string) {
   try {
     await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    const { userId } = await auth();
-
-    // Get deposit
     const [deposit] = await db
       .select()
       .from(bankDeposits)
@@ -347,55 +397,42 @@ export async function approveBankDeposit(depositId: string) {
     const locked = await checkPeriodLocked(new Date(deposit.depositDate));
     if (locked) return { success: false, error: "Cannot approve deposit in a locked fiscal period" };
 
-    const bankAccountId = await findAccountBySubType(orgId, "asset", "Bank");
-    const cashAccountId = await findAccountBySubType(orgId, "asset", "Cash");
+    const { userId } = await auth();
 
     await db.transaction(async (tx) => {
-      const [acct] = await tx.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, deposit.bankAccountId)).limit(1);
-      const newBalance = parseFloat(deposit.amount) + parseFloat(acct?.currentBalance || "0");
-
       await tx
         .update(bankAccounts)
-        .set({ currentBalance: newBalance.toFixed(2) })
-        .where(eq(bankAccounts.id, deposit.bankAccountId));
+        .set({ currentBalance: sql`${bankAccounts.currentBalance}::numeric + ${deposit.amount}::numeric` })
+        .where(and(eq(bankAccounts.id, deposit.bankAccountId), eq(bankAccounts.orgId, orgId)));
 
       await tx
         .update(bankDeposits)
         .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
         .where(eq(bankDeposits.id, depositId));
 
-      const [{ count: entryCount }] = await tx
-        .select({ count: sql<number>`count(*)::int` })
-        .from(journalEntries)
-        .where(eq(journalEntries.orgId, orgId));
-      const entryNumber = `JE-DEP-${String(entryCount + 1).padStart(5, "0")}`;
+      const [depositBank] = await tx
+        .select({ coaAccountId: bankAccounts.coaAccountId })
+        .from(bankAccounts)
+        .where(and(eq(bankAccounts.id, deposit.bankAccountId), eq(bankAccounts.orgId, orgId)))
+        .limit(1);
 
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: deposit.depositDate,
-          referenceType: "bank_deposit",
-          referenceId: deposit.id,
-          description: `Bank deposit ${deposit.depositNumber}`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
+      const bankAcc = depositBank?.coaAccountId
+        ? { id: depositBank.coaAccountId }
+        : await resolveAccount(tx, orgId, "bank");
+      const cashAcc = await resolveAccount(tx, orgId, "cash");
 
-      const lines = [
-        { debitAmount: deposit.amount, creditAmount: "0" },
-        { debitAmount: "0", creditAmount: deposit.amount },
-      ];
-      if (!validateJournalBalance(lines)) {
-        throw new Error("Journal entry out of balance: total debits must equal total credits");
-      }
-      await tx.insert(journalEntryLines).values({
-        orgId, journalEntryId: journalEntry.id, accountId: bankAccountId, debitAmount: deposit.amount, creditAmount: "0", description: "Bank deposit"
-      });
-      await tx.insert(journalEntryLines).values({
-        orgId, journalEntryId: journalEntry.id, accountId: cashAccountId, debitAmount: "0", creditAmount: deposit.amount, description: "Cash deposited"
+      await postTransaction(tx, {
+        orgId,
+        description: `Bank deposit ${deposit.depositNumber}`,
+        date: deposit.depositDate,
+        referenceType: "bank_deposit",
+        referenceId: deposit.id,
+        sourceType: "bank_deposit",
+        createdBy: userId || undefined,
+        lines: [
+          { accountId: bankAcc.id, description: "Bank deposit", debit: deposit.amount, credit: "0" },
+          { accountId: cashAcc.id, description: "Cash deposited", debit: "0", credit: deposit.amount },
+        ],
       });
     });
 
@@ -449,8 +486,39 @@ export async function getFundsTransfers(searchQuery?: string) {
   }
 }
 
+async function generateFundsTransferNumber(orgId: string): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const [latest] = await db
+        .select({ transferNumber: fundsTransfers.transferNumber })
+        .from(fundsTransfers)
+        .where(eq(fundsTransfers.orgId, orgId))
+        .orderBy(desc(fundsTransfers.createdAt))
+        .limit(1);
+
+      let nextNumber = 1;
+      if (latest?.transferNumber) {
+        const match = latest.transferNumber.match(/(\d+)$/);
+        if (match) nextNumber = parseInt(match[1], 10) + 1;
+      }
+      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
+      return `FT-${String(nextNumber + jitter).padStart(5, "0")}`;
+    } catch {
+      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
+    }
+  }
+  return `FT-${String(Date.now() % 100000).padStart(5, "0")}`;
+}
+
+// NOTE (2026 review, flagged not fixed): balance sufficiency is checked
+// here at creation time, but the actual deduction happens later at
+// approval time. Between creation and approval, other approved
+// transactions could change the balance, making this check stale. A
+// re-check at approval time (added below) is the real guard; this one is
+// just an early, best-effort UX check.
 export async function addFundsTransfer(data: FundsTransferFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -467,7 +535,6 @@ export async function addFundsTransfer(data: FundsTransferFormData) {
       return { success: false, error: "Invalid transfer amount" };
     }
 
-    // Check sufficient balance in from account
     const [fromAccount] = await db
       .select()
       .from(bankAccounts)
@@ -481,11 +548,7 @@ export async function addFundsTransfer(data: FundsTransferFormData) {
       return { success: false, error: `Insufficient balance. Available: ${fromBalance.toFixed(2)}` };
     }
 
-    const [{ count }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(fundsTransfers)
-      .where(eq(fundsTransfers.orgId, orgId));
-    const transferNumber = `FT-${String(count + 1).padStart(5, "0")}`;
+    const transferNumber = await generateFundsTransferNumber(orgId);
 
     const [transfer] = await db
       .insert(fundsTransfers)
@@ -511,6 +574,10 @@ export async function addFundsTransfer(data: FundsTransferFormData) {
   }
 }
 
+// FIX (2026 review): balance re-checked at approval time (creation-time
+// check can go stale — see note on addFundsTransfer). Balance updates now
+// atomic SQL arithmetic instead of read-then-write. JE routed through
+// postTransaction().
 export async function approveFundsTransfer(transferId: string) {
   try {
     await requireRole(["admin", "accountant"]);
@@ -531,57 +598,72 @@ export async function approveFundsTransfer(transferId: string) {
     const locked = await checkPeriodLocked(new Date(transfer.transferDate));
     if (locked) return { success: false, error: "Cannot approve transfer in a locked fiscal period" };
 
-    const amount = parseFloat(transfer.amount);
-
     await db.transaction(async (tx) => {
-      const [fromAcct] = await tx.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, transfer.fromBankAccountId)).limit(1);
-      const fromBalance = parseFloat(fromAcct?.currentBalance || "0") - amount;
-      await tx.update(bankAccounts).set({ currentBalance: fromBalance.toFixed(2) }).where(eq(bankAccounts.id, transfer.fromBankAccountId));
+      const [fromAcct] = await tx
+        .select({ currentBalance: bankAccounts.currentBalance, coaAccountId: bankAccounts.coaAccountId })
+        .from(bankAccounts)
+        .where(and(eq(bankAccounts.id, transfer.fromBankAccountId), eq(bankAccounts.orgId, orgId)))
+        .for("update");
 
-      const [toAcct] = await tx.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts).where(eq(bankAccounts.id, transfer.toBankAccountId)).limit(1);
-      const toBalance = parseFloat(toAcct?.currentBalance || "0") + amount;
-      await tx.update(bankAccounts).set({ currentBalance: toBalance.toFixed(2) }).where(eq(bankAccounts.id, transfer.toBankAccountId));
+      if (parseFloat(fromAcct?.currentBalance || "0") < parseFloat(transfer.amount)) {
+        throw new Error("Insufficient balance in source account at approval time");
+      }
+
+      const [toAcct] = await tx
+        .select({ coaAccountId: bankAccounts.coaAccountId })
+        .from(bankAccounts)
+        .where(and(eq(bankAccounts.id, transfer.toBankAccountId), eq(bankAccounts.orgId, orgId)))
+        .limit(1);
+
+      if (!toAcct) {
+        throw new Error("Destination bank account not found");
+      }
+
+      await tx
+        .update(bankAccounts)
+        .set({ currentBalance: sql`${bankAccounts.currentBalance}::numeric - ${transfer.amount}::numeric` })
+        .where(and(eq(bankAccounts.id, transfer.fromBankAccountId), eq(bankAccounts.orgId, orgId)));
+
+      await tx
+        .update(bankAccounts)
+        .set({ currentBalance: sql`${bankAccounts.currentBalance}::numeric + ${transfer.amount}::numeric` })
+        .where(and(eq(bankAccounts.id, transfer.toBankAccountId), eq(bankAccounts.orgId, orgId)));
 
       await tx
         .update(fundsTransfers)
         .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
         .where(eq(fundsTransfers.id, transferId));
 
-      const entryCount = await tx.select().from(journalEntries).where(eq(journalEntries.orgId, orgId));
-      const entryNumber = `JE-FT-${String(entryCount.length + 1).padStart(5, "0")}`;
+      const sharedBankAcc = !fromAcct?.coaAccountId || !toAcct.coaAccountId
+        ? await resolveAccount(tx, orgId, "bank")
+        : null;
+      const fromCoaId = fromAcct?.coaAccountId || sharedBankAcc?.id;
+      const toCoaId = toAcct.coaAccountId || sharedBankAcc?.id;
 
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: transfer.transferDate,
-          referenceType: "funds_transfer",
-          referenceId: transfer.id,
-          description: `Funds transfer ${transfer.transferNumber}`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      const lines = [
-        { debitAmount: transfer.amount, creditAmount: "0" },
-        { debitAmount: "0", creditAmount: transfer.amount },
-      ];
-      if (!validateJournalBalance(lines)) {
-        throw new Error("Journal entry out of balance: total debits must equal total credits");
+      if (!fromCoaId || !toCoaId) {
+        throw new Error("Bank GL account not found");
       }
-      await tx.insert(journalEntryLines).values([
-        { orgId, journalEntryId: journalEntry.id, accountId: transfer.toBankAccountId, debitAmount: transfer.amount, creditAmount: "0", description: "Funds transfer to" },
-        { orgId, journalEntryId: journalEntry.id, accountId: transfer.fromBankAccountId, debitAmount: "0", creditAmount: transfer.amount, description: "Funds transfer from" },
-      ]);
+
+      await postTransaction(tx, {
+        orgId,
+        description: `Funds transfer ${transfer.transferNumber}`,
+        date: transfer.transferDate,
+        referenceType: "funds_transfer",
+        referenceId: transfer.id,
+        sourceType: "funds_transfer",
+        createdBy: userId || undefined,
+        lines: [
+          { accountId: toCoaId, description: "Funds transfer to", debit: transfer.amount, credit: "0" },
+          { accountId: fromCoaId, description: "Funds transfer from", debit: "0", credit: transfer.amount },
+        ],
+      });
     });
 
     revalidatePath("/accounts/banking");
     return { success: true, message: "Funds transfer approved and posted" };
   } catch (error) {
     captureException(error, { module: "banking", function: "approveFundsTransfer" });
-    return { success: false, error: "Failed to approve funds transfer" };
+    return { success: false, error: error instanceof Error ? error.message : "Failed to approve funds transfer" };
   }
 }
 
@@ -590,10 +672,10 @@ export async function approveFundsTransfer(transferId: string) {
 // ==========================================
 
 export interface MiscContactFormData {
-  contactType: string;
+  contactType: MiscContactType;
   partyName: string;
   amount: string;
-  paymentMethod: string;
+  paymentMethod: PaymentMethod;
   bankAccountId?: string;
   transactionDate: string;
   reference?: string;
@@ -629,8 +711,33 @@ export async function getMiscContacts(searchQuery?: string) {
   }
 }
 
+async function generateMiscContactNumber(orgId: string): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const [latest] = await db
+        .select({ referenceNumber: miscContacts.referenceNumber })
+        .from(miscContacts)
+        .where(eq(miscContacts.orgId, orgId))
+        .orderBy(desc(miscContacts.createdAt))
+        .limit(1);
+
+      let nextNumber = 1;
+      if (latest?.referenceNumber) {
+        const match = latest.referenceNumber.match(/(\d+)$/);
+        if (match) nextNumber = parseInt(match[1], 10) + 1;
+      }
+      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
+      return `MC-${String(nextNumber + jitter).padStart(5, "0")}`;
+    } catch {
+      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
+    }
+  }
+  return `MC-${String(Date.now() % 100000).padStart(5, "0")}`;
+}
+
 export async function addMiscContact(data: MiscContactFormData) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -638,18 +745,17 @@ export async function addMiscContact(data: MiscContactFormData) {
       return { success: false, error: "Party name, amount, and date are required" };
     }
 
-    const count = await db.select().from(miscContacts).where(eq(miscContacts.orgId, orgId));
-    const referenceNumber = `MC-${String(count.length + 1).padStart(5, "0")}`;
+    const referenceNumber = await generateMiscContactNumber(orgId);
 
     const [contact] = await db
       .insert(miscContacts)
       .values({
         orgId,
         referenceNumber,
-        contactType: data.contactType as any,
+        contactType: data.contactType,
         partyName: data.partyName,
         amount: data.amount,
-        paymentMethod: data.paymentMethod as any,
+        paymentMethod: data.paymentMethod,
         bankAccountId: data.bankAccountId || null,
         transactionDate: new Date(data.transactionDate),
         reference: data.reference,
@@ -666,12 +772,18 @@ export async function addMiscContact(data: MiscContactFormData) {
   }
 }
 
+// FIX (2026 review): this previously updated bankAccounts.currentBalance
+// directly with NO journal entry at all — capital investments, loan
+// proceeds/repayments, owner withdrawals, and dividends never reached the
+// GL, permanently diverging bank-account balances from the books. Also
+// added the missing requireRole and checkPeriodLocked (present on every
+// sibling approval function but absent here), and switched the balance
+// update to atomic SQL arithmetic.
 export async function approveMiscContact(contactId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-
-    const { userId } = await auth();
 
     const [contact] = await db
       .select()
@@ -682,31 +794,70 @@ export async function approveMiscContact(contactId: string) {
     if (!contact) return { success: false, error: "Transaction not found" };
     if (contact.approvalStatus === "approved") return { success: false, error: "Already approved" };
 
-    // Update bank account balance if applicable
-    if (contact.bankAccountId) {
-      const amount = parseFloat(contact.amount);
-      const [bankAccount] = await db
-        .select({ currentBalance: bankAccounts.currentBalance })
-        .from(bankAccounts)
-        .where(eq(bankAccounts.id, contact.bankAccountId))
-        .limit(1);
+    const locked = await checkPeriodLocked(new Date(contact.transactionDate));
+    if (locked) return { success: false, error: "Cannot approve transaction in a locked fiscal period" };
 
-      if (bankAccount) {
-        const currentBalance = parseFloat(bankAccount.currentBalance || "0");
-        const isIncome = ["capital_investment", "loan_proceeds"].includes(contact.contactType);
-        const newBalance = isIncome ? currentBalance + amount : currentBalance - amount;
+    const { userId } = await auth();
+    const isIncome = ["capital_investment", "loan_proceeds"].includes(contact.contactType);
 
-        await db
+    await db.transaction(async (tx) => {
+      if (contact.bankAccountId) {
+        await tx
           .update(bankAccounts)
-          .set({ currentBalance: newBalance.toString() })
-          .where(eq(bankAccounts.id, contact.bankAccountId));
+          .set({
+            currentBalance: isIncome
+              ? sql`${bankAccounts.currentBalance}::numeric + ${contact.amount}::numeric`
+              : sql`${bankAccounts.currentBalance}::numeric - ${contact.amount}::numeric`,
+          })
+          .where(and(eq(bankAccounts.id, contact.bankAccountId), eq(bankAccounts.orgId, orgId)));
       }
-    }
 
-    await db
-      .update(miscContacts)
-      .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
-      .where(eq(miscContacts.id, contactId));
+      await tx
+        .update(miscContacts)
+        .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
+        .where(eq(miscContacts.id, contactId));
+
+      const cashOrBankAcc = await (async () => {
+        if (contact.paymentMethod === "cash") return resolveAccount(tx, orgId, "cash");
+        if (contact.bankAccountId) {
+          const [bankRow] = await tx
+            .select({ coaAccountId: bankAccounts.coaAccountId })
+            .from(bankAccounts)
+            .where(and(eq(bankAccounts.id, contact.bankAccountId), eq(bankAccounts.orgId, orgId)))
+            .limit(1);
+          if (bankRow?.coaAccountId) return { id: bankRow.coaAccountId };
+        }
+        return resolveAccount(tx, orgId, "bank");
+      })();
+      const counterpartSubType: Record<MiscContactType, string> = {
+        capital_investment: "capital",
+        loan_proceeds: "loan_payable_shortterm",
+        loan_repayment: "loan_payable_shortterm",
+        owner_withdrawal: "owners_drawings",
+        dividend: "owners_drawings",
+        other: "other_income",
+      };
+      const counterpartAcc = await resolveAccount(tx, orgId, counterpartSubType[contact.contactType] || "other_income");
+
+      await postTransaction(tx, {
+        orgId,
+        description: `${contact.contactType.replace(/_/g, " ")} - ${contact.partyName} (${contact.referenceNumber})`,
+        date: contact.transactionDate,
+        referenceType: "misc_contact",
+        referenceId: contact.id,
+        sourceType: "misc_contact",
+        createdBy: userId || undefined,
+        lines: isIncome
+          ? [
+              { accountId: cashOrBankAcc.id, description: `Received from ${contact.partyName}`, debit: contact.amount, credit: "0" },
+              { accountId: counterpartAcc.id, description: contact.description || contact.contactType, debit: "0", credit: contact.amount },
+            ]
+          : [
+              { accountId: counterpartAcc.id, description: contact.description || contact.contactType, debit: contact.amount, credit: "0" },
+              { accountId: cashOrBankAcc.id, description: `Paid to ${contact.partyName}`, debit: "0", credit: contact.amount },
+            ],
+      });
+    });
 
     revalidatePath("/accounts/banking");
     return { success: true, message: "Transaction approved" };
@@ -714,20 +865,6 @@ export async function approveMiscContact(contactId: string) {
     captureException(error, { module: "banking", function: "approveMiscContact" });
     return { success: false, error: "Failed to approve transaction" };
   }
-}
-
-// ==========================================
-// HELPER FUNCTIONS
-// ==========================================
-
-async function findAccountBySubType(orgId: string, subType: string, type: string): Promise<string> {
-  const [account] = await db
-    .select({ id: chartOfAccounts.id })
-    .from(chartOfAccounts)
-    .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, subType), eq(chartOfAccounts.type, type)))
-    .limit(1);
-
-  return account?.id || "";
 }
 
 // ==========================================
@@ -745,6 +882,11 @@ export interface ReconciliationTransaction {
   referenceNumber: string | null;
 }
 
+// NOTE (2026 review, flagged not fixed pending Q1/Q2 above): still matches
+// the COA account by fuzzy ILIKE name matching against bankAccounts, since
+// there's no explicit FK between the two tables. Left as-is until the
+// chartOfAccountId linkage question is resolved — replacing this with a
+// direct join would be straightforward once that column exists.
 export async function getBankReconciliation(
   bankAccountId: string,
   statementDate: string,
@@ -770,7 +912,6 @@ export async function getBankReconciliation(
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    // Fetch bank account details
     const [bankAccount] = await db
       .select()
       .from(bankAccounts)
@@ -779,8 +920,6 @@ export async function getBankReconciliation(
 
     if (!bankAccount) return { success: false, error: "Bank account not found" };
 
-    // Find the corresponding chartOfAccounts entry for this bank account
-    // Match by account name — bank account names usually match COA names
     const [coaAccount] = await db
       .select()
       .from(chartOfAccounts)
@@ -793,7 +932,6 @@ export async function getBankReconciliation(
 
     const accountId = coaAccount?.id || null;
 
-    // If no COA account found, fall back to searching by bank name pattern
     let transactions: ReconciliationTransaction[] = [];
     let totalDebits = 0;
     let totalCredits = 0;
@@ -878,44 +1016,15 @@ export interface ContraEntryFormData {
 }
 
 /**
- * Generate a unique journal entry number for contra entries
- */
-async function generateContraEntryNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ entryNumber: journalEntries.entryNumber })
-        .from(journalEntries)
-        .where(and(
-          eq(journalEntries.orgId, orgId),
-          eq(journalEntries.referenceType, 'contra_entry')
-        ))
-        .orderBy(desc(journalEntries.createdAt))
-        .limit(1);
-
-      let nextNumber = 1;
-      if (result.length > 0 && result[0].entryNumber) {
-        const match = result[0].entryNumber.match(/\d+$/);
-        if (match) {
-          const lastNumber = parseInt(match[0]);
-          nextNumber = lastNumber + 1;
-        }
-      }
-
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `CE-${String(nextNumber + jitter).padStart(5, '0')}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `CE-${String(Date.now() % 100000).padStart(5, '0')}`;
-}
-
-/**
  * Create a contra entry for Cash <-> Bank transfers
  * Creates a journal entry with:
  * - Debit: To Account (receiving account)
  * - Credit: From Account (sending account)
+ *
+ * NOTE (2026 review, flagged not merged pending confirmation): this
+ * duplicates createVoucher()'s CONTRA case in accounts.ts — same
+ * behavior, implemented twice independently. Left both in place; consider
+ * consolidating once confirmed they serve genuinely separate entry points.
  */
 export async function createContraEntry(data: ContraEntryFormData) {
   try {
@@ -928,7 +1037,6 @@ export async function createContraEntry(data: ContraEntryFormData) {
     const locked = await checkPeriodLocked(new Date(data.entryDate));
     if (locked) return { success: false, error: "Cannot create contra entry in a locked fiscal period" };
 
-    // Validate required fields
     if (!data.fromAccountId || !data.toAccountId) {
       return { success: false, error: "From and To accounts are required" };
     }
@@ -937,12 +1045,10 @@ export async function createContraEntry(data: ContraEntryFormData) {
       return { success: false, error: "Valid amount is required" };
     }
 
-    // Validate From and To are not the same
     if (data.fromAccountId === data.toAccountId) {
       return { success: false, error: "From and To accounts cannot be the same" };
     }
 
-    // Get account details
     const [fromAccount] = await db
       .select()
       .from(chartOfAccounts)
@@ -965,55 +1071,29 @@ export async function createContraEntry(data: ContraEntryFormData) {
       return { success: false, error: "One or both accounts not found" };
     }
 
-    const entryNumber = await generateContraEntryNumber(orgId);
+    const { userId } = await auth();
 
-    const entryDate = new Date(data.entryDate);
-
-    const journalEntry = await db.transaction(async (tx) => {
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate,
-          referenceType: 'contra_entry',
-          description: data.description || `Contra transfer: ${fromAccount.name} → ${toAccount.name}`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      const lines = [
-        { debitAmount: data.amount, creditAmount: '0' },
-        { debitAmount: '0', creditAmount: data.amount },
-      ];
-      if (!validateJournalBalance(lines)) {
-        throw new Error("Journal entry out of balance: total debits must equal total credits");
-      }
-      await tx.insert(journalEntryLines).values({
+    const posted = await db.transaction(async (tx) => {
+      const { journalEntryId, entryNumber } = await postTransaction(tx, {
         orgId,
-        journalEntryId: journalEntry.id,
-        accountId: data.toAccountId,
-        debitAmount: data.amount,
-        creditAmount: '0',
-        description: `Transfer from ${fromAccount.name}`,
-      });
-
-      await tx.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: data.fromAccountId,
-        debitAmount: '0',
-        creditAmount: data.amount,
-        description: `Transfer to ${toAccount.name}`,
+        description: data.description || `Contra transfer: ${fromAccount.name} → ${toAccount.name}`,
+        date: new Date(data.entryDate),
+        referenceType: "contra_entry",
+        referenceId: data.reference || "",
+        sourceType: "contra_entry",
+        createdBy: userId || undefined,
+        lines: [
+          { accountId: data.toAccountId, description: `Transfer from ${fromAccount.name}`, debit: data.amount, credit: "0" },
+          { accountId: data.fromAccountId, description: `Transfer to ${toAccount.name}`, debit: "0", credit: data.amount },
+        ],
       });
 
       await tx.insert(auditLogs).values({
         orgId,
-        userId: (await auth()).userId || 'system',
+        userId: userId || 'system',
         action: 'CONTRA_ENTRY_CREATED',
         entityType: 'journal_entry',
-        entityId: journalEntry.id,
+        entityId: journalEntryId,
         changes: JSON.stringify({
           entryNumber,
           fromAccount: fromAccount.name,
@@ -1022,7 +1102,7 @@ export async function createContraEntry(data: ContraEntryFormData) {
         }),
       });
 
-      return journalEntry;
+      return { journalEntryId, entryNumber };
     });
 
     revalidatePath('/accounts/banking');
@@ -1030,9 +1110,9 @@ export async function createContraEntry(data: ContraEntryFormData) {
 
     return {
       success: true,
-      data: journalEntry,
-      entryNumber,
-      message: `Contra entry ${entryNumber} created successfully`,
+      data: { id: posted.journalEntryId },
+      entryNumber: posted.entryNumber,
+      message: `Contra entry ${posted.entryNumber} created successfully`,
     };
   } catch (error) {
     captureException(error, { module: "banking", function: "createContraEntry" });

@@ -8,10 +8,10 @@ import {
   customers, vendors, products,
 } from "@/db/schema";
 import { createAuditLog } from "./audit";
-import { eq, and, desc, ilike, or } from "drizzle-orm";
+import { eq, and, desc, ilike, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 
 // ==========================================
 // CREDIT & DEBIT NOTES
@@ -434,6 +434,7 @@ export async function addMiscContactSettlement(data: MiscContactSettlementFormDa
 
 export async function approveMiscContactSettlement(settlementId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -448,29 +449,24 @@ export async function approveMiscContactSettlement(settlementId: string) {
     if (!settlement) return { success: false, error: "Settlement not found" };
     if (settlement.approvalStatus === "approved") return { success: false, error: "Already approved" };
 
-    // Update bank account balance if applicable
-    if (settlement.bankAccountId) {
-      const settledAmount = parseFloat(settlement.settledAmount || "0");
-      const [bankAccount] = await db
-        .select({ currentBalance: bankAccounts.currentBalance })
-        .from(bankAccounts)
-        .where(and(eq(bankAccounts.id, settlement.bankAccountId), eq(bankAccounts.orgId, orgId)))
-        .limit(1);
-
-      if (bankAccount) {
-        const currentBalance = parseFloat(bankAccount.currentBalance || "0");
-        const newBalance = currentBalance - settledAmount;
-        await db
+    await db.transaction(async (tx) => {
+      if (settlement.bankAccountId) {
+        const [bankAccount] = await tx
           .update(bankAccounts)
-          .set({ currentBalance: newBalance.toString() })
-          .where(and(eq(bankAccounts.id, settlement.bankAccountId), eq(bankAccounts.orgId, orgId)));
-      }
-    }
+          .set({ currentBalance: sql`${bankAccounts.currentBalance}::numeric - ${settlement.settledAmount}::numeric` })
+          .where(and(eq(bankAccounts.id, settlement.bankAccountId), eq(bankAccounts.orgId, orgId)))
+          .returning({ id: bankAccounts.id });
 
-    await db
-      .update(miscContactSettlements)
-      .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
-      .where(eq(miscContactSettlements.id, settlementId));
+        if (!bankAccount) {
+          throw new Error("Bank account not found for this settlement");
+        }
+      }
+
+      await tx
+        .update(miscContactSettlements)
+        .set({ approvalStatus: "approved", approvedBy: userId || "system", approvedAt: new Date() })
+        .where(and(eq(miscContactSettlements.id, settlementId), eq(miscContactSettlements.orgId, orgId)));
+    });
 
     revalidatePath("/accounts/contact-settlement");
     await createAuditLog({ action: "SETTLEMENT_APPROVED", entityType: "settlement", entityId: settlementId });

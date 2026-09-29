@@ -5,10 +5,10 @@ import {
   organizations, journalEntries, journalEntryLines, chartOfAccounts,
   invoices, profiles,
 } from "@/db/schema";
-import { eq, and, sql, lte, gte, inArray } from "drizzle-orm";
+import { eq, and, sql, lte, gte, inArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 
 // ─── Org Hierarchy Management ───
 
@@ -54,6 +54,7 @@ export async function getOrgHierarchy() {
 
 export async function linkChildOrg(childOrgId: string) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
 
@@ -85,6 +86,7 @@ export async function linkChildOrg(childOrgId: string) {
 
 export async function unlinkChildOrg(childOrgId: string) {
   try {
+    await requireRole(["admin"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
 
@@ -114,10 +116,17 @@ export async function getAvailableOrgsForConsolidation() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
+    const { userId } = await auth();
+    if (!userId) return { success: false as const, error: "Unauthorized" };
 
     const allOrgs = await db
       .select({ id: organizations.id, name: organizations.name, slug: organizations.slug })
       .from(organizations)
+      .innerJoin(profiles, and(
+        eq(profiles.orgId, organizations.id),
+        eq(profiles.userId, userId),
+        or(eq(profiles.role, "admin"), eq(profiles.role, "manager")),
+      ))
       .where(and(
         sql`${organizations.id} != ${orgId}`,
         sql`${organizations.parentOrgId} IS NULL`,
@@ -172,6 +181,7 @@ export async function getConsolidatedPandL(dateFrom: string, dateTo: string) {
       .innerJoin(chartOfAccounts, eq(journalEntryLines.accountId, chartOfAccounts.id))
       .where(and(
         inArray(journalEntryLines.orgId, orgIds),
+        eq(journalEntries.status, "posted"),
         sql`${chartOfAccounts.type} IN ('income', 'expense')`,
         gte(journalEntries.entryDate, fromDate),
         lte(journalEntries.entryDate, toDate),
@@ -190,11 +200,12 @@ export async function getConsolidatedPandL(dateFrom: string, dateTo: string) {
       if (!entry) continue;
       const balance = parseFloat(row.debit || "0") - parseFloat(row.credit || "0");
       if (row.accountType === "income") {
-        entry.income.push({ accountId: row.accountId, name: row.accountName, balance: Math.abs(balance) });
-        entry.totalIncome += Math.abs(balance);
+        const displayBalance = -balance;
+        entry.income.push({ accountId: row.accountId, name: row.accountName, balance: displayBalance });
+        entry.totalIncome += displayBalance;
       } else {
-        entry.expense.push({ accountId: row.accountId, name: row.accountName, balance: Math.abs(balance) });
-        entry.totalExpense += Math.abs(balance);
+        entry.expense.push({ accountId: row.accountId, name: row.accountName, balance });
+        entry.totalExpense += balance;
       }
     }
 
@@ -259,6 +270,7 @@ export async function getConsolidatedBalanceSheet(asOfDate: string) {
       .innerJoin(chartOfAccounts, eq(journalEntryLines.accountId, chartOfAccounts.id))
       .where(and(
         inArray(journalEntryLines.orgId, orgIds),
+        eq(journalEntries.status, "posted"),
         sql`${chartOfAccounts.type} IN ('asset', 'liability', 'equity')`,
         lte(journalEntries.entryDate, reportDate),
       ))
@@ -274,16 +286,16 @@ export async function getConsolidatedBalanceSheet(asOfDate: string) {
       const entry = orgMap.get(row.orgId);
       if (!entry) continue;
       const balance = parseFloat(row.debit || "0") - parseFloat(row.credit || "0");
-      const absBalance = Math.abs(balance);
+      const displayBalance = row.accountType === "asset" ? balance : -balance;
       if (row.accountType === "asset") {
-        entry.assets.push({ accountId: row.accountId, name: row.accountName, balance: absBalance });
-        entry.totalAssets += absBalance;
+        entry.assets.push({ accountId: row.accountId, name: row.accountName, balance: displayBalance });
+        entry.totalAssets += displayBalance;
       } else if (row.accountType === "liability") {
-        entry.liabilities.push({ accountId: row.accountId, name: row.accountName, balance: absBalance });
-        entry.totalLiabilities += absBalance;
+        entry.liabilities.push({ accountId: row.accountId, name: row.accountName, balance: displayBalance });
+        entry.totalLiabilities += displayBalance;
       } else {
-        entry.equity.push({ accountId: row.accountId, name: row.accountName, balance: absBalance });
-        entry.totalEquity += absBalance;
+        entry.equity.push({ accountId: row.accountId, name: row.accountName, balance: displayBalance });
+        entry.totalEquity += displayBalance;
       }
     }
 

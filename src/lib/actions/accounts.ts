@@ -4,12 +4,13 @@ import { db } from "@/db";
 import { chartOfAccounts, organizations, profiles, journalEntries, journalEntryLines, auditLogs, invoices, invoiceItems, purchaseInvoices, purchaseItems } from "@/db/schema";
 import { validate, createInvoiceSchema, createCustomerSchema, createVendorSchema } from "@/lib/validations";
 import { z } from "zod";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId } from "./shared";
 import { requireRole } from "./shared";
 import { validateJournalBalance } from "../accounting";
+import { postTransaction } from "../accounting/posting-engine";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { captureException } from "@/lib/error-handler";
 
@@ -31,7 +32,7 @@ export interface JournalEntryData {
 export async function getAccounts() {
   try {
     const orgId = await getCurrentOrgId();
-    
+
     if (!orgId) {
       return { success: false, error: "No organization found" };
     }
@@ -44,21 +45,33 @@ export async function getAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getAccounts" });
+    captureException(error, { module: "accounts", function: "getAccounts" });
     return { success: false, error: "Failed to fetch accounts" };
   }
 }
 
 // Seed initial Chart of Accounts for current user's organization
+//
+// FIX (2026 review): the previous subType mapping assigned the SAME
+// subType to multiple accounts in 7 places (cash, bank, income_tax_payable,
+// cogs, salary_expense, fixed_assets, misc_expense). Since resolveAccount()
+// does `WHERE orgId AND subType LIMIT 1` with no ORDER BY, Postgres gives no
+// guarantee which of the duplicate rows comes back — meaning postings could
+// silently land on the wrong account (e.g. payroll withholding tax posting
+// to the corporate income tax account, or COGS postings landing on Direct
+// Labor). Every subType below now maps to exactly one account. Also added:
+// a dedicated "Discount Allowed" account (was incorrectly sharing "Sales
+// Returns & Allowances" with a vendor-discount-received posting that has
+// nothing to do with sales returns), and a "Card Clearing" account for POS
+// card/jazzcash/easypaisa payments.
 export async function seedInitialCOA() {
   const orgId = await getCurrentOrgId();
-  
+
   if (!orgId) {
     return { success: false, error: "No organization found" };
   }
 
   try {
-    // Check if accounts already exist for this organization
     const existingAccounts = await db
       .select()
       .from(chartOfAccounts)
@@ -66,9 +79,9 @@ export async function seedInitialCOA() {
       .limit(1);
 
     if (existingAccounts.length > 0) {
-      return { 
-        success: false, 
-        error: "Chart of Accounts already exists for this organization" 
+      return {
+        success: false,
+        error: "Chart of Accounts already exists for this organization"
       };
     }
 
@@ -78,8 +91,10 @@ export async function seedInitialCOA() {
       { code: "1010", name: "Bank - Main Account", type: "asset", description: "Main bank account" },
       { code: "1020", name: "Bank - Savings Account", type: "asset", description: "Savings bank account" },
       { code: "1030", name: "Petty Cash", type: "asset", description: "Small cash fund for minor expenses" },
+      { code: "1040", name: "POS Cash", type: "asset", description: "POS terminal cash float" },
       { code: "1100", name: "Accounts Receivable", type: "asset", description: "Money owed by customers" },
       { code: "1110", name: "Allowance for Doubtful Accounts", type: "asset", description: "Estimated uncollectible receivables" },
+      { code: "1150", name: "Card Clearing / Receivable", type: "asset", description: "Card, JazzCash, and Easypaisa payments pending settlement" },
       { code: "1200", name: "Inventory", type: "asset", description: "Goods available for sale" },
       { code: "1210", name: "Raw Materials", type: "asset", description: "Materials for production" },
       { code: "1211", name: "SRB Input Tax", type: "asset", description: "Recoverable Sindh sales tax on services" },
@@ -117,6 +132,7 @@ export async function seedInitialCOA() {
       { code: "2400", name: "Accrued Liabilities", type: "liability", description: "Expenses incurred but not yet paid" },
       { code: "2410", name: "Accrued Salaries", type: "liability", description: "Salaries owed to employees" },
       { code: "2420", name: "Accrued Interest", type: "liability", description: "Interest owed but not yet paid" },
+      { code: "2430", name: "Provident Fund Payable", type: "liability", description: "Employee provident fund contributions payable" },
       { code: "2500", name: "Short-term Loans", type: "liability", description: "Loans due within one year" },
       { code: "2510", name: "Bank Overdraft", type: "liability", description: "Negative bank balance" },
       { code: "2600", name: "Long-term Loans", type: "liability", description: "Loans due after one year" },
@@ -141,13 +157,14 @@ export async function seedInitialCOA() {
       { code: "4200", name: "Interest Income", type: "income", description: "Interest earned" },
       { code: "4250", name: "Shipping Revenue", type: "income", subType: "shipping_revenue", description: "Revenue from shipping charges" },
       { code: "4300", name: "Other Income", type: "income", description: "Miscellaneous income" },
-      { code: "4400", name: "Discount Received", type: "income", description: "Discounts from suppliers" },
+      { code: "4400", name: "Discount Received", type: "income", description: "Discounts from suppliers (vendor settlement)" },
       { code: "4500", name: "Exchange Gain", type: "income", description: "Gain from currency exchange rate fluctuations" },
       { code: "4550", name: "Commission Income", type: "income", description: "Commission earned" },
       { code: "4600", name: "Rental Income", type: "income", description: "Income from property rental" },
       { code: "4700", name: "Gain on Asset Sale", type: "income", description: "Profit from selling assets" },
       { code: "4800", name: "Export Revenue", type: "income", description: "Revenue from export sales" },
       { code: "4900", name: "Sales Returns & Allowances", type: "income", description: "Contra account for returns" },
+      { code: "4910", name: "Discount Allowed", type: "income", description: "Discounts given to customers (customer settlement)" },
       { code: "4950", name: "Unrealized FX Gain/Loss", type: "income", subType: "unrealized_fx", description: "Unrealized foreign exchange gain or loss" },
 
       // Expenses (5000-5999)
@@ -158,6 +175,7 @@ export async function seedInitialCOA() {
       { code: "5040", name: "Import Duties", type: "expense", description: "Customs and import charges" },
       { code: "5100", name: "Salaries & Wages", type: "expense", description: "Employee compensation" },
       { code: "5110", name: "Employee Benefits", type: "expense", description: "Health insurance, provident fund" },
+      { code: "5115", name: "EOBI Expense", type: "expense", description: "Employer EOBI contribution" },
       { code: "5120", name: "Overtime Pay", type: "expense", description: "Overtime compensation" },
       { code: "5200", name: "Rent Expense", type: "expense", description: "Office/warehouse rent" },
       { code: "5300", name: "Utilities", type: "expense", description: "Electricity, water, gas" },
@@ -182,25 +200,46 @@ export async function seedInitialCOA() {
       { code: "6900", name: "Miscellaneous Expense", type: "expense", description: "Other expenses" },
     ];
 
-// subType mapping
+    // FIX (2026 review): every subType now maps to exactly one account code.
+    // Previously duplicated subTypes (cash, bank, income_tax_payable, cogs,
+    // salary_expense, fixed_assets, misc_expense) made resolveAccount()'s
+    // single-row lookup non-deterministic. See review notes above.
     const subTypeMap: Record<string, string> = {
-      "1000": "cash", "1010": "bank", "1020": "bank", "1030": "cash",
-      "1100": "accounts_receivable", "1200": "inventory", "1210": "tax_receivable",
+      "1000": "cash",                        // Petty Cash (1030) no longer shares this
+      "1010": "bank",                        // Savings (1020) no longer shares this
+      "1040": "pos_cash",
+      "1100": "accounts_receivable",
+      "1150": "card_clearing",
+      "1200": "inventory",
+      "1210": "raw_materials_inventory",
       "1211": "tax_receivable_srb", "1212": "tax_receivable_pra", "1213": "tax_receivable_kpra", "1214": "tax_receivable_bra",
-      "1400": "prepaid", "1500": "fixed_assets", "1600": "fixed_assets",
-      "2000": "accounts_payable", "2200": "tax_payable",
+      "1230": "finished_goods",
+      "1400": "prepaid",
+      "1500": "fixed_assets",                // Accumulated Depreciation (1600) no longer shares this
+      "1600": "accumulated_depreciation",
+      "2000": "accounts_payable",
+      "2200": "tax_payable",
       "2201": "tax_payable_srb", "2202": "tax_payable_pra", "2203": "tax_payable_kpra", "2204": "tax_payable_bra",
-      "2210": "income_tax_payable", "2250": "wht_payable", "2300": "income_tax_payable",
-      "2410": "salaries_payable", "2800": "eobi_payable",
+      "2210": "income_tax_payable",           // payroll withholding — corporate tax (2300) no longer shares this
+      "2250": "wht_payable",
+      "2300": "corporate_income_tax_payable",
+      "2410": "salaries_payable", "2430": "pf_payable", "2800": "eobi_payable",
       "3000": "capital", "3010": "opening_balance_equity", "3100": "retained_earnings",
       "3500": "current_year_pl",
       "4000": "sales_revenue", "4100": "service_revenue",
-      "4250": "shipping_revenue", "4300": "other_income", "4400": "inventory_adjustment_income", "4500": "exchange_gain", "4900": "discount_allowed",
-      "5000": "cogs", "5010": "cogs",
-      "5100": "salary_expense", "5110": "salary_expense",
+      "4250": "shipping_revenue", "4300": "other_income",
+      "4400": "discount_received",            // FIX: was previously unset; vendor-discount postings now resolve correctly
+      "4500": "exchange_gain",
+      "4900": "sales_returns",                // FIX: was "discount_allowed" — genuinely a returns account, not discounts
+      "4910": "discount_allowed",             // NEW: dedicated customer-discount account
+      "5000": "cogs",                         // Direct Labor (5010) no longer shares this
+      "5100": "salary_expense",               // Employee Benefits (5110) no longer shares this
+      "5115": "eobi_expense",
       "5200": "rent_expense", "5300": "utilities",
-      "5500": "depreciation", "5600": "misc_expense", "6650": "exchange_loss",
-      "6700": "inventory_write_off", "6900": "misc_expense",
+      "5500": "depreciation",
+      "6650": "exchange_loss",
+      "6700": "inventory_write_off",
+      "6900": "misc_expense",                 // Marketing (5600) no longer shares this
     };
 
     const accountsToInsert = defaultAccounts.map((account) => ({
@@ -208,15 +247,14 @@ export async function seedInitialCOA() {
       code: account.code,
       name: account.name,
       type: account.type,
-      subType: subTypeMap[account.code] || null,
+      subType: (account as any).subType || subTypeMap[account.code] || null,
       isSystemAccount: false,
       description: account.description,
       isActive: true,
       balance: "0",
     }));
 
-
-    await db.insert(chartOfAccounts).values(accountsToInsert);
+    await db.insert(chartOfAccounts).values(accountsToInsert).onConflictDoNothing();
 
     revalidatePath("/dashboard/accounts/chart-of-accounts");
 
@@ -226,12 +264,17 @@ export async function seedInitialCOA() {
       count: accountsToInsert.length
     };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getAllAccounts" });
-    return { success: false, error: "Failed to fetch accounts" };
+    captureException(error, { module: "accounts", function: "seedInitialCOA" });
+    return { success: false, error: "Failed to seed chart of accounts" };
   }
 }
 
 // Create a journal entry for current user's organization
+// FIX (2026 review): per-line account-org validation batched via inArray
+// (was one query per line — N+1). Entry number now routed through the
+// shared generateJournalEntryNumber() (MAX-parsed, prefix-scoped) instead
+// of a hand-rolled COUNT(*) that had the same delete-causes-duplicate flaw
+// fixed elsewhere.
 export async function createJournalEntry(data: JournalEntryData) {
   await requireRole(["admin", "accountant"]);
   const orgId = await getCurrentOrgId();
@@ -240,7 +283,6 @@ export async function createJournalEntry(data: JournalEntryData) {
     return { success: false, error: "No organization found" };
   }
 
-  // Validate input shape
   const validation = validate(
     z.object({
       date: z.string().min(1, "Date is required"),
@@ -264,11 +306,9 @@ export async function createJournalEntry(data: JournalEntryData) {
   }
 
   try {
-    // Calculate totals
     const totalDebit = data.lines.reduce((sum, line) => sum + parseFloat(line.debit || "0"), 0);
     const totalCredit = data.lines.reduce((sum, line) => sum + parseFloat(line.credit || "0"), 0);
 
-    // Validate debits equal credits
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
       return {
         success: false,
@@ -276,81 +316,65 @@ export async function createJournalEntry(data: JournalEntryData) {
       };
     }
 
-    // Validate all lines have accounts
     for (const line of data.lines) {
       if (!line.accountId) {
         return { success: false, error: "All journal entry lines must have an account" };
       }
-
-      // Validate that either debit or credit is present
       if ((!line.debit || parseFloat(line.debit) === 0) && (!line.credit || parseFloat(line.credit) === 0)) {
         return { success: false, error: "Each line must have either a debit or credit amount" };
       }
+    }
 
-      // Validate account belongs to this organization
-      const [account] = await db
-        .select({ id: chartOfAccounts.id })
-        .from(chartOfAccounts)
-        .where(and(eq(chartOfAccounts.id, line.accountId), eq(chartOfAccounts.orgId, orgId)))
-        .limit(1);
-      if (!account) {
-        return { success: false, error: `Account ${line.accountId} does not belong to this organization` };
+    // Batch org-membership check for all accounts referenced (fix N+1)
+    const accountIds = [...new Set(data.lines.map((l) => l.accountId))];
+    const orgAccounts = await db
+      .select({ id: chartOfAccounts.id })
+      .from(chartOfAccounts)
+      .where(and(inArray(chartOfAccounts.id, accountIds), eq(chartOfAccounts.orgId, orgId)));
+    const validAccountIds = new Set(orgAccounts.map((a) => a.id));
+
+    for (const accountId of accountIds) {
+      if (!validAccountIds.has(accountId)) {
+        return { success: false, error: `Account ${accountId} does not belong to this organization` };
       }
     }
 
-    // Generate entry number using SQL COUNT (not loading all rows)
-    const [countResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(journalEntries)
-      .where(eq(journalEntries.orgId, orgId));
-    
-    const entryNumber = `JE-${String((countResult?.count || 0) + 1).padStart(5, '0')}`;
-
-    // Create journal entry atomically with lines + audit
     if (!validateJournalBalance(data.lines.map(l => ({ debitAmount: l.debit || '0', creditAmount: l.credit || '0' })))) {
       throw new Error("Journal entry out of balance: total debits must equal total credits");
     }
 
-    const [journalEntry] = await db.transaction(async (tx) => {
-      const [entry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(data.date),
-          referenceType: 'manual',
-          description: data.description,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
+    const userId = (await auth()).userId || "system";
 
-      for (const line of data.lines) {
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: entry.id,
+    const { entryNumber } = await db.transaction(async (tx) => {
+      const posted = await postTransaction(tx, {
+        orgId,
+        description: data.description || "Manual Journal Entry",
+        date: new Date(data.date),
+        referenceType: "manual",
+        createdBy: userId,
+        lines: data.lines.map((line) => ({
           accountId: line.accountId,
-          description: line.description,
-          debitAmount: line.debit || '0',
-          creditAmount: line.credit || '0',
-        });
-      }
+          description: line.description || "",
+          debit: line.debit || "0",
+          credit: line.credit || "0",
+        })),
+      });
 
       await tx.insert(auditLogs).values({
         orgId,
-        userId: (await auth()).userId || 'system',
-        action: 'JOURNAL_ENTRY_CREATED',
-        entityType: 'journal_entry',
-        entityId: entry.id,
+        userId,
+        action: "JOURNAL_ENTRY_CREATED",
+        entityType: "journal_entry",
+        entityId: posted.journalEntryId,
         changes: JSON.stringify({
-          entryNumber,
+          entryNumber: posted.entryNumber,
           description: data.description,
           totalDebit,
           totalCredit,
         }),
       });
 
-      return [entry];
+      return posted;
     });
 
     revalidatePath("/dashboard/accounts/journal-entries");
@@ -361,7 +385,7 @@ export async function createJournalEntry(data: JournalEntryData) {
       entryNumber
     };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "createJournalEntry" });
+    captureException(error, { module: "accounts", function: "createJournalEntry" });
     return { success: false, error: "Failed to create journal entry" };
   }
 }
@@ -384,7 +408,7 @@ export async function getAccountById(accountId: string) {
 
     return { success: true, data: account };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getAccountById" });
+    captureException(error, { module: "accounts", function: "getAccountById" });
     return { success: false, error: "Failed to fetch account" };
   }
 }
@@ -405,19 +429,24 @@ export async function findOpeningBalanceEquityAccount(orgId: string) {
   return account || null;
 }
 
+// FIX (2026 review): added missing requireRole — this posts real financial
+// entries and had no RBAC check at all, unlike every sibling function
+// (createJournalEntry, createVoucher, deleteJournalEntry). Also: line
+// accountIds are now verified to belong to this org (were previously
+// trusted from the client with zero ownership check).
 export async function postOpeningBalance(data: {
   date: string;
   description: string;
   lines: Array<{ accountId: string; debit: string; credit: string }>;
 }) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
     const locked = await checkPeriodLocked(new Date(data.date));
     if (locked) return { success: false, error: "Cannot post opening balance in a locked fiscal period" };
 
-    // Find Opening Balance Equity account
     const obeAccount = await findOpeningBalanceEquityAccount(orgId);
     if (!obeAccount) {
       return {
@@ -427,34 +456,30 @@ export async function postOpeningBalance(data: {
       };
     }
 
-    // Calculate totals
-    const totalDebit = data.lines.reduce(
-      (sum, l) => sum + parseFloat(l.debit || "0"),
-      0
-    );
-    const totalCredit = data.lines.reduce(
-      (sum, l) => sum + parseFloat(l.credit || "0"),
-      0
-    );
+    const accountIds = [...new Set(data.lines.map((l) => l.accountId))];
+    const orgAccounts = await db
+      .select({ id: chartOfAccounts.id })
+      .from(chartOfAccounts)
+      .where(and(inArray(chartOfAccounts.id, accountIds), eq(chartOfAccounts.orgId, orgId)));
+    const validAccountIds = new Set(orgAccounts.map((a) => a.id));
+    for (const accountId of accountIds) {
+      if (!validAccountIds.has(accountId)) {
+        return { success: false, error: `Account ${accountId} does not belong to this organization` };
+      }
+    }
+
+    const totalDebit = data.lines.reduce((sum, l) => sum + parseFloat(l.debit || "0"), 0);
+    const totalCredit = data.lines.reduce((sum, l) => sum + parseFloat(l.credit || "0"), 0);
 
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
       return {
         success: false,
-        error: `Opening entry is not balanced. Total Debit: ${totalDebit.toFixed(
-          2
-        )}, Total Credit: ${totalCredit.toFixed(2)}`,
+        error: `Opening entry is not balanced. Total Debit: ${totalDebit.toFixed(2)}, Total Credit: ${totalCredit.toFixed(2)}`,
       };
     }
 
-    // Generate entry number using SQL COUNT
-    const [obCountResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(journalEntries)
-      .where(eq(journalEntries.orgId, orgId));
+    const userId = (await auth()).userId || "system";
 
-    const entryNumber = `OB-${String((obCountResult?.count || 0) + 1).padStart(5, "0")}`;
-
-    // Auto-balance with Opening Balance Equity
     const allLines = [...data.lines];
     const diff = totalDebit - totalCredit;
     if (Math.abs(diff) > 0.01) {
@@ -465,47 +490,37 @@ export async function postOpeningBalance(data: {
       });
     }
 
-    // Create journal entry atomically with lines + audit
-    const [journalEntry] = await db.transaction(async (tx) => {
-      const [entry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(data.date),
-          referenceType: "opening_balance",
-          description: data.description || "Opening Balance Entry",
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      for (const line of allLines) {
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: entry.id,
+    const { entryNumber } = await db.transaction(async (tx) => {
+      const posted = await postTransaction(tx, {
+        orgId,
+        description: data.description || "Opening Balance Entry",
+        date: new Date(data.date),
+        referenceType: "opening_balance",
+        numberPrefix: "OB",
+        createdBy: userId,
+        lines: allLines.map((line) => ({
           accountId: line.accountId,
           description: data.description || "Opening Balance",
-          debitAmount: line.debit || "0",
-          creditAmount: line.credit || "0",
-        });
-      }
+          debit: line.debit || "0",
+          credit: line.credit || "0",
+        })),
+      });
 
       await tx.insert(auditLogs).values({
         orgId,
-        userId: (await auth()).userId || "system",
+        userId,
         action: "OPENING_BALANCE_POSTED",
         entityType: "journal_entry",
-        entityId: entry.id,
+        entityId: posted.journalEntryId,
         changes: JSON.stringify({
-          entryNumber,
+          entryNumber: posted.entryNumber,
           description: data.description,
           totalDebit,
           totalCredit,
         }),
       });
 
-      return [entry];
+      return posted;
     });
 
     revalidatePath("/accounts/opening-balance");
@@ -517,16 +532,20 @@ export async function postOpeningBalance(data: {
       entryNumber,
     };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "postOpeningBalance" });
+    captureException(error, { module: "accounts", function: "postOpeningBalance" });
     return { success: false, error: "Failed to post opening balance" };
   }
 }
 
+// FIX (2026 review): added missing requireRole (same RBAC gap as
+// postOpeningBalance). Account-code lookups batched (was one query per
+// row — N+1). Entry number routed through the shared generator.
 export async function bulkImportOpeningBalances(
   rows: Array<{ accountCode: string; debit: string; credit: string }>,
   date?: string
 ) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
@@ -542,34 +561,24 @@ export async function bulkImportOpeningBalances(
       };
     }
 
-    // Resolve account codes to IDs
-    const lines: Array<{ accountId: string; debit: string; credit: string }> =
-      [];
+    const codes = [...new Set(rows.map((r) => r.accountCode))];
+    const orgAccounts = await db
+      .select({ id: chartOfAccounts.id, code: chartOfAccounts.code })
+      .from(chartOfAccounts)
+      .where(and(inArray(chartOfAccounts.code, codes), eq(chartOfAccounts.orgId, orgId)));
+    const codeToId = new Map(orgAccounts.map((a) => [a.code, a.id]));
+
+    const lines: Array<{ accountId: string; debit: string; credit: string }> = [];
     const errors: Array<{ row: number; error: string }> = [];
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const [account] = await db
-        .select({ id: chartOfAccounts.id })
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.orgId, orgId),
-            eq(chartOfAccounts.code, row.accountCode)
-          )
-        )
-        .limit(1);
-
-      if (!account) {
-        errors.push({
-          row: i + 1,
-          error: `Account code "${row.accountCode}" not found`,
-        });
-        continue;
+    rows.forEach((row, i) => {
+      const accountId = codeToId.get(row.accountCode);
+      if (!accountId) {
+        errors.push({ row: i + 1, error: `Account code "${row.accountCode}" not found` });
+        return;
       }
-
-      lines.push({ accountId: account.id, debit: row.debit, credit: row.credit });
-    }
+      lines.push({ accountId, debit: row.debit, credit: row.credit });
+    });
 
     if (errors.length > 0) {
       return { success: false, errors };
@@ -579,17 +588,9 @@ export async function bulkImportOpeningBalances(
       return { success: false, error: "No valid rows to import" };
     }
 
-    // Now post as one opening balance entry
-    const totalDebit = lines.reduce(
-      (sum, l) => sum + parseFloat(l.debit || "0"),
-      0
-    );
-    const totalCredit = lines.reduce(
-      (sum, l) => sum + parseFloat(l.credit || "0"),
-      0
-    );
+    const totalDebit = lines.reduce((sum, l) => sum + parseFloat(l.debit || "0"), 0);
+    const totalCredit = lines.reduce((sum, l) => sum + parseFloat(l.credit || "0"), 0);
 
-    // Auto-balance with Opening Balance Equity
     const diff = totalDebit - totalCredit;
     if (Math.abs(diff) > 0.01) {
       lines.push({
@@ -599,42 +600,20 @@ export async function bulkImportOpeningBalances(
       });
     }
 
-    const [bulkCountResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(journalEntries)
-      .where(eq(journalEntries.orgId, orgId));
-
-    const entryNumber = `OB-BULK-${String((bulkCountResult?.count || 0) + 1).padStart(
-      5,
-      "0"
-    )}`;
-
-    const [journalEntry] = await db.transaction(async (tx) => {
-      const [entry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: new Date(date || new Date()),
-          referenceType: "opening_balance",
-          description: "Bulk Opening Balance Import",
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      for (const line of lines) {
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: entry.id,
+    const { entryNumber } = await db.transaction(async (tx) => {
+      return await postTransaction(tx, {
+        orgId,
+        description: "Bulk Opening Balance Import",
+        date: new Date(date || new Date()),
+        referenceType: "opening_balance",
+        numberPrefix: "OB-BULK",
+        lines: lines.map((line) => ({
           accountId: line.accountId,
           description: "Opening Balance",
-          debitAmount: line.debit || "0",
-          creditAmount: line.credit || "0",
-        });
-      }
-
-      return [entry];
+          debit: line.debit || "0",
+          credit: line.credit || "0",
+        })),
+      });
     });
 
     revalidatePath("/accounts/opening-balance");
@@ -645,7 +624,7 @@ export async function bulkImportOpeningBalances(
       entryNumber,
     };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "bulkImportOpeningBalances" });
+    captureException(error, { module: "accounts", function: "bulkImportOpeningBalances" });
     return { success: false, error: "Failed to import opening balances" };
   }
 }
@@ -671,7 +650,7 @@ export async function getCompanySettings() {
 
     return { success: true, data: org };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getCompanySettings" });
+    captureException(error, { module: "accounts", function: "getCompanySettings" });
     return { success: false, error: "Failed to fetch company settings" };
   }
 }
@@ -716,8 +695,7 @@ export async function updateCompanySettings(data: {
     if (data.website !== undefined) updateData.website = data.website;
     if (data.fiscalYearStart !== undefined) updateData.fiscalYearStart = data.fiscalYearStart;
     if (data.currency !== undefined) updateData.currency = data.currency;
-    
-    // Add document numbering fields
+
     if (data.invoicePrefix !== undefined) updateData.invoicePrefix = data.invoicePrefix;
     if (data.orderPrefix !== undefined) updateData.orderPrefix = data.orderPrefix;
     if (data.quotationPrefix !== undefined) updateData.quotationPrefix = data.quotationPrefix;
@@ -736,7 +714,7 @@ export async function updateCompanySettings(data: {
 
     return { success: true, message: "Settings saved successfully" };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "updateCompanySettings" });
+    captureException(error, { module: "accounts", function: "updateCompanySettings" });
     return { success: false, error: "Failed to update company settings" };
   }
 }
@@ -765,7 +743,7 @@ export async function getAllAccounts() {
 
     return { success: true, data: accounts };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getAllAccounts" });
+    captureException(error, { module: "accounts", function: "getAllAccounts" });
     return { success: false, error: "Failed to fetch accounts" };
   }
 }
@@ -792,6 +770,10 @@ export interface LedgerReportResult {
   closingBalance: string;
 }
 
+// FIX (2026 review): account lookup previously had no orgId filter — a
+// cross-org accountId would still resolve and leak that account's
+// code/name/type (the transactions themselves stayed correctly scoped via
+// journalEntryLines.orgId, but the account metadata did not).
 export async function getLedgerReport(
   accountId: string,
   dateFrom: string,
@@ -803,7 +785,6 @@ export async function getLedgerReport(
       return { success: false, error: "No organization found" };
     }
 
-    // Fetch account details
     const [account] = await db
       .select({
         id: chartOfAccounts.id,
@@ -812,18 +793,16 @@ export async function getLedgerReport(
         type: chartOfAccounts.type,
       })
       .from(chartOfAccounts)
-      .where(eq(chartOfAccounts.id, accountId))
+      .where(and(eq(chartOfAccounts.id, accountId), eq(chartOfAccounts.orgId, orgId)))
       .limit(1);
 
     if (!account) {
       return { success: false, error: "Account not found" };
     }
 
-    // Build date filter
     const from = dateFrom ? new Date(dateFrom) : new Date('2000-01-01');
     const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date('2099-12-31');
 
-    // Fetch journal entry lines for this account within date range
     const rows = await db
       .select({
         date: journalEntries.entryDate,
@@ -842,7 +821,6 @@ export async function getLedgerReport(
       ))
       .orderBy(journalEntries.entryDate, journalEntries.entryNumber);
 
-    // Calculate running balance
     let runningBalance = 0;
     let totalDebit = 0;
     let totalCredit = 0;
@@ -854,8 +832,6 @@ export async function getLedgerReport(
 
       totalDebit += debit;
       totalCredit += credit;
-
-      // Running balance: positive = debit balance, negative = credit balance
       runningBalance += debit - credit;
 
       transactions.push({
@@ -879,7 +855,7 @@ export async function getLedgerReport(
       },
     };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getLedgerReport" });
+    captureException(error, { module: "accounts", function: "getLedgerReport" });
     return { success: false, error: "Failed to generate ledger report" };
   }
 }
@@ -923,7 +899,6 @@ export async function getTaxSummary(
     const from = dateFrom ? new Date(dateFrom) : new Date('2000-01-01');
     const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date('2099-12-31');
 
-    // Output Tax: sales invoices (excluding draft/cancelled)
     const [outputResult] = await db
       .select({ total: sql<string>`SUM(COALESCE(${invoices.taxAmount}, 0))` })
       .from(invoices)
@@ -936,7 +911,6 @@ export async function getTaxSummary(
 
     const outputTax = parseFloat(outputResult?.total || '0');
 
-    // Input Tax: purchase invoices (excluding draft/revised)
     const [inputResult] = await db
       .select({ total: sql<string>`SUM(COALESCE(${purchaseInvoices.taxTotal}, 0))` })
       .from(purchaseInvoices)
@@ -948,10 +922,8 @@ export async function getTaxSummary(
       ));
 
     const inputTax = parseFloat(inputResult?.total || '0');
-
     const netTaxPayable = outputTax - inputTax;
 
-    // Monthly breakdown — fetch all relevant invoices and group by month
     const salesRows = await db
       .select({
         issueDate: invoices.issueDate,
@@ -978,7 +950,6 @@ export async function getTaxSummary(
         sql`${purchaseInvoices.status} NOT IN ('Draft', 'Revised')`
       ));
 
-    // Group by YYYY-MM
     const monthMap = new Map<string, { output: number; input: number }>();
 
     for (const row of salesRows) {
@@ -1004,7 +975,6 @@ export async function getTaxSummary(
         net_tax: (v.output - v.input).toFixed(2),
       }));
 
-    // Provincial breakdown from invoice items (sales)
     const salesTaxByType = await db
       .select({
         taxType: invoiceItems.taxType,
@@ -1020,7 +990,6 @@ export async function getTaxSummary(
       ))
       .groupBy(invoiceItems.taxType);
 
-    // Provincial breakdown from purchase items
     const purchaseTaxByType = await db
       .select({
         taxType: purchaseItems.taxType,
@@ -1064,7 +1033,7 @@ export async function getTaxSummary(
       },
     };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getTaxSummary" });
+    captureException(error, { module: "accounts", function: "getTaxSummary" });
     return { success: false, error: "Failed to generate tax summary" };
   }
 }
@@ -1078,38 +1047,27 @@ export interface VoucherData {
   date: string;
   description: string;
   amount: string;
-  // For CPV/BPV: expense account being debited
   expenseAccountId?: string;
-  // For CRV/BRV: receipt account being credited
   receiptAccountId?: string;
-  // For CONTRA: from and to accounts
   fromAccountId?: string;
   toAccountId?: string;
-  // For JV: multiple lines
   lines?: JournalEntryLine[];
-  // Bank account for BPV/BRV
   bankAccountId?: string;
-  // Reference
   reference?: string;
-  // Payee/Payer
   payeeName?: string;
-  // Payment mode
   paymentMode?: string;
 }
 
-// Get next voucher number
-async function getNextVoucherNumber(orgId: string, voucherType: VoucherType): Promise<string> {
-  // Count existing vouchers of this type
-  const result = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(journalEntries)
-    .where(sql`${journalEntries.orgId} = ${orgId} AND ${journalEntries.entryNumber} LIKE ${voucherType + '-%'}`);
-
-  const count = (result[0]?.count as number) || 0;
-  return `${voucherType}-${String(count + 1).padStart(5, '0')}`;
-}
-
 // Create voucher with auto Dr/Cr logic
+// FIX (2026 review):
+//  - Entry number now routed through the shared, MAX-parsed generator
+//    with retry (the previous getNextVoucherNumber() was a standalone
+//    COUNT-based LIKE query with no retry loop).
+//  - Every account ID the client can supply (expenseAccountId,
+//    receiptAccountId, bankAccountId, fromAccountId, toAccountId, and each
+//    JV line's accountId) is now verified to belong to this org before the
+//    entry posts — previously only the auto-resolved cash account was
+//    org-scoped, meaning a client could reference another org's account.
 export async function createVoucher(data: VoucherData) {
   await requireRole(["admin", "accountant"]);
   const orgId = await getCurrentOrgId();
@@ -1122,22 +1080,43 @@ export async function createVoucher(data: VoucherData) {
   if (locked) return { success: false, error: "Cannot create voucher in a locked fiscal period" };
 
   try {
-    const voucherNumber = await getNextVoucherNumber(orgId, data.voucherType);
     const amount = parseFloat(data.amount);
-
     if (isNaN(amount) || amount <= 0) {
       return { success: false, error: "Invalid amount" };
     }
 
+    // Collect every client-supplied accountId up front for a single
+    // org-membership check, regardless of voucher type.
+    const suppliedAccountIds = [
+      data.expenseAccountId,
+      data.receiptAccountId,
+      data.fromAccountId,
+      data.toAccountId,
+      data.bankAccountId,
+      ...(data.lines?.map((l) => l.accountId) || []),
+    ].filter((id): id is string => !!id);
+
+    if (suppliedAccountIds.length > 0) {
+      const uniqueIds = [...new Set(suppliedAccountIds)];
+      const orgAccounts = await db
+        .select({ id: chartOfAccounts.id })
+        .from(chartOfAccounts)
+        .where(and(inArray(chartOfAccounts.id, uniqueIds), eq(chartOfAccounts.orgId, orgId)));
+      const validIds = new Set(orgAccounts.map((a) => a.id));
+      for (const id of uniqueIds) {
+        if (!validIds.has(id)) {
+          return { success: false, error: `Account ${id} does not belong to this organization` };
+        }
+      }
+    }
+
     let linesToInsert: JournalEntryLine[] = [];
 
-    // Auto-generate Dr/Cr lines based on voucher type
     switch (data.voucherType) {
-      case 'CPV': // Cash Payment Voucher - Dr Expense, Cr Cash
+      case 'CPV': {
         if (!data.expenseAccountId) {
           return { success: false, error: "Expense account is required for CPV" };
         }
-// Cash account UUID dhundho
         const [cashAcc] = await db.select({ id: chartOfAccounts.id })
           .from(chartOfAccounts)
           .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cash')))
@@ -1146,7 +1125,7 @@ export async function createVoucher(data: VoucherData) {
 
         linesToInsert = [
           {
-            accountId: data.expenseAccountId!,
+            accountId: data.expenseAccountId,
             description: data.description || `Payment for ${data.payeeName || 'expense'}`,
             debit: data.amount,
             credit: '0',
@@ -1159,12 +1138,13 @@ export async function createVoucher(data: VoucherData) {
           },
         ];
         break;
+      }
 
-      case 'CRV': // Cash Receipt Voucher - Dr Cash, Cr Receipt Account
+      case 'CRV': {
         if (!data.receiptAccountId) {
           return { success: false, error: "Receipt account is required for CRV" };
         }
-const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
+        const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
           .from(chartOfAccounts)
           .where(and(eq(chartOfAccounts.orgId, orgId), eq(chartOfAccounts.subType, 'cash')))
           .limit(1);
@@ -1185,8 +1165,9 @@ const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
           },
         ];
         break;
+      }
 
-      case 'BPV': // Bank Payment Voucher - Dr Expense, Cr Bank
+      case 'BPV': {
         if (!data.expenseAccountId || !data.bankAccountId) {
           return { success: false, error: "Expense and Bank accounts are required for BPV" };
         }
@@ -1205,8 +1186,9 @@ const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
           },
         ];
         break;
+      }
 
-      case 'BRV': // Bank Receipt Voucher - Dr Bank, Cr Receipt Account
+      case 'BRV': {
         if (!data.receiptAccountId || !data.bankAccountId) {
           return { success: false, error: "Receipt and Bank accounts are required for BRV" };
         }
@@ -1225,8 +1207,9 @@ const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
           },
         ];
         break;
+      }
 
-      case 'CONTRA': // Contra - Transfer between Cash and Bank
+      case 'CONTRA': {
         if (!data.fromAccountId || !data.toAccountId) {
           return { success: false, error: "From and To accounts are required for CONTRA" };
         }
@@ -1248,19 +1231,20 @@ const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
           },
         ];
         break;
+      }
 
-      case 'JV': // Journal Voucher - Manual lines
+      case 'JV': {
         if (!data.lines || data.lines.length === 0) {
           return { success: false, error: "At least one line is required for JV" };
         }
         linesToInsert = data.lines;
         break;
+      }
 
       default:
         return { success: false, error: "Invalid voucher type" };
     }
 
-    // Validate lines
     const totalDebit = linesToInsert.reduce((sum, line) => sum + parseFloat(line.debit || '0'), 0);
     const totalCredit = linesToInsert.reduce((sum, line) => sum + parseFloat(line.credit || '0'), 0);
 
@@ -1271,51 +1255,45 @@ const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
       };
     }
 
-    // Create journal entry atomically with lines + audit
-    const [journalEntry] = await db.transaction(async (tx) => {
-      const [entry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber: voucherNumber,
-          entryDate: new Date(data.date),
-          referenceType: data.voucherType.toLowerCase(),
-          description: data.description,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      for (const line of linesToInsert) {
-        if (!line.accountId) {
-          throw new Error("All lines must have an account");
-        }
-
-        await tx.insert(journalEntryLines).values({
-          orgId,
-          journalEntryId: entry.id,
-          accountId: line.accountId,
-          description: line.description,
-          debitAmount: line.debit || '0',
-          creditAmount: line.credit || '0',
-        });
+    for (const line of linesToInsert) {
+      if (!line.accountId) {
+        return { success: false, error: "All lines must have an account" };
       }
+    }
+
+    const userId = (await auth()).userId || "system";
+
+    const { entryNumber: voucherNumber, journalEntryId: entryId } = await db.transaction(async (tx) => {
+      const posted = await postTransaction(tx, {
+        orgId,
+        description: data.description || `${data.voucherType} Voucher`,
+        date: new Date(data.date),
+        referenceType: data.voucherType.toLowerCase(),
+        numberPrefix: data.voucherType,
+        createdBy: userId,
+        lines: linesToInsert.map((line) => ({
+          accountId: line.accountId,
+          description: line.description || "",
+          debit: line.debit || "0",
+          credit: line.credit || "0",
+        })),
+      });
 
       await tx.insert(auditLogs).values({
         orgId,
-        userId: (await auth()).userId || 'system',
-        action: 'VOUCHER_CREATED',
-        entityType: 'voucher',
-        entityId: entry.id,
+        userId,
+        action: "VOUCHER_CREATED",
+        entityType: "voucher",
+        entityId: posted.journalEntryId,
         changes: JSON.stringify({
-          voucherNumber,
+          voucherNumber: posted.entryNumber,
           voucherType: data.voucherType,
           amount,
           description: data.description,
         }),
       });
 
-      return [entry];
+      return posted;
     });
 
     revalidatePath("/dashboard/accounts/journal-entries");
@@ -1324,10 +1302,10 @@ const [cashAcc2] = await db.select({ id: chartOfAccounts.id })
       success: true,
       message: `${data.voucherType} voucher created successfully`,
       voucherNumber,
-      entryId: journalEntry.id,
+      entryId,
     };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "createVoucher" });
+    captureException(error, { module: "accounts", function: "createVoucher" });
     return { success: false, error: "Failed to create voucher" };
   }
 }
@@ -1349,7 +1327,7 @@ export async function getVouchersByType(voucherType: VoucherType, limit: number 
         description: journalEntries.description,
       })
       .from(journalEntries)
-            .where(and(
+      .where(and(
         eq(journalEntries.orgId, orgId),
         sql`${journalEntries.entryNumber} LIKE ${voucherType + '-%'}`
       ))
@@ -1358,7 +1336,7 @@ export async function getVouchersByType(voucherType: VoucherType, limit: number 
 
     return { success: true, data: vouchers };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getVouchersByType" });
+    captureException(error, { module: "accounts", function: "getVouchersByType" });
     return { success: false, error: "Failed to fetch vouchers" };
   }
 }
@@ -1372,7 +1350,6 @@ export async function getVoucherWithLines(entryId: string) {
   }
 
   try {
-    // Get entry
     const [entry] = await db
       .select()
       .from(journalEntries)
@@ -1386,7 +1363,6 @@ export async function getVoucherWithLines(entryId: string) {
       return { success: false, error: "Voucher not found" };
     }
 
-    // Get lines
     const lines = await db
       .select({
         id: journalEntryLines.id,
@@ -1403,21 +1379,18 @@ export async function getVoucherWithLines(entryId: string) {
 
     return { success: true, data: { entry, lines } };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "getVoucherWithLines" });
+    captureException(error, { module: "accounts", function: "getVoucherWithLines" });
     return { success: false, error: "Failed to fetch voucher" };
   }
 }
 
-
 export async function deleteJournalEntry(id: string) {
   try {
-    // RBAC Check: Only admin and accountant can delete
     await requireRole(['admin', 'accountant']);
 
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 
-    // Fetch entry before deletion to check fiscal period and create audit log
     const [entry] = await db
       .select()
       .from(journalEntries)
@@ -1426,7 +1399,6 @@ export async function deleteJournalEntry(id: string) {
 
     if (!entry) return { success: false, error: "Journal entry not found" };
 
-    // Posted and reversed entries are immutable — only draft entries can be deleted
     if (entry.status === "posted" || entry.status === "reversed") {
       return {
         success: false,
@@ -1434,25 +1406,20 @@ export async function deleteJournalEntry(id: string) {
       };
     }
 
-    // Check if fiscal period is locked
     const locked = await checkPeriodLocked(entry.entryDate);
     if (locked) {
       return { success: false, error: "Cannot delete entry in a locked fiscal period" };
     }
 
-    // Atomic transaction for safe deletion
     await db.transaction(async (tx) => {
-      // 1. Delete lines associated with the entry
       await tx
         .delete(journalEntryLines)
         .where(eq(journalEntryLines.journalEntryId, id));
 
-      // 2. Delete the actual entry
       await tx
         .delete(journalEntries)
         .where(and(eq(journalEntries.id, id), eq(journalEntries.orgId, orgId)));
 
-      // 3. Create audit log
       await tx.insert(auditLogs).values({
         orgId,
         userId: (await auth()).userId || "system",
@@ -1470,10 +1437,10 @@ export async function deleteJournalEntry(id: string) {
     revalidatePath("/dashboard/accounts/journal-entries");
     return { success: true, message: "Journal entry deleted successfully" };
   } catch (error) {
-    captureException(error, { module: "accounts.ts", function: "deleteJournalEntry" });
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : "Failed to delete journal entry" 
+    captureException(error, { module: "accounts", function: "deleteJournalEntry" });
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to delete journal entry"
     };
   }
 }

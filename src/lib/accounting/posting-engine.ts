@@ -15,11 +15,13 @@ export interface PostTransactionSpec {
   description: string;
   date: Date;
   referenceType: string;
-  referenceId: string;
+  referenceId?: string;
+  numberPrefix?: string;
   sourceType?: string;
   lines: JournalLineSpec[];
   customerId?: string;
   vendorId?: string;
+  createdBy?: string;
 }
 
 /**
@@ -53,9 +55,9 @@ export async function postTransaction(
     );
   }
 
-  const entryNumber = await generateJournalEntryNumber(spec.orgId);
+  const entryNumber = await generateJournalEntryNumber(spec.orgId, spec.numberPrefix || "JE");
 
-  const [entry] = await tx
+    const [entry] = await tx
     .insert(journalEntries)
     .values({
       orgId: spec.orgId,
@@ -66,6 +68,7 @@ export async function postTransaction(
       description: spec.description,
       status: "posted",
       sourceType: spec.sourceType || "",
+      createdBy: spec.createdBy || null, // NEW
       postedAt: new Date(),
     })
     .returning();

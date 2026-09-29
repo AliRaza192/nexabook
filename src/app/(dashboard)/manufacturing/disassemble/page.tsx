@@ -25,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
   getBoms,
-  getProducts,
+  getManufacturingProducts,
   disassembleFinishedGood,
 } from "@/lib/actions/manufacturing";
 
@@ -86,7 +86,7 @@ export default function DisassemblePage() {
     try {
       const [bomsRes, productsRes] = await Promise.all([
         getBoms("active"),
-        getProducts(),
+        getManufacturingProducts(),
       ]);
 
       if (bomsRes.success && bomsRes.data) {

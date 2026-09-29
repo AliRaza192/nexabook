@@ -10,7 +10,6 @@ import {
   products,
   auditLogs,
   journalEntries,
-  journalEntryLines,
   stockMovements,
   purchaseOrders,
   purchaseOrderItems,
@@ -27,9 +26,8 @@ import {
 import { eq, and, or, ilike, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { validateJournalBalance } from "../accounting";
 import { postTransaction, resolveAccount } from "../accounting/posting-engine";
-import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, requireRole } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber, requireRole } from "./shared";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { convertToBaseUnit, updateWarehouseStock, updateBatchStock } from "./inventory";
 import { captureException } from "@/lib/error-handler";
@@ -415,7 +413,7 @@ export async function approvePurchaseInvoice(invoiceId: string) {
 
             // Update warehouse specific stock if warehouseId is set
             if (invoice.warehouseId) {
-              await updateWarehouseStock(tx, invoice.warehouseId, item.productId, baseQuantity);
+              await updateWarehouseStock(tx, orgId, invoice.warehouseId, item.productId, baseQuantity);
             }
 
             const newStock = available + baseQuantity;
@@ -712,8 +710,6 @@ export async function recordExpense(data: ExpenseFormData) {
     const locked = await checkPeriodLocked(data.date);
     if (locked) return { success: false, error: "Cannot record expense in a locked fiscal period" };
 
-    const entryNumber = await generateJournalEntryNumber(orgId);
-
     const newExpense = await db.transaction(async (tx) => {
       const [expense] = await tx
         .insert(expenses)
@@ -728,44 +724,30 @@ export async function recordExpense(data: ExpenseFormData) {
         })
         .returning();
 
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: data.date,
-          referenceType: 'expense',
-          referenceId: expense.id,
-          description: `Expense: ${data.description || data.reference || 'Recorded'}`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      if (!validateJournalBalance([{ debitAmount: data.amount, creditAmount: "0" }, { debitAmount: "0", creditAmount: data.amount }]))
-        throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-      // Debit: Expense Account
-      await tx.insert(journalEntryLines).values({
+      const posted = await postTransaction(tx, {
         orgId,
-        journalEntryId: journalEntry.id,
-        accountId: data.accountId,
-        description: `Debit - Expense Account`,
-        debitAmount: data.amount,
-        creditAmount: '0',
+        description: `Expense: ${data.description || data.reference || 'Recorded'}`,
+        date: new Date(data.date),
+        referenceType: 'expense',
+        referenceId: expense.id,
+        sourceType: 'expense',
+        createdBy: (await auth()).userId || 'system',
+        lines: [
+          {
+            accountId: data.accountId,
+            description: "Debit - Expense Account",
+            debit: data.amount,
+            credit: "0",
+          },
+          {
+            accountId: data.paidFromAccountId,
+            description: "Credit - Cash/Bank Account",
+            debit: "0",
+            credit: data.amount,
+          },
+        ],
       });
 
-      // Credit: Cash/Bank Account
-      await tx.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: data.paidFromAccountId,
-        description: `Credit - Cash/Bank Account`,
-        debitAmount: '0',
-        creditAmount: data.amount,
-      });
-
-      // Audit log
       await tx.insert(auditLogs).values({
         orgId,
         userId: (await auth()).userId || 'system',
@@ -774,16 +756,16 @@ export async function recordExpense(data: ExpenseFormData) {
         entityId: expense.id,
         changes: JSON.stringify({
           amount: data.amount,
-          journalEntry: entryNumber,
+          journalEntry: posted.entryNumber,
         }),
       });
 
-      return expense;
+      return { expense, entryNumber: posted.entryNumber };
     });
 
     revalidatePath('/accounts/expenses');
 
-    return { success: true, data: newExpense, message: "Expense recorded successfully", entryNumber };
+    return { success: true, data: newExpense.expense, message: "Expense recorded successfully", entryNumber: newExpense.entryNumber };
   } catch (error) {
     captureException(error, { module: "purchases.ts", function: "recordExpense" });
     return { success: false, error: "Failed to record expense" };

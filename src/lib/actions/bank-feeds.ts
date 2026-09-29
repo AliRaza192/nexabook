@@ -10,7 +10,7 @@ import {
 import { eq, and, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 import {
   getBankFeedProvider,
   mapTransactionsToStatementLines,
@@ -92,6 +92,7 @@ export async function createBankConnection(data: {
   config?: Record<string, string>;
 }) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
 
@@ -127,6 +128,7 @@ export async function createBankConnection(data: {
 
 export async function deleteBankConnection(id: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
 
@@ -145,6 +147,7 @@ export async function deleteBankConnection(id: string) {
 
 export async function syncBankTransactions(connectionId: string) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false as const, error: "No organization found" };
 

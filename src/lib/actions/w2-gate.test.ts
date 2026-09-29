@@ -188,6 +188,9 @@ describe("W2-GATE: Real DB regression tests", () => {
     const { processPosSale } = await import("./pos");
 
     await db.execute(
+      "INSERT INTO pos_shifts (id, org_id, profile_id, opening_amount, status) VALUES ('" + U.shiftJe + "','" + ids.orgId + "','" + ids.profileId + "','0','open')"
+    );
+    await db.execute(
       "INSERT INTO journal_entries (id, org_id, entry_number, entry_date, status, reference_type, reference_id, description) VALUES ('" + U.shiftJe + "','" + ids.orgId + "','JE-SHIFT-1','2026-08-20','posted','pos_shift','" + ids.profileId + "','open')"
     );
 

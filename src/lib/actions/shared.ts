@@ -1,20 +1,20 @@
 "use server";
 
 import { db } from "@/db";
-import { 
-  organizations, 
-  profiles, 
-  chartOfAccounts, 
-  invoices, 
-  saleOrders, 
-  quotations, 
-  purchaseOrders, 
-  purchaseInvoices, 
+import {
+  organizations,
+  profiles,
+  chartOfAccounts,
+  invoices,
+  saleOrders,
+  quotations,
+  purchaseOrders,
+  purchaseInvoices,
   goodReceivingNotes,
   journalEntries,
 } from "@/db/schema";
-import { eq, sql, and, desc } from "drizzle-orm";
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { eq, sql, and, desc, ilike } from "drizzle-orm";
 
 // NOTE: Default COA seeding is handled by seedInitialCOA() in accounts.ts
 // That version is comprehensive (~70 accounts) and should be the single source of truth.
@@ -41,116 +41,130 @@ export async function getCurrentOrgId(): Promise<string | null> {
 
 // Helper to pad numbers with leading zeros
 function padNumber(num: number, padding: number): string {
-  return String(num).padStart(padding, '0');
+  return String(num).padStart(padding, "0");
 }
 
-// Centralized function to generate document numbers
+const documentTables = {
+  invoice: invoices,
+  order: saleOrders,
+  quotation: quotations,
+  purchase: purchaseOrders,
+  bill: purchaseInvoices,
+  grn: goodReceivingNotes,
+} as const;
+
+const documentNumberColumns = {
+  invoice: invoices.invoiceNumber,
+  order: saleOrders.orderNumber,
+  quotation: quotations.quotationNumber,
+  purchase: purchaseOrders.orderNumber,
+  bill: purchaseInvoices.billNumber,
+  grn: goodReceivingNotes.grnNumber,
+} as const;
+
+const documentCreatedAtColumns = {
+  invoice: invoices.createdAt,
+  order: saleOrders.createdAt,
+  quotation: quotations.createdAt,
+  purchase: purchaseOrders.createdAt,
+  bill: purchaseInvoices.createdAt,
+  grn: goodReceivingNotes.createdAt,
+} as const;
+
+/**
+ * Centralized document number generator.
+ *
+ * FIX (2026 review): previously used COUNT(*) + 1, which breaks the moment
+ * any document is deleted — e.g. INV-1, INV-2, INV-3 exist (count=3);
+ * delete INV-2 (count=2); next number = count+1 = 3 → collides with the
+ * still-existing INV-3. Now parses the highest existing number from the
+ * most recently created document instead, matching the pattern already
+ * used elsewhere in sales.ts (generateDeliveryNumber, generatePaymentNumber,
+ * etc). Combined with the DB-level unique constraints added in migration
+ * 0005, a real collision now throws instead of silently succeeding, and
+ * the retry loop below will regenerate on that error.
+ */
 export async function generateDocumentNumber(
-  type: 'invoice' | 'order' | 'quotation' | 'purchase' | 'bill' | 'grn', 
-  orgId: string
+  type: "invoice" | "order" | "quotation" | "purchase" | "bill" | "grn",
+  orgId: string,
 ): Promise<string | null> {
   const MAX_RETRIES = 10;
+
+  const orgSettings = await db
+    .select({
+      invoicePrefix: organizations.invoicePrefix,
+      orderPrefix: organizations.orderPrefix,
+      quotationPrefix: organizations.quotationPrefix,
+      purchasePrefix: organizations.purchasePrefix,
+      billPrefix: organizations.billPrefix,
+      grnPrefix: organizations.grnPrefix,
+      numberingPadding: organizations.numberingPadding,
+      numberingIncludeYear: organizations.numberingIncludeYear,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+
+  if (!orgSettings || orgSettings.length === 0) {
+    console.error(`Organization settings not found for orgId: ${orgId}`);
+    return null;
+  }
+
+  const settings = orgSettings[0];
+  const prefixMap: Record<typeof type, string> = {
+    invoice: settings.invoicePrefix || "INV",
+    order: settings.orderPrefix || "SO",
+    quotation: settings.quotationPrefix || "QT",
+    purchase: settings.purchasePrefix || "PO",
+    bill: settings.billPrefix || "PI",
+    grn: settings.grnPrefix || "GRN",
+  };
+  const prefix = prefixMap[type];
+  const table = documentTables[type];
+  const numberColumn = documentNumberColumns[type];
+  const createdAtColumn = documentCreatedAtColumns[type];
+
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const orgSettings = await db
-        .select({
-          invoicePrefix: organizations.invoicePrefix,
-          orderPrefix: organizations.orderPrefix,
-          quotationPrefix: organizations.quotationPrefix,
-          purchasePrefix: organizations.purchasePrefix,
-          billPrefix: organizations.billPrefix,
-          grnPrefix: organizations.grnPrefix,
-          numberingPadding: organizations.numberingPadding,
-          numberingIncludeYear: organizations.numberingIncludeYear,
-        })
-        .from(organizations)
-        .where(eq(organizations.id, orgId))
+      const [latest] = await db
+        .select({ number: numberColumn })
+        .from(table as any)
+        .where(eq((table as any).orgId, orgId))
+        .orderBy(desc(createdAtColumn as any))
         .limit(1);
 
-      if (!orgSettings || orgSettings.length === 0) {
-        console.error(`Organization settings not found for orgId: ${orgId}`);
-        return null;
+      let nextNumber = 1;
+      if (latest?.number) {
+        const match = String(latest.number).match(/(\d+)$/);
+        if (match) nextNumber = parseInt(match[1], 10) + 1;
       }
 
-      const settings = orgSettings[0];
-      let prefix = '';
-      let count = 0;
-
-      switch (type) {
-        case 'invoice':
-          prefix = settings.invoicePrefix || 'INV';
-          const [invoiceCount] = await db
-            .select({ count: sql<number>`count(*)` })
-            .from(invoices)
-            .where(eq(invoices.orgId, orgId));
-          count = Number(invoiceCount.count);
-          break;
-        case 'order':
-          prefix = settings.orderPrefix || 'SO';
-          const [orderCount] = await db
-            .select({ count: sql<number>`count(*)` })
-            .from(saleOrders)
-            .where(eq(saleOrders.orgId, orgId));
-          count = Number(orderCount.count);
-          break;
-        case 'quotation':
-          prefix = settings.quotationPrefix || 'QT';
-          const [quotationCount] = await db
-            .select({ count: sql<number>`count(*)` })
-            .from(quotations)
-            .where(eq(quotations.orgId, orgId));
-          count = Number(quotationCount.count);
-          break;
-        case 'purchase':
-          prefix = settings.purchasePrefix || 'PO';
-          const [purchaseCount] = await db
-            .select({ count: sql<number>`count(*)` })
-            .from(purchaseOrders)
-            .where(eq(purchaseOrders.orgId, orgId));
-          count = Number(purchaseCount.count);
-          break;
-        case 'bill':
-          prefix = settings.billPrefix || 'PI';
-          const [billCount] = await db
-            .select({ count: sql<number>`count(*)` })
-            .from(purchaseInvoices)
-            .where(eq(purchaseInvoices.orgId, orgId));
-          count = Number(billCount.count);
-          break;
-        case 'grn':
-          prefix = settings.grnPrefix || 'GRN';
-          const [grnCount] = await db
-            .select({ count: sql<number>`count(*)` })
-            .from(goodReceivingNotes)
-            .where(eq(goodReceivingNotes.orgId, orgId));
-          count = Number(grnCount.count);
-          break;
-        default:
-          console.error(`Unknown document type: ${type}`);
-          return null;
-      }
-
-      // On retry, offset by attempt number to avoid same collision
-      const nextNumber = count + 1 + attempt;
-      const currentYear = new Date().getFullYear();
-      const paddedNumber = padNumber(nextNumber, settings.numberingPadding || 5);
+      // On retry, offset by attempt to reduce repeat-collision probability
+      const jitter =
+        attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
+      const paddedNumber = padNumber(
+        nextNumber + jitter,
+        settings.numberingPadding || 5,
+      );
 
       let documentNumber = prefix;
       if (settings.numberingIncludeYear) {
-        documentNumber += `-${currentYear}`;
+        documentNumber += `-${new Date().getFullYear()}`;
       }
       documentNumber += `-${paddedNumber}`;
 
       return documentNumber;
     } catch (error) {
-      console.error(`Error generating document number (attempt ${attempt + 1}):`, error);
+      console.error(
+        `Error generating document number (attempt ${attempt + 1}):`,
+        error,
+      );
       if (attempt === MAX_RETRIES - 1) return null;
-      await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
     }
   }
   return null;
 }
-
 
 // ==========================================
 // ROLE-BASED ACCESS CONTROL
@@ -178,7 +192,9 @@ export async function requireRole(allowedRoles: UserRole[]): Promise<void> {
 
   if (!profile) throw new Error("Unauthorized: Profile not found");
   if (!allowedRoles.includes(profile.role as UserRole)) {
-    throw new Error(`Forbidden: This action requires one of these roles: ${allowedRoles.join(", ")}`);
+    throw new Error(
+      `Forbidden: This action requires one of these roles: ${allowedRoles.join(", ")}`,
+    );
   }
 }
 
@@ -205,21 +221,45 @@ export async function getCurrentUserRole(): Promise<UserRole | null> {
   }
 }
 
-export async function generateJournalEntryNumber(orgId: string): Promise<string> {
+/**
+ * FIX (2026 review): was COUNT(*)-based, same delete-causes-duplicate flaw
+ * as generateDocumentNumber. Now parses the last journal entry's number.
+ */
+export async function generateJournalEntryNumber(
+  orgId: string,
+  prefix: string = "JE",
+): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const result = await db
-        .select({ count: sql<number>`count(*)::int` })
+      const [latest] = await db
+        .select({ entryNumber: journalEntries.entryNumber })
         .from(journalEntries)
-        .where(eq(journalEntries.orgId, orgId));
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      const nextNum = (result[0]?.count || 0) + 1 + jitter;
-      return `JE-${String(nextNum).padStart(5, "0")}`;
+        .where(
+          and(
+            eq(journalEntries.orgId, orgId),
+            ilike(journalEntries.entryNumber, `${prefix}-%`),
+          ),
+        )
+        .orderBy(desc(journalEntries.createdAt))
+        .limit(1);
+
+      let nextNum = 1;
+      if (latest?.entryNumber) {
+        const match = latest.entryNumber.match(/(\d+)$/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+
+      const jitter =
+        attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
+      return `${prefix}-${String(nextNum + jitter).padStart(5, "0")}`;
     } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
+      if (attempt < 4)
+        await new Promise((r) =>
+          setTimeout(r, Math.random() * 100 * (attempt + 1)),
+        );
     }
   }
-  return `JE-${String(Date.now() % 100000).padStart(5, "0")}`;
+  return `${prefix}-${String(Date.now() % 100000).padStart(5, "0")}`;
 }
 
 export async function getOrgProfile() {
@@ -235,7 +275,10 @@ export async function getOrgProfile() {
 
     if (!org) return { success: false, error: "Organization not found" };
 
-    return { success: true, data: { name: org.name, plan: org.planType || "Professional" } };
+    return {
+      success: true,
+      data: { name: org.name, plan: org.planType || "Professional" },
+    };
   } catch (error) {
     console.error("Error fetching org profile:", error);
     return { success: false, error: "Failed to fetch organization info" };

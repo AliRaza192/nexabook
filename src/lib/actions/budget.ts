@@ -3,7 +3,7 @@
 import { db } from "@/db";
 import { budgets, chartOfAccounts, journalEntryLines, journalEntries } from "@/db/schema";
 import { eq, and, sql, gte, lte } from "drizzle-orm";
-import { getCurrentOrgId } from "./shared";
+import { getCurrentOrgId, requireRole } from "./shared";
 import { revalidatePath } from "next/cache";
 
 export async function getBudgets(fiscalYear?: string) {
@@ -145,6 +145,7 @@ export async function setBudget(data: {
   notes?: string;
 }) {
   try {
+    await requireRole(["admin", "accountant"]);
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
 

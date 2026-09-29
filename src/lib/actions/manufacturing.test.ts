@@ -36,7 +36,8 @@ const chainable = () => {
     orderBy: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
     values: vi.fn().mockReturnThis(),
-    returning: vi.fn().mockResolvedValue([]),
+    returning: vi.fn().mockResolvedValue([{ id: "je_test_1" }]),
+    for: vi.fn().mockReturnThis(),
     onConflictDoNothing: vi.fn().mockReturnThis(),
     groupBy: vi.fn().mockReturnThis(),
     then: vi.fn((resolve: any) => resolve([])),
@@ -84,12 +85,15 @@ describe("SEC-10: Manufacturing disassemble IDOR isolation", () => {
   it("component stock update uses orgId guard", async () => {
     mockGetCurrentOrgId.mockResolvedValue("org_A");
 
-    const selectChain = chainable();
-    selectChain.limit
-      .mockResolvedValueOnce([{ id: "bom_1", finishedGoodId: "fg_1", quantity: 10, isActive: true, status: "active" }])
-      .mockResolvedValueOnce([{ id: "fg_1", name: "FG", currentStock: "20", costPrice: "100" }])
-      .mockResolvedValueOnce([{ componentId: "comp_1", quantityRequired: "2", component: { id: "comp_1", name: "Comp", currentStock: "50" } }]);
-    mockDb.select.mockReturnValue(selectChain);
+      const selectChain = chainable();
+      selectChain.for.mockResolvedValueOnce([{ currentStock: "20" }]);
+      selectChain.limit
+        .mockResolvedValueOnce([{ id: "bom_1", finishedGoodId: "fg_1", quantity: 10, isActive: true, status: "active" }])
+        .mockResolvedValueOnce([{ id: "fg_1", name: "FG", currentStock: "20", costPrice: "100" }])
+        .mockResolvedValueOnce([{ id: "acc_fg", subType: "finished_goods" }])
+        .mockResolvedValueOnce([{ id: "acc_rm", subType: "raw_materials_inventory" }])
+        .mockResolvedValueOnce([{ id: "acc_cogs", subType: "cogs" }]);
+      mockDb.select.mockReturnValue(selectChain);
 
     const updateChain = chainable();
     updateChain.where.mockResolvedValue(undefined);

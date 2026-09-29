@@ -29,6 +29,7 @@ import {
   deleteTicket,
   resolveTicket,
   updateTicket,
+  type TicketStatus,
 } from "@/lib/actions/crm";
 
 interface TicketData {
@@ -172,7 +173,7 @@ export default function TicketsPage() {
     }
   };
 
-  const handleStatusChange = async (ticketId: string, status: string) => {
+  const handleStatusChange = async (ticketId: string, status: TicketStatus) => {
     setActionLoading(ticketId);
     try {
       const result = await updateTicket(ticketId, { status });
@@ -402,7 +403,7 @@ export default function TicketsPage() {
                             </button>
                           )}
                           {ticket.status !== "resolved" && ticket.status !== "closed" && (
-                            <Select onValueChange={(val) => handleStatusChange(ticket.id, val)}>
+                            <Select onValueChange={(val) => handleStatusChange(ticket.id, val as TicketStatus)}>
                               <SelectTrigger className="h-6 w-[70px] text-xs">
                                 <SelectValue />
                               </SelectTrigger>

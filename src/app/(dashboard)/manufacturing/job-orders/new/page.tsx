@@ -44,6 +44,7 @@ import {
   getNextJobOrderNumber,
   getBoms,
   type JobOrderFormData,
+  type JobOrderStatus,
 } from "@/lib/actions/manufacturing";
 import { getAllAccounts } from "@/lib/actions/accounts";
 
@@ -115,7 +116,7 @@ export default function JobOrdersPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | JobOrderStatus>("all");
   const [completingOrderId, setCompletingOrderId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<AccountSelect[]>([]);
 
@@ -525,7 +526,7 @@ export default function JobOrdersPage() {
         <CardContent className="p-4">
           <div className="flex items-center gap-3">
             <Label className="text-sm font-medium text-nexabook-700">Status:</Label>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "all" | JobOrderStatus)}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue />
               </SelectTrigger>
