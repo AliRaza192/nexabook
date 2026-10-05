@@ -124,7 +124,7 @@ export default function BankingPage() {
   const handleAddTransfer = async (formData: FormData) => {
     setSubmitting(true);
     const data: FundsTransferFormData = {
-      transferType: formData.get("transferType") as any,
+      transferType: formData.get("transferType") as FundsTransferFormData["transferType"],
       fromBankAccountId: formData.get("fromBankAccountId") as string,
       toBankAccountId: formData.get("toBankAccountId") as string,
       amount: formData.get("amount") as string,

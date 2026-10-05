@@ -48,7 +48,7 @@ export default function ExpiryReportPage() {
       setLoading(true);
       const res = await getExpiryReport();
       if (res.success && res.data) {
-        setData(res.data as any);
+        setData(res.data);
       }
       setLoading(false);
     };

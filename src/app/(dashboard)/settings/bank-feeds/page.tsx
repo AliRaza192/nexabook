@@ -51,7 +51,7 @@ export default function BankFeedsSettingsPage() {
     setLoading(true);
     const [connRes, bankRes] = await Promise.all([getBankConnections(), getBankAccounts()]);
     if (connRes.success) setConnections(connRes.data);
-    if (bankRes.success) setAccounts(bankRes.data as any);
+    if (bankRes.success && bankRes.data) setAccounts(bankRes.data);
     setLoading(false);
   };
 

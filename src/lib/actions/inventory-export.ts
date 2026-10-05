@@ -293,6 +293,13 @@ export async function importProductsFromCSV(
       if (!row.name) rowErrors.push("Product name is required");
       if (!row.sku) rowErrors.push("SKU is required");
 
+      const normalizedType = (row.type || "product").trim().toLowerCase();
+      if ((products.type.enumValues as readonly string[]).includes(normalizedType)) {
+        row.type = normalizedType;
+      } else {
+        rowErrors.push(`Type "${row.type}" must be one of: ${products.type.enumValues.join(", ")}`);
+      }
+
       if (row.sku && existingSKUs.has(row.sku.toLowerCase())) {
         rowErrors.push(`SKU "${row.sku}" already exists`);
       }
@@ -320,7 +327,7 @@ export async function importProductsFromCSV(
         sku: row.sku!,
         barcode: row.barcode || null,
         categoryId: categoryId || null,
-        type: (row.type as any) || "product",
+        type: (row.type || "product") as (typeof products.type.enumValues)[number],
         unit: row.unit || "Pcs",
         description: row.description || null,
         salePrice: row.salePrice || "0",

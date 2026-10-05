@@ -63,7 +63,7 @@ export default function StockAdjustmentPage() {
     setSubmitting(true);
     const data: StockAdjustmentFormData = {
       adjustmentDate: formData.get("adjustmentDate") as string,
-      reason: formData.get("reason") as any,
+      reason: formData.get("reason") as StockAdjustmentFormData["reason"],
       notes: formData.get("notes") as string,
       lines,
     };

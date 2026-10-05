@@ -15,13 +15,15 @@ function setCookie(locale: Locale) {
   document.cookie = `${COOKIE_KEY}=${locale};path=/;max-age=31536000;SameSite=Lax`;
 }
 
-const messagesCache: Record<Locale, Messages> = {} as any;
+const messagesCache: Partial<Record<Locale, Messages>> = {};
 
 async function loadMessages(locale: Locale): Promise<Messages> {
-  if (messagesCache[locale]) return messagesCache[locale];
+  const cached = messagesCache[locale];
+  if (cached) return cached;
   const data = await import(`../../messages/${locale}.json`);
-  messagesCache[locale] = data.default || data;
-  return messagesCache[locale];
+  const messages: Messages = data.default || data;
+  messagesCache[locale] = messages;
+  return messages;
 }
 
 interface I18nContextValue {

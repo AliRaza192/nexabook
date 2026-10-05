@@ -44,7 +44,7 @@ export default function NewPurchaseReturnPage() {
         const [vendorsRes, productsRes, invoicesRes, retNumRes] = await Promise.all([getVendors(), getProducts(), getPurchaseInvoices(), getNextPurchaseReturnNumber()]);
         if (vendorsRes.success && vendorsRes.data) setVendors(vendorsRes.data as Vendor[]);
         if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
-        if (invoicesRes.success && invoicesRes.data) setInvoices(invoicesRes.data as any[]);
+        if (invoicesRes.success && invoicesRes.data) setInvoices(invoicesRes.data);
         if (retNumRes.success && retNumRes.data) setReturnNumber(retNumRes.data as string);
       } catch (error) {} finally { setLoading(false); }
     };
@@ -98,9 +98,9 @@ export default function NewPurchaseReturnPage() {
       const res = await createPurchaseReturn(data);
       if (res.success && res.data) {
         if (action === "approve") {
-          const id = (res.data as any).id;
+          const id = (res.data).id;
           const ar = await approvePurchaseReturn(id);
-          if (!ar.success) { alert(`Created but approval failed: ${(ar as any).error}`); router.push("/purchases/returns"); return; }
+          if (!ar.success) { alert(`Created but approval failed: ${(ar).error}`); router.push("/purchases/returns"); return; }
           alert("Return created and approved - stock reduced!");
         } else {
           alert("Purchase return created (pending approval)");
@@ -129,9 +129,9 @@ export default function NewPurchaseReturnPage() {
           <Card className="border-gray-200 shadow-sm"><CardContent className="p-4 space-y-3">
             <div className="grid grid-cols-4 gap-3">
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Vendor*</Label><Select value={vendorId} onValueChange={setVendorId}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select vendor" /></SelectTrigger><SelectContent>{vendors.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Linked Invoice</Label><Select value={selectedInvoice} onValueChange={handleInvoiceSelect}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select invoice (optional)" /></SelectTrigger><SelectContent>{invoices.filter(inv => !vendorId || (inv as any).vendorId === vendorId).map(inv => <SelectItem key={inv.id} value={inv.id}>{inv.billNumber}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Linked Invoice</Label><Select value={selectedInvoice} onValueChange={handleInvoiceSelect}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select invoice (optional)" /></SelectTrigger><SelectContent>{invoices.filter(inv => !vendorId || (inv).vendorId === vendorId).map(inv => <SelectItem key={inv.id} value={inv.id}>{inv.billNumber}</SelectItem>)}</SelectContent></Select></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Return Date*</Label><Input type="date" value={returnDate} onChange={e => setReturnDate(e.target.value)} className="h-9 text-xs" /></div>
-              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reason*</Label><Select value={reason} onValueChange={v => setReason(v as any)}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="defective">Defective</SelectItem><SelectItem value="wrong_item">Wrong Item</SelectItem><SelectItem value="not_as_described">Not as Described</SelectItem><SelectItem value="damaged_in_transit">Damaged in Transit</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent></Select></div>
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reason*</Label><Select value={reason} onValueChange={v => setReason(v as typeof reason)}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="defective">Defective</SelectItem><SelectItem value="wrong_item">Wrong Item</SelectItem><SelectItem value="not_as_described">Not as Described</SelectItem><SelectItem value="damaged_in_transit">Damaged in Transit</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent></Select></div>
             </div>
             <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reason Details</Label><Textarea value={reasonDetails} onChange={e => setReasonDetails(e.target.value)} className="min-h-[50px] text-xs" placeholder="Additional details about the return reason..." /></div>
           </CardContent></Card>

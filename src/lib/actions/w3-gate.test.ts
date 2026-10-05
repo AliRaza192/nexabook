@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "@/__tests__/test-db";
+import { createTestDb, type TestDbHandle, type SqlRow } from "@/__tests__/test-db";
 
 vi.setConfig({ hookTimeout: 30000 });
 
 let testDb: Awaited<ReturnType<typeof createTestDb>>;
 
-const dbRef: { current: any } = { current: null as any };
+const dbRef: { current: TestDbHandle["db"] | null } = { current: null };
 vi.mock("@/db", () => ({ get db() { return dbRef.current; } }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -145,7 +145,7 @@ describe("W3-GATE: Transaction atomicity regression tests", () => {
 
     const jes = await db.execute(`SELECT entry_date FROM journal_entries WHERE reference_type = 'invoice' AND reference_id = '${invId}'`);
     expect(jes.rows.length).toBe(1);
-    const jeDate = new Date((jes.rows[0] as any).entry_date);
+    const jeDate = new Date((jes.rows[0] as { entry_date: string | Date }).entry_date);
     expect(jeDate.getFullYear()).toBe(2026);
     expect(jeDate.getMonth()).toBe(2);
     expect(jeDate.getDate()).toBe(15);
@@ -172,7 +172,7 @@ describe("W3-GATE: Transaction atomicity regression tests", () => {
 
     const jes = await db.execute(`SELECT entry_date FROM journal_entries WHERE reference_type = 'purchase_invoice' AND reference_id = '${piId}'`);
     expect(jes.rows.length).toBe(1);
-    const jeDate = new Date((jes.rows[0] as any).entry_date);
+    const jeDate = new Date((jes.rows[0] as { entry_date: string | Date }).entry_date);
     expect(jeDate.getFullYear()).toBe(2026);
     expect(jeDate.getMonth()).toBe(4);
     expect(jeDate.getDate()).toBe(20);
@@ -198,7 +198,7 @@ describe("W3-GATE: Transaction atomicity regression tests", () => {
 
     const bankRows = await db.execute(`SELECT current_balance, opening_balance FROM bank_accounts WHERE org_id = '${ids.orgId}'`);
     expect(bankRows.rows.length).toBe(1);
-    const row = bankRows.rows[0] as any;
+    const row = bankRows.rows[0] as SqlRow;
     expect(row.current_balance).toBe("50000.50");
     expect(row.opening_balance).toBe("50000.50");
   });
@@ -210,12 +210,14 @@ describe("W3-GATE: Transaction atomicity regression tests", () => {
     vi.mocked(shared.getCurrentOrgId).mockResolvedValue(null);
 
     const clerk = await import("@clerk/nextjs/server");
-    vi.mocked(clerk.auth).mockResolvedValue({ userId: "user_999" } as any);
+    vi.mocked(clerk.auth).mockResolvedValue(
+      { userId: "user_999" } as unknown as Awaited<ReturnType<typeof clerk.auth>>
+    );
     vi.mocked(clerk.currentUser).mockResolvedValue({
       emailAddresses: [{ emailAddress: "new@org.com" }],
       fullName: "New User",
       username: "newuser",
-    } as any);
+    } as unknown as Awaited<ReturnType<typeof clerk.currentUser>>);
 
     const { createOrganization } = await import("./onboarding");
     const result = await createOrganization({ name: "Atomic Test Org" });

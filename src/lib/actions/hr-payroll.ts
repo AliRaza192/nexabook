@@ -18,6 +18,7 @@ import { getCurrentOrgId, requireRole } from "./shared";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { postTransaction, resolveAccount } from "../accounting/posting-engine";
 import { captureException } from "@/lib/error-handler";
+import { roundDecimal } from "@/lib/utils/decimal";
 
 const VALID_EMPLOYEE_STATUSES = ["Active", "On Leave", "Terminated"] as const;
 
@@ -671,13 +672,13 @@ export async function generateAndApprovePayroll(month: number, year: number, cal
       return { success: false, error: "Payroll already exists and has been approved for this month" };
     }
 
-    const totalGross = calculations.reduce((sum, c) => sum + c.totalEarnings, 0);
-    const totalDeductions = calculations.reduce((sum, c) => sum + c.totalDeductions, 0);
-    const totalNet = calculations.reduce((sum, c) => sum + c.netSalary, 0);
-    const totalEobi = calculations.reduce((sum, c) => sum + c.eobiDeduction, 0);
-    const totalIncomeTax = calculations.reduce((sum, c) => sum + c.incomeTax, 0);
-    const totalProvidentFund = calculations.reduce((sum, c) => sum + c.providentFund, 0);
-    const totalUnpaidLeave = calculations.reduce((sum, c) => sum + c.unpaidLeaveDeduction, 0);
+    const totalGross = roundDecimal(calculations.reduce((sum, c) => sum + c.totalEarnings, 0));
+    const totalDeductions = roundDecimal(calculations.reduce((sum, c) => sum + c.totalDeductions, 0));
+    const totalNet = roundDecimal(calculations.reduce((sum, c) => sum + c.netSalary, 0));
+    const totalEobi = roundDecimal(calculations.reduce((sum, c) => sum + c.eobiDeduction, 0));
+    const totalIncomeTax = roundDecimal(calculations.reduce((sum, c) => sum + c.incomeTax, 0));
+    const totalProvidentFund = roundDecimal(calculations.reduce((sum, c) => sum + c.providentFund, 0));
+    const totalUnpaidLeave = roundDecimal(calculations.reduce((sum, c) => sum + c.unpaidLeaveDeduction, 0));
 
     let payrollRunId = '';
     let journalEntryId = '';

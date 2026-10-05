@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "@/__tests__/test-db";
+import { createTestDb, type TestDbHandle, type SqlRow } from "@/__tests__/test-db";
 
 vi.setConfig({ hookTimeout: 60000 });
 
 let testDb: Awaited<ReturnType<typeof createTestDb>>;
 
-const dbRef: { current: any } = { current: null as any };
+const dbRef: { current: TestDbHandle["db"] | null } = { current: null };
 vi.mock("@/db", () => ({ get db() { return dbRef.current; } }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -90,7 +90,7 @@ describe("W7-GATE: Wave 7a financial-integrity regression tests", () => {
     const { db, ids } = testDb;
 
     const stockBefore = await db.execute(`SELECT current_stock FROM products WHERE id = '${ids.prodId}'`);
-    const beforeQty = Number((stockBefore.rows[0] as any).current_stock);
+    const beforeQty = Number((stockBefore.rows[0] as SqlRow).current_stock);
 
     const { createGRN } = await import("./purchases");
     const grnResult = await createGRN({
@@ -107,7 +107,7 @@ describe("W7-GATE: Wave 7a financial-integrity regression tests", () => {
     expect(grnResult.success).toBe(true);
 
     const stockAfterGrn = await db.execute(`SELECT current_stock FROM products WHERE id = '${ids.prodId}'`);
-    const afterGrnQty = Number((stockAfterGrn.rows[0] as any).current_stock);
+    const afterGrnQty = Number((stockAfterGrn.rows[0] as SqlRow).current_stock);
     expect(afterGrnQty).toBe(beforeQty);
 
     await db.execute(
@@ -122,7 +122,7 @@ describe("W7-GATE: Wave 7a financial-integrity regression tests", () => {
     expect(approvalResult.success).toBe(true);
 
     const stockAfterApproval = await db.execute(`SELECT current_stock FROM products WHERE id = '${ids.prodId}'`);
-    const afterApprovalQty = Number((stockAfterApproval.rows[0] as any).current_stock);
+    const afterApprovalQty = Number((stockAfterApproval.rows[0] as SqlRow).current_stock);
     expect(afterApprovalQty).toBe(beforeQty + 50);
   });
 
@@ -148,9 +148,9 @@ describe("W7-GATE: Wave 7a financial-integrity regression tests", () => {
       `SELECT id, status FROM journal_entries WHERE reference_type = 'stock_adjustment' AND reference_id = '${U.adj1}'`
     );
     expect(jeRows.rows.length).toBe(1);
-    expect((jeRows.rows[0] as any).status).toBe("posted");
+    expect((jeRows.rows[0] as SqlRow).status).toBe("posted");
 
-    const jeId = (jeRows.rows[0] as any).id;
+    const jeId = (jeRows.rows[0] as SqlRow).id as string;
     const lines = await db.execute(
       `SELECT debit_amount, credit_amount FROM journal_entry_lines WHERE journal_entry_id = '${jeId}'`
     );
@@ -170,7 +170,7 @@ describe("W7-GATE: Wave 7a financial-integrity regression tests", () => {
     );
 
     const stockBefore = await db.execute(`SELECT current_stock FROM products WHERE id = '${ids.prodId}'`);
-    const beforeQty = Number((stockBefore.rows[0] as any).current_stock);
+    const beforeQty = Number((stockBefore.rows[0] as SqlRow).current_stock);
 
     const { addStockAdjustment, approveStockAdjustment } = await import("./inventory-depth");
 
@@ -182,15 +182,16 @@ describe("W7-GATE: Wave 7a financial-integrity regression tests", () => {
     expect(createResult.success).toBe(true);
 
     const stockAfterCreate = await db.execute(`SELECT current_stock FROM products WHERE id = '${ids.prodId}'`);
-    const afterCreateQty = Number((stockAfterCreate.rows[0] as any).current_stock);
+    const afterCreateQty = Number((stockAfterCreate.rows[0] as SqlRow).current_stock);
     expect(afterCreateQty).toBe(beforeQty);
 
-    const adjustmentId = (createResult.data as any).id;
+    if (!("data" in createResult) || !createResult.data) throw new Error("Stock adjustment was not created");
+    const adjustmentId = createResult.data.id;
     const approveResult = await approveStockAdjustment(adjustmentId);
     expect(approveResult.success).toBe(true);
 
     const stockAfterApprove = await db.execute(`SELECT current_stock FROM products WHERE id = '${ids.prodId}'`);
-    const afterApproveQty = Number((stockAfterApprove.rows[0] as any).current_stock);
+    const afterApproveQty = Number((stockAfterApprove.rows[0] as SqlRow).current_stock);
     expect(afterApproveQty).toBe(120);
   });
 
@@ -234,21 +235,21 @@ describe("W7-GATE: Wave 7a financial-integrity regression tests", () => {
     expect(approveResult.success).toBe(true);
 
     const invBefore = await db.execute(`SELECT journal_entry_id, status FROM invoices WHERE id = '${U.inv1}'`);
-    const origJeId = (invBefore.rows[0] as any).journal_entry_id;
-    expect((invBefore.rows[0] as any).status).toBe("approved");
+    const origJeId = (invBefore.rows[0] as SqlRow).journal_entry_id as string;
+    expect((invBefore.rows[0] as SqlRow).status).toBe("approved");
 
     const deleteResult = await deleteInvoice(U.inv1);
     expect(deleteResult.success).toBe(true);
 
     const invAfter = await db.execute(`SELECT status FROM invoices WHERE id = '${U.inv1}'`);
     expect(invAfter.rows.length).toBe(1);
-    expect((invAfter.rows[0] as any).status).toBe("cancelled");
+    expect((invAfter.rows[0] as SqlRow).status).toBe("cancelled");
 
     const reversalJe = await db.execute(
       `SELECT id FROM journal_entries WHERE reference_type = 'reversal' AND reference_id = '${U.inv1}'`
     );
     expect(reversalJe.rows.length).toBe(1);
-    const reversalJeId = (reversalJe.rows[0] as any).id;
+    const reversalJeId = (reversalJe.rows[0] as SqlRow).id as string;
 
     const origLines = await db.execute(
       `SELECT debit_amount, credit_amount FROM journal_entry_lines WHERE journal_entry_id = '${origJeId}'`

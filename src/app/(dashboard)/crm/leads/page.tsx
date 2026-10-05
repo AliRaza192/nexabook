@@ -347,7 +347,7 @@ export default function LeadsPage() {
   }, [searchQuery, statusFilter]);
 
   const handleStatusChange = async (leadId: string, status: string) => {
-    const result = await updateLeadStatus(leadId, status as any);
+    const result = await updateLeadStatus(leadId, status as import("@/lib/actions/crm").LeadStatus);
     if (result.success) {
       await loadLeads();
       await loadStats();

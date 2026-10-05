@@ -34,6 +34,10 @@ export function sumDecimals(values: (string | number | null | undefined)[]): str
   return addDecimal(...values);
 }
 
+export function roundDecimal(value: string | number | null | undefined): number {
+  return round(toNumber(value));
+}
+
 export function absDecimal(a: string | number | null | undefined): string {
   return Math.abs(toNumber(a)).toFixed(SCALE);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "@/__tests__/test-db";
+import { createTestDb, type TestDbHandle, type SqlRow } from "@/__tests__/test-db";
 
 vi.setConfig({ hookTimeout: 60000 });
 
@@ -26,7 +26,7 @@ const U = {
   fpLocked:  "11111111-1111-1111-1111-111111111111",
 };
 
-const dbRef: { current: any } = { current: null as any };
+const dbRef: { current: TestDbHandle["db"] | null } = { current: null };
 vi.mock("@/db", () => ({ get db() { return dbRef.current; } }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -81,12 +81,12 @@ describe("W2-GATE: Real DB regression tests", () => {
     expect(result.success).toBe(true);
 
     const inv = await db.execute("SELECT journal_entry_id, status FROM invoices WHERE id = '" + U.inv1 + "'");
-    const row = inv.rows[0] as any;
+    const row = inv.rows[0] as SqlRow;
     expect(row.journal_entry_id).toBeTruthy();
     expect(row.status).toBe("approved");
 
     const jeRows = await db.execute("SELECT status FROM journal_entries WHERE id = '" + row.journal_entry_id + "'");
-    expect((jeRows.rows[0] as any).status).toBe("posted");
+    expect((jeRows.rows[0] as SqlRow).status).toBe("posted");
 
     const lines = await db.execute(
       "SELECT debit_amount, credit_amount FROM journal_entry_lines WHERE journal_entry_id = '" + row.journal_entry_id + "'"
@@ -112,7 +112,7 @@ describe("W2-GATE: Real DB regression tests", () => {
     expect(approveResult.success).toBe(true);
 
     const inv = await db.execute("SELECT journal_entry_id FROM invoices WHERE id = '" + U.invDel + "'");
-    const origJeId = (inv.rows[0] as any).journal_entry_id;
+    const origJeId = (inv.rows[0] as SqlRow).journal_entry_id as string;
 
     const deleteResult = await deleteInvoice(U.invDel);
     expect(deleteResult.success).toBe(true);
@@ -120,7 +120,7 @@ describe("W2-GATE: Real DB regression tests", () => {
     const revJe = await db.execute(
       "SELECT id FROM journal_entries WHERE reference_type = 'reversal' AND reference_id = '" + U.invDel + "'"
     );
-    const reversalJeId = (revJe.rows[0] as any).id;
+    const reversalJeId = (revJe.rows[0] as SqlRow).id as string;
 
     const origLines = await db.execute(
       "SELECT debit_amount, credit_amount FROM journal_entry_lines WHERE journal_entry_id = '" + origJeId + "'"
@@ -164,7 +164,7 @@ describe("W2-GATE: Real DB regression tests", () => {
     const jeAfter = await db.execute(
       "SELECT id FROM journal_entries WHERE reference_type = 'purchase_invoice_revision' AND reference_id = '" + U.pi1 + "' ORDER BY created_at DESC LIMIT 1"
     );
-    const newJeId = (jeAfter.rows[0] as any).id;
+    const newJeId = (jeAfter.rows[0] as SqlRow).id as string;
 
     const origLines = await db.execute(
       "SELECT debit_amount, credit_amount FROM journal_entry_lines WHERE journal_entry_id = '" + U.jeOrig + "'"
@@ -204,12 +204,12 @@ describe("W2-GATE: Real DB regression tests", () => {
     const inv = await db.execute(
       "SELECT id FROM invoices WHERE org_id = '" + ids.orgId + "' ORDER BY created_at DESC LIMIT 1"
     );
-    const invoiceId = (inv.rows[0] as any).id;
+    const invoiceId = (inv.rows[0] as SqlRow).id as string;
 
     const jeRow = await db.execute(
       "SELECT id FROM journal_entries WHERE reference_type = 'pos_sale' AND reference_id = '" + invoiceId + "'"
     );
-    const jeId = (jeRow.rows[0] as any).id;
+    const jeId = (jeRow.rows[0] as SqlRow).id as string;
     expect(jeId).toBeTruthy();
 
     const lines = await db.execute(
@@ -221,7 +221,7 @@ describe("W2-GATE: Real DB regression tests", () => {
     let hasCogs = false;
 
     for (const row of lines.rows) {
-      const r = row as any;
+      const r = row as SqlRow;
       totalDebit += Number(r.debit_amount);
       totalCredit += Number(r.credit_amount);
       if (r.account_id === ids.cogsAccId) hasCogs = true;

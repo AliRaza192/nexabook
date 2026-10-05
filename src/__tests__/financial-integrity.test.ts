@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "@/__tests__/test-db";
+import { createTestDb, type TestDbHandle, type SqlRow } from "@/__tests__/test-db";
+import { NextRequest } from "next/server";
 
 vi.setConfig({ hookTimeout: 60000, testTimeout: 60000 });
 
 let testDb: Awaited<ReturnType<typeof createTestDb>>;
 
-const dbRef: { current: any } = { current: null as any };
+const dbRef: { current: TestDbHandle["db"] | null } = { current: null };
 vi.mock("@/db", () => ({ get db() { return dbRef.current; } }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -54,20 +55,21 @@ const U = {
   srItem: "b1000017-0000-0000-0000-000000000001",
   salesReturn: "b1000018-0000-0000-0000-000000000001",
   srItemLine: "b100001a-0000-0000-0000-000000000001",
+  srBatch: "b100001b-0000-0000-0000-000000000001",
   invForPayroll: "b1000019-0000-0000-0000-000000000001",
 };
 
-async function sqlRows(query: string): Promise<any[]> {
+async function sqlRows(query: string): Promise<SqlRow[]> {
   const res = await testDb.db.execute(query);
-  return res.rows as any[];
+  return res.rows as SqlRow[];
 }
 
-async function firstRow(query: string): Promise<any> {
+async function firstRow(query: string): Promise<SqlRow> {
   const rows = await sqlRows(query);
   return rows[0];
 }
 
-async function journalLines(jeId: string): Promise<any[]> {
+async function journalLines(jeId: string): Promise<SqlRow[]> {
   return sqlRows(
     `SELECT l.debit_amount, l.credit_amount, a.sub_type, a.code
      FROM journal_entry_lines l
@@ -76,7 +78,7 @@ async function journalLines(jeId: string): Promise<any[]> {
   );
 }
 
-function totals(lines: any[]) {
+function totals(lines: SqlRow[]) {
   const debit = lines.reduce((s, l) => s + Number(l.debit_amount), 0);
   const credit = lines.reduce((s, l) => s + Number(l.credit_amount), 0);
   return { debit, credit };
@@ -207,7 +209,7 @@ describe("W7 financial-integrity integration tests", () => {
       `SELECT id FROM invoices WHERE org_id = '${ids.orgId}' ORDER BY created_at DESC LIMIT 1`
     );
 
-    const approveResult = await approveInvoice(invRow.id);
+    const approveResult = await approveInvoice(invRow.id as string);
     expect(approveResult.success).toBe(true);
 
     const approved = await firstRow(
@@ -216,7 +218,7 @@ describe("W7 financial-integrity integration tests", () => {
     expect(approved.status).toBe("approved");
     expect(approved.journal_entry_id).toBeTruthy();
 
-    const lines = await journalLines(approved.journal_entry_id);
+    const lines = await journalLines(approved.journal_entry_id as string);
     expect(lines.length).toBeGreaterThanOrEqual(4);
     const { debit, credit } = totals(lines);
     expect(debit).toBeCloseTo(credit, 2);
@@ -283,7 +285,7 @@ describe("W7 financial-integrity integration tests", () => {
     expect(run.status).toBe("Posted");
     expect(run.journal_entry_id).toBeTruthy();
 
-    const lines = await journalLines(run.journal_entry_id);
+    const lines = await journalLines(run.journal_entry_id as string);
     const { debit, credit } = totals(lines);
     expect(debit).toBeCloseTo(credit, 2);
     expect(debit).toBeCloseTo(148700, 2);
@@ -345,7 +347,7 @@ describe("W7 financial-integrity integration tests", () => {
     );
     expect(payslip.is_paid).toBe(false);
 
-    const paid = await markPayslipPaid(payslip.id, "bank");
+    const paid = await markPayslipPaid(payslip.id as string, "bank");
     expect(paid.success).toBe(true);
 
     const after = await firstRow(
@@ -361,7 +363,7 @@ describe("W7 financial-integrity integration tests", () => {
     );
     expect(je).toBeTruthy();
 
-    const lines = await journalLines(je.id);
+    const lines = await journalLines(je.id as string);
     expect(lines.length).toBe(2);
     const { debit, credit } = totals(lines);
     expect(debit).toBeCloseTo(credit, 2);
@@ -388,7 +390,7 @@ describe("W7 financial-integrity integration tests", () => {
     expect(shift.status).toBe("open");
     expect(shift.opening_journal_entry_id).toBeTruthy();
 
-    const openLines = await journalLines(shift.opening_journal_entry_id);
+    const openLines = await journalLines(shift.opening_journal_entry_id as string);
     const openTotals = totals(openLines);
     expect(openTotals.debit).toBeCloseTo(openTotals.credit, 2);
     expect(openTotals.debit).toBeCloseTo(5000, 2);
@@ -400,7 +402,7 @@ describe("W7 financial-integrity integration tests", () => {
     expect(Number(openByType.pos_cash.credit_amount)).toBe(5000);
 
     const equityLines = openLines.filter((l) =>
-      ["opening_balance_equity", "capital"].includes(l.sub_type)
+      ["opening_balance_equity", "capital"].includes(l.sub_type as string)
     );
     expect(equityLines.length).toBe(0);
 
@@ -413,7 +415,7 @@ describe("W7 financial-integrity integration tests", () => {
     expect(afterClose.status).toBe("closed");
     expect(afterClose.closing_journal_entry_id).toBeTruthy();
 
-    const closeLines = await journalLines(afterClose.closing_journal_entry_id);
+    const closeLines = await journalLines(afterClose.closing_journal_entry_id as string);
     const closeTotals = totals(closeLines);
     expect(closeTotals.debit).toBeCloseTo(closeTotals.credit, 2);
     expect(closeTotals.debit).toBeCloseTo(5200, 2);
@@ -424,7 +426,7 @@ describe("W7 financial-integrity integration tests", () => {
     expect(closeJe.status).toBe("posted");
     expect(closeJe.reference_type).toBe("pos_shift_closing");
 
-    const zReport = await generatePOSReport(shift.id, "Z");
+    const zReport = await generatePOSReport(shift.id as string, "Z");
     expect(zReport.success).toBe(false);
     expect(zReport.error).toContain("already closed");
   });
@@ -514,11 +516,11 @@ describe("W7 financial-integrity integration tests", () => {
     const { POST } = await import("@/app/api/portal-pay/route");
 
     const post = (body: unknown) =>
-      new Request("http://localhost/api/portal-pay", {
+      new NextRequest("http://localhost/api/portal-pay", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }) as any;
+      });
 
     const tooHigh = await POST(
       post({ token: "portal-token-w7", invoiceId: U.portalInv, amount: 1500, gateway: "jazzcash" })
@@ -553,7 +555,7 @@ describe("W7 financial-integrity integration tests", () => {
     expect(pendingTxns.length).toBe(0);
   });
 
-  it("8. approving a sales return restores product and warehouse stock and posts a balanced JE", async () => {
+  it("8. approving a sales return restores product, warehouse and batch stock and posts a balanced JE", async () => {
     const { db, ids } = testDb;
     await db.execute(
       `INSERT INTO warehouses (id, org_id, name, is_default)
@@ -568,8 +570,12 @@ describe("W7 financial-integrity integration tests", () => {
        VALUES ('${U.srInvoice}','${ids.orgId}','${ids.custId}','${U.warehouse}','INV-SR-W7','approved','2026-07-01','1000','1000','0','0','0','0','1000')`
     );
     await db.execute(
-      `INSERT INTO invoice_items (id, org_id, invoice_id, product_id, description, quantity, unit_price, line_total, tax_rate, unit_cost)
-       VALUES ('${U.srItem}','${ids.orgId}','${U.srInvoice}','${ids.prodId}','Widget','10','100','1000','0','60')`
+      `INSERT INTO product_batches (id, org_id, product_id, warehouse_id, batch_no, initial_qty, current_qty)
+       VALUES ('${U.srBatch}','${ids.orgId}','${ids.prodId}','${U.warehouse}','BATCH-W7','100','90')`
+    );
+    await db.execute(
+      `INSERT INTO invoice_items (id, org_id, invoice_id, product_id, batch_id, description, quantity, unit_price, line_total, tax_rate, unit_cost)
+       VALUES ('${U.srItem}','${ids.orgId}','${U.srInvoice}','${ids.prodId}','${U.srBatch}','Widget','10','100','1000','0','60')`
     );
     await db.execute(
       `INSERT INTO sales_returns (id, org_id, return_number, invoice_id, customer_id, return_date, reason, gross_amount, discount_amount, tax_amount, net_amount, refund_amount, status)
@@ -588,8 +594,14 @@ describe("W7 financial-integrity integration tests", () => {
         `SELECT quantity FROM warehouse_stock WHERE id = '${U.warehouseStock}'`
       )).quantity
     );
+    const batchBefore = Number(
+      (await firstRow(
+        `SELECT current_qty FROM product_batches WHERE id = '${U.srBatch}'`
+      )).current_qty
+    );
     expect(productBefore).toBe(100);
     expect(warehouseBefore).toBe(50);
+    expect(batchBefore).toBe(90);
 
     const { approveSalesReturn } = await import("@/lib/actions/sales");
     const result = await approveSalesReturn(U.salesReturn);
@@ -603,8 +615,14 @@ describe("W7 financial-integrity integration tests", () => {
         `SELECT quantity FROM warehouse_stock WHERE id = '${U.warehouseStock}'`
       )).quantity
     );
+    const batchAfter = Number(
+      (await firstRow(
+        `SELECT current_qty FROM product_batches WHERE id = '${U.srBatch}'`
+      )).current_qty
+    );
     expect(productAfter).toBe(productBefore + 2);
     expect(warehouseAfter).toBe(warehouseBefore + 2);
+    expect(batchAfter).toBe(batchBefore + 2);
 
     const inv = await firstRow(
       `SELECT balance_amount, status FROM invoices WHERE id = '${U.srInvoice}'`
@@ -619,7 +637,7 @@ describe("W7 financial-integrity integration tests", () => {
     );
     expect(je).toBeTruthy();
 
-    const lines = await journalLines(je.id);
+    const lines = await journalLines(je.id as string);
     const { debit, credit } = totals(lines);
     expect(debit).toBeCloseTo(credit, 2);
     expect(debit).toBeCloseTo(620, 2);

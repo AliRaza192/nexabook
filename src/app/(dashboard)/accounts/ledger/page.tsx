@@ -31,7 +31,7 @@ export default function GeneralLedgerPage() {
     async function loadAccounts() {
       const res = await getAllAccounts();
       if (res.success && res.data) {
-        setAccounts(res.data as any);
+        setAccounts(res.data);
       }
     }
     loadAccounts();

@@ -3,13 +3,13 @@
 import { db } from "@/db";
 import {
   stockMovements, stockAdjustments, stockAdjustmentLines, stockValuationLogs,
-  products, chartOfAccounts, journalEntries, journalEntryLines, productBatches,
+  products, chartOfAccounts, productBatches,
 } from "@/db/schema";
 import { eq, and, desc, ilike, or, asc, sql, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
-import { validateJournalBalance } from "../accounting";
+import { postTransaction } from "../accounting/posting-engine";
 import { checkPeriodLocked } from "./fiscal-periods";
 
 // ==========================================
@@ -23,7 +23,7 @@ export async function getStockMovements(productId?: string, movementType?: strin
 
     const conditions = [eq(stockMovements.orgId, orgId)];
     if (productId) conditions.push(eq(stockMovements.productId, productId));
-    if (movementType) conditions.push(eq(stockMovements.movementType, movementType as any));
+    if (movementType) conditions.push(eq(stockMovements.movementType, movementType as (typeof stockMovements.movementType.enumValues)[number]));
 
     const movements = await db
       .select({
@@ -350,27 +350,19 @@ export async function approveStockAdjustment(adjustmentId: string) {
           .limit(1);
         if (!lossAccount) throw new Error("Loss on Inventory Write-off account not found");
 
-        const [je] = await tx.insert(journalEntries).values({
+        await postTransaction(tx, {
           orgId,
-          entryNumber: `SA-${Date.now()}`,
-          entryDate: new Date(adjustment.adjustmentDate),
           description: `Stock adjustment (loss): ${adjustment.adjustmentNumber}`,
+          date: new Date(adjustment.adjustmentDate),
           referenceType: "stock_adjustment",
           referenceId: adjustmentId,
-          status: "posted",
-          postedAt: new Date(),
+          numberPrefix: "SA",
           sourceType: "inventory",
-        }).returning();
-
-        if (!validateJournalBalance([
-          { debitAmount: totalNegative.toFixed(2), creditAmount: "0" },
-          { debitAmount: "0", creditAmount: totalNegative.toFixed(2) },
-        ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-        await tx.insert(journalEntryLines).values([
-          { orgId, journalEntryId: je.id, accountId: lossAccount.id, description: "Loss on Inventory Write-off", debitAmount: totalNegative.toFixed(2), creditAmount: "0" },
-          { orgId, journalEntryId: je.id, accountId: invAccount.id, description: "Inventory decrease", debitAmount: "0", creditAmount: totalNegative.toFixed(2) },
-        ]);
+          lines: [
+            { accountId: lossAccount.id, description: "Loss on Inventory Write-off", debit: totalNegative.toFixed(2), credit: "0" },
+            { accountId: invAccount.id, description: "Inventory decrease", debit: "0", credit: totalNegative.toFixed(2) },
+          ],
+        });
       }
 
       if (totalPositive > 0) {
@@ -381,27 +373,19 @@ export async function approveStockAdjustment(adjustmentId: string) {
           .limit(1);
         if (!incomeAccount) throw new Error("Inventory Adjustment Income account not found");
 
-        const [je] = await tx.insert(journalEntries).values({
+        await postTransaction(tx, {
           orgId,
-          entryNumber: `SA-${Date.now() + 1}`,
-          entryDate: new Date(adjustment.adjustmentDate),
           description: `Stock adjustment (gain): ${adjustment.adjustmentNumber}`,
+          date: new Date(adjustment.adjustmentDate),
           referenceType: "stock_adjustment",
           referenceId: adjustmentId,
-          status: "posted",
-          postedAt: new Date(),
+          numberPrefix: "SA",
           sourceType: "inventory",
-        }).returning();
-
-        if (!validateJournalBalance([
-          { debitAmount: totalPositive.toFixed(2), creditAmount: "0" },
-          { debitAmount: "0", creditAmount: totalPositive.toFixed(2) },
-        ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-        await tx.insert(journalEntryLines).values([
-          { orgId, journalEntryId: je.id, accountId: invAccount.id, description: "Inventory increase", debitAmount: totalPositive.toFixed(2), creditAmount: "0" },
-          { orgId, journalEntryId: je.id, accountId: incomeAccount.id, description: "Inventory Adjustment Income", debitAmount: "0", creditAmount: totalPositive.toFixed(2) },
-        ]);
+          lines: [
+            { accountId: invAccount.id, description: "Inventory increase", debit: totalPositive.toFixed(2), credit: "0" },
+            { accountId: incomeAccount.id, description: "Inventory Adjustment Income", debit: "0", credit: totalPositive.toFixed(2) },
+          ],
+        });
       }
 
       // Update product stock and create stock movements (now deferred to approval)

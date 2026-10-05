@@ -6,14 +6,13 @@ import {
   stockCountItems,
   stockMovements,
   products,
-  journalEntries,
-  journalEntryLines,
   chartOfAccounts,
 } from "@/db/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
+import { postTransaction } from "../accounting/posting-engine";
 import { validateJournalBalance } from "../accounting";
 
 // ==========================================
@@ -413,28 +412,21 @@ export async function completeStockCount(stockCountId: string) {
           debitAmount: l.debit || "0",
           creditAmount: l.credit || "0",
         })))) {
-          const [je] = await db.insert(journalEntries).values({
+          await postTransaction(db, {
             orgId,
-            entryNumber: `SC-${Date.now()}`,
-            entryDate: new Date(),
             description: `Stock count adjustment: ${count.countNumber}`,
+            date: new Date(),
             referenceType: "stock_count",
             referenceId: stockCountId,
-            status: "posted",
-            postedAt: new Date(),
+            numberPrefix: "SC",
             sourceType: "inventory",
-          }).returning();
-
-          for (const line of resolvedLines) {
-            await db.insert(journalEntryLines).values({
-              orgId,
-              journalEntryId: je.id,
+            lines: resolvedLines.map((line) => ({
               accountId: line.accountId,
               description: line.description,
-              debitAmount: line.debit || "0",
-              creditAmount: line.credit || "0",
-            });
-          }
+              debit: line.debit || "0",
+              credit: line.credit || "0",
+            })),
+          });
           journalEntryCreated = true;
         }
       }

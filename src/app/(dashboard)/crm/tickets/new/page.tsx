@@ -166,7 +166,7 @@ export default function NewTicketPage() {
                 <select
                   id="priority"
                   value={formData.priority || "medium"}
-                  onChange={(e) => setFormData({ ...formData, priority: e.target.value as any })}
+                  onChange={(e) => setFormData({ ...formData, priority: e.target.value as typeof formData.priority })}
                   className="w-full h-10 px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-nexabook-500 bg-background"
                 >
                   <option value="low">Low</option>

@@ -359,7 +359,7 @@ export default function NewInvoicePage() {
         if (invoiceNumRes.success && invoiceNumRes.data) setInvoiceNumber(invoiceNumRes.data as string);
         if (cashBankRes.success && cashBankRes.data) setCashBankAccounts(cashBankRes.data as CashBankAccount[]);
         if (orgRes.success && orgRes.data) {
-          const org = orgRes.data as any;
+          const org = orgRes.data;
           setOrgData({ ntn: org.ntn || null, strn: org.strn || null });
         }
       } catch (error) {
@@ -494,10 +494,10 @@ export default function NewInvoicePage() {
       };
       const result = await createInvoice(data);
       if (result.success && result.data) {
-        const id = (result.data as any).id;
+        const id = (result.data).id;
         if (action === "approve" || action === "approve-print" || action === "approve-download") {
           const ar = await approveInvoice(id);
-          if (!ar.success) { alert(`Created but approval failed: ${(ar as any).error}`); router.push("/sales/invoices"); return; }
+          if (!ar.success) { alert(`Created but approval failed: ${(ar).error}`); router.push("/sales/invoices"); return; }
         }
         if (action === "approve-print") {
           window.print();

@@ -2,6 +2,9 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatPakistaniCurrency } from '@/lib/utils/number-format';
 
+
+type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
+
 export interface TaxReturnPDFData {
   orgName: string;
   orgNtn: string | null;
@@ -93,7 +96,7 @@ export async function generateTaxReturnPDF(data: TaxReturnPDFData): Promise<Buff
     margin: { left: 14, right: 14 },
   });
 
-  const finalY = (doc as any).lastAutoTable.finalY || y + 60;
+  const finalY = (doc as AutoTableDoc).lastAutoTable!.finalY || y + 60;
 
   if (parseFloat(data.netPayable) > 0) {
     doc.setFontSize(10);

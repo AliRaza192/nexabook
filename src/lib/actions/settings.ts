@@ -194,7 +194,7 @@ export async function updateOrgUser(profileId: string, data: UpdateUserData) {
         designation: data.designation,
         territory: data.territory,
         region: data.region,
-        role: data.role as any,
+        role: data.role as (typeof profiles.role.enumValues)[number],
         isActive: data.isActive,
         updatedAt: new Date(),
       })

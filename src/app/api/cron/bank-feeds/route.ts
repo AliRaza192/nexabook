@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
 
         if (existingStatements.length > 0) {
           await db.update(bankStatements)
-            .set({ lines: statementLines as any, closingBalance: String(lastBalance), updatedAt: new Date() })
+            .set({ lines: statementLines, closingBalance: String(lastBalance), updatedAt: new Date() })
             .where(eq(bankStatements.id, existingStatements[0].id));
         } else if (syncResult.transactions.length > 0) {
           await db.insert(bankStatements).values({
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
             closingBalance: String(lastBalance),
             totalDeposits: String(syncResult.transactions.filter((t) => t.credit > 0).reduce((s, t) => s + t.credit, 0)),
             totalWithdrawals: String(syncResult.transactions.filter((t) => t.debit > 0).reduce((s, t) => s + t.debit, 0)),
-            lines: statementLines as any,
+            lines: statementLines,
             status: "matched",
           });
         }

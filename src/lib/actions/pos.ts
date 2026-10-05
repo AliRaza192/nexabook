@@ -22,6 +22,7 @@ import { getCurrentOrgId, generateDocumentNumber } from "./shared";
 import { postTransaction, resolveAccount } from "../accounting/posting-engine";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { captureException } from "@/lib/error-handler";
+import { roundDecimal } from "@/lib/utils/decimal";
 
 export interface PosSaleItem {
   productId: string;
@@ -345,13 +346,13 @@ export async function processPosSale(saleData: PosSaleData) {
       const afterDiscount = lineTotal - discount;
       const tax = saleData.taxPercentage ? afterDiscount * (saleData.taxPercentage / 100) : 0;
 
-      grossAmount += lineTotal;
-      totalDiscount += discount;
-      totalTax += tax;
+      grossAmount = roundDecimal(grossAmount + lineTotal);
+      totalDiscount = roundDecimal(totalDiscount + discount);
+      totalTax = roundDecimal(totalTax + tax);
     }
 
-    const globalDiscount = saleData.discountPercentage ? grossAmount * (saleData.discountPercentage / 100) : 0;
-    const netAmount = grossAmount - globalDiscount - totalDiscount + totalTax;
+    const globalDiscount = roundDecimal(saleData.discountPercentage ? grossAmount * (saleData.discountPercentage / 100) : 0);
+    const netAmount = roundDecimal(grossAmount - globalDiscount - totalDiscount + totalTax);
 
     // Determine cash/card split based on payment method
     let cashPortion = 0;
@@ -527,7 +528,7 @@ export async function processPosSale(saleData: PosSaleData) {
 
       // Earn loyalty points (1 point per 100 PKR spent) — only for named customers
       if (saleData.customerId && netAmount > 0) {
-        const pointsToEarn = Math.floor(netAmount / 100);
+        const pointsToEarn = Math.floor(roundDecimal(netAmount) / 100);
         await tx
           .update(customers)
           .set({

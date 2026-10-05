@@ -21,6 +21,9 @@ const posShiftsSql = fs.readFileSync(
   "utf8"
 );
 
+export type TestDbHandle = Awaited<ReturnType<typeof createTestDb>>;
+export type SqlRow = Record<string, unknown>;
+
 export async function createTestDb() {
   const client = await PGlite.create();
   await client.exec(schemaSql);

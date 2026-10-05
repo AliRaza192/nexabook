@@ -183,7 +183,7 @@ export default function RunPayrollPage() {
       // Fetch payslips for this payroll run
       const result = await getPayslips(payrollRunId);
       if (result.success && result.data) {
-        const payslips = result.data as any[];
+        const payslips = result.data;
         const payslip = payslips.find((p: any) => p.employeeId === employeeId);
         
         if (payslip) {

@@ -2,6 +2,9 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatPKR } from '@/lib/utils/number-format';
 
+
+type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
+
 type Color = [number, number, number];
 
 export interface WHTCertificateData {
@@ -174,7 +177,7 @@ export async function generateWHTCertificatePDF(data: WHTCertificateData): Promi
     margin: { left: margin, right: margin },
   });
 
-  y = (doc as any).lastAutoTable.finalY + 10;
+  y = (doc as AutoTableDoc).lastAutoTable!.finalY + 10;
 
   // Amount in words
   doc.setFontSize(9);

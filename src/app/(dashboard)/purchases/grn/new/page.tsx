@@ -46,7 +46,7 @@ export default function NewGRNPage() {
         if (vendorsRes.success && vendorsRes.data) setVendors(vendorsRes.data as Vendor[]);
         if (productsRes.success && productsRes.data) setProducts(productsRes.data as Product[]);
         if (posRes.success && posRes.data) {
-          const poList = (posRes.data as any[]).map((po: any) => ({ id: po.id, orderNumber: po.orderNumber, vendor: po.vendor }));
+          const poList = (posRes.data).map((po: any) => ({ id: po.id, orderNumber: po.orderNumber, vendor: po.vendor }));
           setPurchaseOrders(poList);
         }
         if (grnNumRes.success && grnNumRes.data) setGrnNumber(grnNumRes.data as string);

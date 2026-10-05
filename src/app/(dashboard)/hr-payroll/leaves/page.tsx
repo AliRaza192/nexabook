@@ -83,13 +83,13 @@ export default function LeaveManagementPage() {
     ]);
 
     if (appsRes.success && appsRes.data) {
-      setApplications(appsRes.data as any[]);
+      setApplications(appsRes.data);
     }
     if (typesRes.success && typesRes.data) {
-      setLeaveTypes(typesRes.data as any[]);
+      setLeaveTypes(typesRes.data);
     }
     if (employeesRes.success && employeesRes.data) {
-      setEmployees(employeesRes.data as any[]);
+      setEmployees(employeesRes.data);
     }
     
     setLoading(false);

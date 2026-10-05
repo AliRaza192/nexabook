@@ -17,7 +17,7 @@ export default function VendorBalanceReportPage() {
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
-    getVendors().then((r) => { if (r.success) setVendors(r.data as any); });
+    getVendors().then((r) => { if (r.success && r.data) setVendors(r.data); });
     loadReport({ dateFrom: today, dateTo: today });
   }, []);
 

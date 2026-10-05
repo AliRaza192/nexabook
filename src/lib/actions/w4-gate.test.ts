@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "@/__tests__/test-db";
+import { createTestDb, type TestDbHandle, type SqlRow } from "@/__tests__/test-db";
+import { NextRequest } from "next/server";
 
 vi.setConfig({ hookTimeout: 30000 });
 
 let testDb: Awaited<ReturnType<typeof createTestDb>>;
 
-const dbRef: { current: any } = { current: null as any };
+const dbRef: { current: TestDbHandle["db"] | null } = { current: null };
 vi.mock("@/db", () => ({ get db() { return dbRef.current; } }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -136,7 +137,7 @@ describe("W4-GATE: Wave 4 functional regression tests", () => {
     const adjAfter = await db.execute(
       `SELECT approval_status FROM stock_adjustments WHERE id = '${U.adj1}'`
     );
-    expect((adjAfter.rows[0] as any).approval_status).toBe("pending_approval");
+    expect((adjAfter.rows[0] as SqlRow).approval_status).toBe("pending_approval");
   });
 
   it("3. Period-lock rejection: JE post via createJournalEntry in locked period is rejected", async () => {
@@ -220,7 +221,7 @@ describe("W4-GATE: Wave 4 functional regression tests", () => {
     const jeRows = await db.execute(
       `SELECT currency, exchange_rate FROM journal_entries WHERE id = '${U.jeFx}'`
     );
-    const jeRow = jeRows.rows[0] as any;
+    const jeRow = jeRows.rows[0] as SqlRow;
     expect(jeRow.currency).toBe("USD");
     expect(Number(jeRow.exchange_rate)).toBe(exchangeRate);
 
@@ -229,14 +230,14 @@ describe("W4-GATE: Wave 4 functional regression tests", () => {
     );
     expect(lines.rows.length).toBe(2);
 
-    const totalDebit = lines.rows.reduce((s: number, r: any) => s + Number(r.debit_amount), 0);
-    const totalCredit = lines.rows.reduce((s: number, r: any) => s + Number(r.credit_amount), 0);
+    const totalDebit = lines.rows.reduce((s: number, r: SqlRow) => s + Number(r.debit_amount), 0);
+    const totalCredit = lines.rows.reduce((s: number, r: SqlRow) => s + Number(r.credit_amount), 0);
     expect(totalDebit).toBe(totalCredit);
     expect(totalDebit).toBe(pkrAmount);
 
     for (const row of lines.rows) {
-      expect((row as any).original_currency).toBe("USD");
-      expect(Number((row as any).original_amount)).toBe(originalAmount);
+      expect((row as SqlRow).original_currency).toBe("USD");
+      expect(Number((row as SqlRow).original_amount)).toBe(originalAmount);
     }
   });
 
@@ -252,11 +253,10 @@ describe("W4-GATE: Wave 4 functional regression tests", () => {
       formData.set("ppmpf_1", "/pos");
       formData.set("status", "completed");
 
-      const req = new Request("http://localhost:3000/api/payments/callback", {
+      const req = new NextRequest("http://localhost:3000/api/payments/callback", {
         method: "POST",
         body: formData,
-      }) as any;
-      req.nextUrl = new URL("http://localhost:3000/api/payments/callback");
+      });
 
       const resp = await POST(req);
       const location = resp.headers.get("location") || "";
@@ -287,11 +287,10 @@ describe("W4-GATE: Wave 4 functional regression tests", () => {
       formData.set("secureHash", "aabbccdd1122334400000000000000000000000000000000000000000000000000");
       formData.set("ppmpf_1", "/pos");
 
-      const req = new Request("http://localhost:3000/api/payments/callback", {
+      const req = new NextRequest("http://localhost:3000/api/payments/callback", {
         method: "POST",
         body: formData,
-      }) as any;
-      req.nextUrl = new URL("http://localhost:3000/api/payments/callback");
+      });
 
       const resp = await POST(req);
       const location = resp.headers.get("location") || "";

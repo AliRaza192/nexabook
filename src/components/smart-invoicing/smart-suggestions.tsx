@@ -28,6 +28,12 @@ import {
 } from "@/lib/actions/smart-invoice";
 import { getCurrentOrgId } from "@/lib/actions/shared";
 
+declare global {
+  interface Window {
+    __smartInvoiceCheckDuplicates?: () => Promise<boolean>;
+  }
+}
+
 interface SmartSuggestionsProps {
   customerId: string | null;
   lineItems: {
@@ -166,9 +172,9 @@ export default function SmartSuggestions({
 
   // Expose checkDuplicates for parent to call before save
   useEffect(() => {
-    (window as any).__smartInvoiceCheckDuplicates = checkDuplicates;
+    (window).__smartInvoiceCheckDuplicates = checkDuplicates;
     return () => {
-      delete (window as any).__smartInvoiceCheckDuplicates;
+      delete (window).__smartInvoiceCheckDuplicates;
     };
   }, [checkDuplicates]);
 

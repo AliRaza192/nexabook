@@ -142,10 +142,10 @@ export default function NewSaleOrderPage() {
       };
       const result = await createSaleOrder(data);
       if (result.success && result.data) {
-        const id = (result.data as any).id;
+        const id = (result.data).id;
         if (action === "approve" || action === "approve-print") {
           const ar = await approveSaleOrder(id);
-          if (!ar.success) { alert(`Created but approval failed: ${(ar as any).error}`); router.push("/sales/orders"); return; }
+          if (!ar.success) { alert(`Created but approval failed: ${(ar).error}`); router.push("/sales/orders"); return; }
         }
         if (action === "approve-print") window.print();
         if (action === "close" || action === "approve" || action === "approve-print") router.push("/sales/orders");

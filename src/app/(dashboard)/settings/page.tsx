@@ -98,7 +98,7 @@ export default function SettingsPage() {
       getReminderSettings(),
     ]);
     if (compRes.success && compRes.data) {
-      const d = compRes.data as any;
+      const d = compRes.data;
       setCompany({
         name: d.name || "", email: d.email || "", phone: d.phone || "",
         address: d.address || "", city: d.city || "", country: d.country || "Pakistan",
@@ -112,9 +112,9 @@ export default function SettingsPage() {
         logo: d.logo || "",
       });
     }
-    if (usersRes.success && usersRes.data) setUsers(usersRes.data as any);
+    if (usersRes.success && usersRes.data) setUsers(usersRes.data);
     if (compRes.success && compRes.data) {
-      const org = compRes.data as any;
+      const org = compRes.data;
       setFormData({
         islamicFinanceEnabled: org.islamicFinanceEnabled ?? false,
         zakatCalculationMethod: org.zakatCalculationMethod || "standard",
@@ -124,7 +124,7 @@ export default function SettingsPage() {
       });
     }
     if (remRes.success && remRes.data) {
-      const r = remRes.data as any;
+      const r = remRes.data;
       setReminder({
         isActive: r.isActive ?? false,
         reminderDaysBefore: r.reminderDaysBefore ?? 3,
@@ -134,7 +134,7 @@ export default function SettingsPage() {
       });
     }
     if (meRes.success && meRes.data) {
-      const me = meRes.data as any;
+      const me = meRes.data;
       setCurrentUser(me);
       setMyProfile({
         fullName: me.fullName || "", phone: me.phone || "",
@@ -197,7 +197,7 @@ export default function SettingsPage() {
       zakatPercentage: formData.zakatPercentage,
       interestFreeTerms: formData.interestFreeTerms,
       latePaymentCharity: formData.latePaymentCharity,
-    } as any);
+    });
     setSaving(false);
     r.success ? showMsg("success", "Islamic finance settings saved") : showMsg("error", r.error || "Failed");
   };
@@ -374,7 +374,7 @@ export default function SettingsPage() {
                   <div key={f.key} className="space-y-1">
                     <Label className="text-xs">{f.label}</Label>
                     <Input
-                      value={(company as any)[f.key] || ""}
+                      value={String(company[f.key as keyof typeof company] ?? "")}
                       onChange={(e) => setCompany({ ...company, [f.key]: e.target.value.toUpperCase() })}
                       placeholder={f.placeholder}
                       className="uppercase font-mono"

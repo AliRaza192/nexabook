@@ -166,8 +166,8 @@ export default function OpeningBalancePage() {
       setImportText("");
       setMessage({ type: "success", text: res.message || "Bulk import successful" });
       loadAccounts();
-    } else if ((res as any).errors) {
-      setImportErrors((res as any).errors.map((e: any) => `Row ${e.row}: ${e.error}`));
+    } else if ((res).errors) {
+      setImportErrors((res).errors.map((e: any) => `Row ${e.row}: ${e.error}`));
     } else {
       setImportErrors([res.error || "Import failed"]);
     }

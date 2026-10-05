@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type FunctionDeclaration } from "@google/generative-ai";
 import { db } from "@/db";
 import { chatMessages } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
@@ -202,7 +202,7 @@ export async function POST(request: NextRequest) {
           const chat = model.startChat({
             history: historyMessages,
             systemInstruction: { role: "system", parts: [{ text: SYSTEM_PROMPT }] },
-            tools: [{ functionDeclarations: mcpToolDefinitions as any }],
+            tools: [{ functionDeclarations: mcpToolDefinitions as unknown as FunctionDeclaration[] }],
           });
 
           const result = await chat.sendMessage(`${message}\n\nRelevant accounting data:\n${context}`);
@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
             const chat = model.startChat({
               history: historyMessages,
               systemInstruction: { role: "system", parts: [{ text: SYSTEM_PROMPT }] },
-              tools: [{ functionDeclarations: mcpToolDefinitions as any }],
+              tools: [{ functionDeclarations: mcpToolDefinitions as unknown as FunctionDeclaration[] }],
             });
 
             const result = await chat.sendMessageStream(`${message}\n\nRelevant accounting data:\n${context}`);

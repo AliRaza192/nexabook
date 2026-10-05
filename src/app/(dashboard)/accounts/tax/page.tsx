@@ -103,7 +103,7 @@ export default function TaxPage() {
           <div className="flex flex-col md:flex-row gap-4 items-end">
             <div className="space-y-2">
               <Label>Period Type</Label>
-              <Select value={period} onValueChange={(v) => setPeriod(v as any)}>
+              <Select value={period} onValueChange={(v) => setPeriod(v as typeof period)}>
                 <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="monthly">Current Month</SelectItem>

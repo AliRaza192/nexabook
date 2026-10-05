@@ -12,6 +12,10 @@ import {
   purchaseInvoices,
   goodReceivingNotes,
   journalEntries,
+  deliveryNotes,
+  salesReturns,
+  customerPayments,
+  settlements,
 } from "@/db/schema";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq, sql, and, desc, ilike } from "drizzle-orm";
@@ -51,6 +55,11 @@ const documentTables = {
   purchase: purchaseOrders,
   bill: purchaseInvoices,
   grn: goodReceivingNotes,
+  delivery: deliveryNotes,
+  recurring: invoices,
+  sales_return: salesReturns,
+  payment: customerPayments,
+  settlement: settlements,
 } as const;
 
 const documentNumberColumns = {
@@ -60,6 +69,11 @@ const documentNumberColumns = {
   purchase: purchaseOrders.orderNumber,
   bill: purchaseInvoices.billNumber,
   grn: goodReceivingNotes.grnNumber,
+  delivery: deliveryNotes.deliveryNumber,
+  recurring: invoices.invoiceNumber,
+  sales_return: salesReturns.returnNumber,
+  payment: customerPayments.paymentNumber,
+  settlement: settlements.settlementNumber,
 } as const;
 
 const documentCreatedAtColumns = {
@@ -69,6 +83,11 @@ const documentCreatedAtColumns = {
   purchase: purchaseOrders.createdAt,
   bill: purchaseInvoices.createdAt,
   grn: goodReceivingNotes.createdAt,
+  delivery: deliveryNotes.createdAt,
+  recurring: invoices.createdAt,
+  sales_return: salesReturns.createdAt,
+  payment: customerPayments.createdAt,
+  settlement: settlements.createdAt,
 } as const;
 
 /**
@@ -78,14 +97,24 @@ const documentCreatedAtColumns = {
  * any document is deleted — e.g. INV-1, INV-2, INV-3 exist (count=3);
  * delete INV-2 (count=2); next number = count+1 = 3 → collides with the
  * still-existing INV-3. Now parses the highest existing number from the
- * most recently created document instead, matching the pattern already
- * used elsewhere in sales.ts (generateDeliveryNumber, generatePaymentNumber,
- * etc). Combined with the DB-level unique constraints added in migration
+ * most recently created document instead. Combined with the DB-level unique
+ * constraints added in migration
  * 0005, a real collision now throws instead of silently succeeding, and
  * the retry loop below will regenerate on that error.
  */
 export async function generateDocumentNumber(
-  type: "invoice" | "order" | "quotation" | "purchase" | "bill" | "grn",
+  type:
+    | "invoice"
+    | "order"
+    | "quotation"
+    | "purchase"
+    | "bill"
+    | "grn"
+    | "delivery"
+    | "recurring"
+    | "sales_return"
+    | "payment"
+    | "settlement",
   orgId: string,
 ): Promise<string | null> {
   const MAX_RETRIES = 10;
@@ -118,6 +147,11 @@ export async function generateDocumentNumber(
     purchase: settings.purchasePrefix || "PO",
     bill: settings.billPrefix || "PI",
     grn: settings.grnPrefix || "GRN",
+    delivery: "DN",
+    recurring: "SL",
+    sales_return: "SR",
+    payment: "CP",
+    settlement: "STL",
   };
   const prefix = prefixMap[type];
   const table = documentTables[type];
@@ -128,9 +162,9 @@ export async function generateDocumentNumber(
     try {
       const [latest] = await db
         .select({ number: numberColumn })
-        .from(table as any)
-        .where(eq((table as any).orgId, orgId))
-        .orderBy(desc(createdAtColumn as any))
+        .from(table)
+        .where(eq(table.orgId, orgId))
+        .orderBy(desc(createdAtColumn))
         .limit(1);
 
       let nextNumber = 1;

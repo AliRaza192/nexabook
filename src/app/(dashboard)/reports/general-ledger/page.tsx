@@ -41,9 +41,11 @@ export default function GeneralLedgerReportPage() {
 
   const loadAccounts = async (type?: string) => {
     const r = await getChartOfAccountsList(type === "all" ? undefined : type);
-    if (r.success) {
-      setAccounts(r.data as any);
-      if ((r.data as any).length > 0) setSelectedAccountId((r.data as any)[0].id);
+    if (r.success && r.data) {
+      const accounts = r.data;
+      setAccounts(accounts);
+      const first = accounts[0];
+      if (first) setSelectedAccountId(first.id);
     }
   };
 

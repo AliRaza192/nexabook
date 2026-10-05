@@ -205,7 +205,7 @@ export default function PurchaseInvoicesPage() {
       alert("Invoice approved successfully!");
       loadData();
     } else {
-      alert((result as any).error || "Failed to approve invoice");
+      alert(("error" in result && result.error) || "Failed to approve invoice");
     }
   };
 
@@ -219,7 +219,7 @@ export default function PurchaseInvoicesPage() {
       alert("Invoice revised successfully!");
       loadData();
     } else {
-      alert((result as any).error || "Failed to revise invoice");
+      alert(("error" in result && result.error) || "Failed to revise invoice");
     }
   };
 

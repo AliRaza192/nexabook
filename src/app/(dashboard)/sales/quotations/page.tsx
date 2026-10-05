@@ -10,7 +10,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -52,7 +52,7 @@ function StatCard({ title, value, icon: Icon, color }: { title: string; value: n
 }
 
 function getStatusBadge(status: string) {
-  const config: Record<string, { label: string; variant: string }> = {
+  const config: Record<string, { label: string; variant: NonNullable<BadgeProps["variant"]> }> = {
     draft: { label: "Draft", variant: "secondary" },
     sent: { label: "Sent", variant: "default" },
     accepted: { label: "Accepted", variant: "success" },
@@ -234,7 +234,7 @@ export default function QuotationsPage() {
                         <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{formatDate(q.issueDate)}</span></td>
                         <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{formatDate(q.expiryDate)}</span></td>
                         <td className="py-3 px-4"><span className="text-sm font-semibold">{formatCurrency(parseFloat(q.netAmount || "0"))}</span></td>
-                        <td className="py-3 px-4"><Badge variant={badge.variant as any} className="text-xs">{badge.label}</Badge></td>
+                        <td className="py-3 px-4"><Badge variant={badge.variant} className="text-xs">{badge.label}</Badge></td>
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-1">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Eye className="h-3.5 w-3.5" /></Button>

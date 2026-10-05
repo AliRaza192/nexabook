@@ -49,7 +49,7 @@ export default function NewReturnPage() {
         const [cRes, pRes, iRes] = await Promise.all([getCustomers(), getProducts(), getInvoices()]);
         if (cRes.success && cRes.data) setCustomers(cRes.data as Customer[]);
         if (pRes.success && pRes.data) setProducts(pRes.data as Product[]);
-        if (iRes.success && iRes.data) setInvoices(iRes.data as any[]);
+        if (iRes.success && iRes.data) setInvoices(iRes.data);
       } finally { setLoading(false); }
     };
     loadData();
@@ -59,10 +59,10 @@ export default function NewReturnPage() {
     if (!invId) return;
     const { getInvoiceById } = await import("@/lib/actions/sales");
     const res = await getInvoiceById(invId);
-    if (res.success && (res.data as any)?.items) {
-      const items = (res.data as any).items;
+    if (res.success && (res.data)?.items) {
+      const items = (res.data).items;
       setLineItems(items.map((it: any) => ({ productId: it.productId || "", description: it.description, quantity: it.quantity, unitPrice: it.unitPrice })));
-      if ((res.data as any)?.customerId) setCustomerId((res.data as any).customerId);
+      if ((res.data)?.customerId) setCustomerId((res.data).customerId);
     }
   };
 
@@ -90,7 +90,7 @@ export default function NewReturnPage() {
       };
       const res = await createSalesReturn(data);
       if (res.success) {
-        const returnId = (res.data as any)?.id;
+        const returnId = (res.data)?.id;
         if (approve && returnId) {
           const ar = await approveSalesReturn(returnId);
           if (ar.success) { alert("Return created and approved - stock reversed"); router.push("/sales/returns"); return; }
@@ -120,7 +120,7 @@ export default function NewReturnPage() {
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Customer*</Label><Select value={customerId} onValueChange={setCustomerId}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Linked Invoice</Label><Select value={invoiceId} onValueChange={v => { setInvoiceId(v); loadInvoiceItems(v); }}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{invoices.map(i => <SelectItem key={i.id} value={i.id}>{i.invoiceNumber}</SelectItem>)}</SelectContent></Select></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Return Date*</Label><Input type="date" value={returnDate} onChange={e => setReturnDate(e.target.value)} className="h-9 text-xs" /></div>
-              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reason*</Label><Select value={reason} onValueChange={v => setReason(v as any)}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent>{reasons.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent></Select></div>
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reason*</Label><Select value={reason} onValueChange={v => setReason(v as typeof reason)}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent>{reasons.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent></Select></div>
             </div>
             <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reason Details</Label><Textarea value={reasonDetails} onChange={e => setReasonDetails(e.target.value)} placeholder="Explain the reason..." className="min-h-[50px] text-xs" /></div>
           </CardContent></Card>

@@ -472,7 +472,13 @@ export async function approvePurchaseInvoice(invoiceId: string) {
         BRA: "tax_receivable_bra",
       };
 
-      const purchaseLines = [
+      const purchaseLines: Array<{
+        accountId: string;
+        description: string;
+        debit: string;
+        credit: string;
+        taxSubType?: string;
+      }> = [
         {
           accountId: invAcc.id,
           description: `Debit - Inventory Asset (Purchase ${invoice.billNumber})`,
@@ -498,10 +504,10 @@ export async function approvePurchaseInvoice(invoiceId: string) {
 
       // Resolve tax account IDs
       for (const line of purchaseLines) {
-        if ((line as any).taxSubType) {
-          const taxAcc = await resolveAccount(tx, orgId, (line as any).taxSubType);
+        if (line.taxSubType) {
+          const taxAcc = await resolveAccount(tx, orgId, line.taxSubType);
           line.accountId = taxAcc.id;
-          delete (line as any).taxSubType;
+          delete line.taxSubType;
         }
       }
 

@@ -39,7 +39,7 @@ export default function SaleOrderReportPage() {
   const [lastFilters, setLastFilters] = useState({ dateFrom: defaultFrom, dateTo: defaultTo });
 
   useEffect(() => {
-    getCustomers().then((r) => { if (r.success) setCustomers(r.data as any); });
+    getCustomers().then((r) => { if (r.success && r.data) setCustomers(r.data); });
     loadReport({ dateFrom: defaultFrom, dateTo: defaultTo });
   }, []);
 
@@ -54,7 +54,7 @@ export default function SaleOrderReportPage() {
 
   const handleStatusChange = (s: string) => {
     setStatusFilter(s);
-    loadReport(lastFilters as any, s);
+    loadReport(lastFilters, s);
   };
 
   return (

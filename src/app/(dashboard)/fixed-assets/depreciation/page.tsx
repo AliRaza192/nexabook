@@ -125,7 +125,7 @@ export default function DepreciationPage() {
         getDepreciationHistory(selectedAssetId),
       ]);
       if (schedRes.success && schedRes.data) {
-        setSchedule(schedRes.data as any);
+        setSchedule(schedRes.data);
       }
       if (histRes.success && histRes.data) {
         setHistory(histRes.data as DepreciationLog[]);
@@ -164,7 +164,7 @@ export default function DepreciationPage() {
         getDepreciationSchedule(selectedAssetId, selectedYear),
         getDepreciationHistory(selectedAssetId),
       ]);
-      if (schedRes.success && schedRes.data) setSchedule(schedRes.data as any);
+      if (schedRes.success && schedRes.data) setSchedule(schedRes.data);
       if (histRes.success && histRes.data) setHistory(histRes.data as DepreciationLog[]);
     } else {
       showMsg("error", res.error || "Failed to post depreciation");

@@ -82,7 +82,7 @@ export default function BankReconciliationPage() {
     const loadBanks = async () => {
       const res = await getBankCOAAccounts();
       if (res.success && res.data) {
-        setBankAccounts(res.data as any);
+        setBankAccounts(res.data);
       }
     };
     loadBanks();

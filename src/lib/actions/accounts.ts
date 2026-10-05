@@ -13,6 +13,7 @@ import { validateJournalBalance } from "../accounting";
 import { postTransaction } from "../accounting/posting-engine";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { captureException } from "@/lib/error-handler";
+import { addDecimal } from "@/lib/utils/decimal";
 
 export interface JournalEntryLine {
   accountId: string;
@@ -85,7 +86,13 @@ export async function seedInitialCOA() {
       };
     }
 
-    const defaultAccounts = [
+    const defaultAccounts: Array<{
+      code: string;
+      name: string;
+      type: string;
+      subType?: string;
+      description: string;
+    }> = [
       // Assets (1000-1999)
       { code: "1000", name: "Cash", type: "asset", description: "Cash on hand" },
       { code: "1010", name: "Bank - Main Account", type: "asset", description: "Main bank account" },
@@ -247,7 +254,7 @@ export async function seedInitialCOA() {
       code: account.code,
       name: account.name,
       type: account.type,
-      subType: (account as any).subType || subTypeMap[account.code] || null,
+      subType: account.subType || subTypeMap[account.code] || null,
       isSystemAccount: false,
       description: account.description,
       isActive: true,
@@ -813,18 +820,18 @@ export async function getLedgerReport(
       ))
       .orderBy(journalEntries.entryDate, journalEntries.entryNumber);
 
-    let runningBalance = 0;
-    let totalDebit = 0;
-    let totalCredit = 0;
+    let runningBalance = "0.00";
+    let totalDebit = "0.00";
+    let totalCredit = "0.00";
     const transactions: LedgerTransaction[] = [];
 
     for (const row of rows) {
       const debit = parseFloat(row.debitAmount || '0');
       const credit = parseFloat(row.creditAmount || '0');
 
-      totalDebit += debit;
-      totalCredit += credit;
-      runningBalance += debit - credit;
+      totalDebit = addDecimal(totalDebit, debit);
+      totalCredit = addDecimal(totalCredit, credit);
+      runningBalance = addDecimal(runningBalance, debit, -credit);
 
       transactions.push({
         date: row.date,
@@ -832,7 +839,7 @@ export async function getLedgerReport(
         description: row.description || '',
         debit: debit.toFixed(2),
         credit: credit.toFixed(2),
-        balance: runningBalance.toFixed(2),
+        balance: runningBalance,
       });
     }
 
@@ -841,9 +848,9 @@ export async function getLedgerReport(
       data: {
         account,
         transactions,
-        totalDebit: totalDebit.toFixed(2),
-        totalCredit: totalCredit.toFixed(2),
-        closingBalance: runningBalance.toFixed(2),
+        totalDebit,
+        totalCredit,
+        closingBalance: runningBalance,
       },
     };
   } catch (error) {

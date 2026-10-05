@@ -17,6 +17,7 @@ import { eq, and, desc, gte, lte, sql, ilike } from "drizzle-orm";
 import { getCurrentOrgId, requireRole } from "./shared";
 import { calculateKeywordOverlap, matchWithPatterns } from "@/lib/bank-matching";
 import { revalidatePath } from "next/cache";
+import { roundDecimal } from "@/lib/utils/decimal";
 
 export interface StatementLine {
   id: string;
@@ -153,11 +154,11 @@ export async function parseBankStatementCSV(csvContent: string, bankAccountId: s
       const balance = balanceIdx >= 0 ? parseFloat(cols[balanceIdx]?.replace(/[^0-9.\-]/g, "") || "0") : 0;
 
       if (i === 1 && balance === 0 && balanceIdx === -1) {
-        runningBalance = credit - debit;
+        runningBalance = roundDecimal(credit - debit);
       } else if (balanceIdx >= 0) {
-        runningBalance = balance;
+        runningBalance = roundDecimal(balance);
       } else {
-        runningBalance += credit - debit;
+        runningBalance = roundDecimal(runningBalance + credit - debit);
       }
 
       parsed.push({

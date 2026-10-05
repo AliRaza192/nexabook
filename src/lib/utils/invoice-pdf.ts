@@ -3,6 +3,9 @@ import autoTable from 'jspdf-autotable';
 import { formatPakistaniCurrency, formatAmountWords } from '@/lib/utils/number-format';
 import { generateFBRQRCodeBuffer, isFBREligible, FBRQRData } from '@/lib/utils/fbr-qr';
 
+
+type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
+
 export interface InvoicePDFData {
   // Organization details
   orgName: string;
@@ -282,7 +285,7 @@ export async function generateInvoicePDF(data: InvoicePDFData): Promise<Blob> {
   });
 
   // Get Y position after table
-  y = (doc as any).lastAutoTable.finalY + 10;
+  y = (doc as AutoTableDoc).lastAutoTable!.finalY + 10;
 
   // ==================== CALCULATIONS SECTION ====================
   const calcBoxX = pageWidth - margin - 75;

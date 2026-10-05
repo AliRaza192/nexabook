@@ -89,7 +89,7 @@ export default function RecurringPage() {
 
   const handleGenerate = async () => {
     const res = await generateRecurringInvoices();
-    if (res.success) { alert(`Generated ${(res.data as any)?.generated || 0} invoices`); loadData(); }
+    if (res.success) { alert(`Generated ${(res.data)?.generated || 0} invoices`); loadData(); }
     else alert(res.error || "Failed");
   };
 
@@ -139,7 +139,7 @@ export default function RecurringPage() {
                     <td className="py-3 px-4"><Badge variant="outline" className="text-xs">{getIntervalLabel(r.interval)}</Badge></td>
                     <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{formatDate(r.startDate)}</span></td>
                     <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{formatDate(r.nextInvoiceDate)}</span></td>
-                    <td className="py-3 px-4"><Badge variant={r.status === 'active' ? 'success' as any : r.status === 'paused' ? 'secondary' as any : 'outline' as any} className="text-xs capitalize">{r.status}</Badge></td>
+                    <td className="py-3 px-4"><Badge variant={r.status === 'active' ? 'success' : r.status === 'paused' ? 'secondary' : 'outline'} className="text-xs capitalize">{r.status}</Badge></td>
                     <td className="py-3 px-4"><div className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Edit className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-600" onClick={() => handleDelete(r.id)}><Trash2 className="h-3.5 w-3.5" /></Button></div></td>
                   </motion.tr>
                 ))}

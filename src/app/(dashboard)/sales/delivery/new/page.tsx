@@ -46,8 +46,8 @@ export default function NewDeliveryPage() {
         const [cRes, pRes, iRes, oRes] = await Promise.all([getCustomers(), getProducts(), getInvoices(), getSaleOrders()]);
         if (cRes.success && cRes.data) setCustomers(cRes.data as Customer[]);
         if (pRes.success && pRes.data) setProducts(pRes.data as Product[]);
-        if (iRes.success && iRes.data) setInvoices((iRes.data as any[]).map((x: any) => ({ id: x.id, label: `${x.invoiceNumber} - ${x.customer?.name || ''}` })));
-        if (oRes.success && oRes.data) setOrders((oRes.data as any[]).map((x: any) => ({ id: x.id, label: `${x.orderNumber} - ${x.customer?.name || ''}` })));
+        if (iRes.success && iRes.data) setInvoices((iRes.data).map((x: any) => ({ id: x.id, label: `${x.invoiceNumber} - ${x.customer?.name || ''}` })));
+        if (oRes.success && oRes.data) setOrders((oRes.data).map((x: any) => ({ id: x.id, label: `${x.orderNumber} - ${x.customer?.name || ''}` })));
       } finally { setLoading(false); }
     };
     loadData();

@@ -166,14 +166,14 @@ export default function PurchaseOrdersPage() {
     if (!confirm("Are you sure you want to approve this purchase order?")) return;
     const result = await approvePurchaseOrder(orderId);
     if (result.success) { alert("Purchase order approved!"); loadData(); }
-    else alert((result as any).error || "Failed to approve");
+    else alert((result).error || "Failed to approve");
   };
 
   const handleDelete = async (orderId: string) => {
     if (!confirm("Are you sure you want to delete this purchase order? This cannot be undone.")) return;
     const result = await deletePurchaseOrder(orderId);
     if (result.success) { alert("Purchase order deleted!"); loadData(); }
-    else alert((result as any).error || "Failed to delete");
+    else alert((result).error || "Failed to delete");
   };
 
   if (loading && !orders.length) {

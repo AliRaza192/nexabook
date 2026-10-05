@@ -112,7 +112,7 @@ export async function createBankConnection(data: {
       .values({
         orgId,
         bankAccountId: data.bankAccountId,
-        provider: data.provider as any,
+        provider: data.provider as (typeof bankConnections.provider.enumValues)[number],
         providerAccountId: connectResult.accountId || null,
         status: "active",
         config: encryptedConfig,
@@ -198,7 +198,7 @@ export async function syncBankTransactions(connectionId: string) {
       await db
         .update(bankStatements)
         .set({
-          lines: statementLines as any,
+          lines: statementLines,
           closingBalance: String(lastBalance),
           status: "matched",
           updatedAt: new Date(),
@@ -213,7 +213,7 @@ export async function syncBankTransactions(connectionId: string) {
         closingBalance: String(lastBalance),
         totalDeposits: String(syncResult.transactions.filter((t) => t.credit > 0).reduce((s, t) => s + t.credit, 0)),
         totalWithdrawals: String(syncResult.transactions.filter((t) => t.debit > 0).reduce((s, t) => s + t.debit, 0)),
-        lines: statementLines as any,
+        lines: statementLines,
         status: "matched",
       });
     }

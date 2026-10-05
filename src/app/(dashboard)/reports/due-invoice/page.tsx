@@ -37,7 +37,7 @@ export default function DueInvoiceReportPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<string | undefined>();
 
   useEffect(() => {
-    getCustomers().then((r) => { if (r.success) setCustomers(r.data as any); });
+    getCustomers().then((r) => { if (r.success && r.data) setCustomers(r.data); });
     loadReport({ dateFrom: today, dateTo: today });
   }, []);
 

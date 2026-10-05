@@ -7,7 +7,7 @@ import { Package, Plus, Search, Filter, Loader2, Eye, Trash2, Truck, MapPin, Che
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getDeliveryNotes, updateDeliveryStatus } from "@/lib/actions/sales";
 
@@ -31,7 +31,7 @@ function StatCard({ title, value, icon: Icon, color }: { title: string; value: n
 }
 
 function getStatusBadge(status: string) {
-  const config: Record<string, { label: string; variant: string }> = {
+  const config: Record<string, { label: string; variant: NonNullable<BadgeProps["variant"]> }> = {
     pending: { label: "Pending", variant: "secondary" }, dispatched: { label: "Dispatched", variant: "default" },
     in_transit: { label: "In Transit", variant: "default" }, delivered: { label: "Delivered", variant: "success" },
     returned: { label: "Returned", variant: "destructive" }, cancelled: { label: "Cancelled", variant: "outline" },
@@ -126,7 +126,7 @@ export default function DeliveryPage() {
                       <td className="py-3 px-4"><span className="text-sm text-nexabook-600">{formatDate(d.deliveryDate)}</span></td>
                       <td className="py-3 px-4">
                         <Select value={d.status} onValueChange={v => handleStatusChange(d.id, v)}>
-                          <SelectTrigger className="w-[130px] h-7 text-xs"><Badge variant={badge.variant as any}>{badge.label}</Badge></SelectTrigger>
+                          <SelectTrigger className="w-[130px] h-7 text-xs"><Badge variant={badge.variant}>{badge.label}</Badge></SelectTrigger>
                           <SelectContent><SelectItem value="pending">Pending</SelectItem><SelectItem value="dispatched">Dispatched</SelectItem><SelectItem value="in_transit">In Transit</SelectItem><SelectItem value="delivered">Delivered</SelectItem><SelectItem value="returned">Returned</SelectItem></SelectContent>
                         </Select>
                       </td>

@@ -130,7 +130,7 @@ export default function ReturnsPage() {
                     <td className="py-3 px-4"><Badge variant="outline" className="text-xs">{getReasonLabel(r.reason)}</Badge></td>
                     <td className="py-3 px-4"><span className="text-sm font-semibold">{formatCurrency(parseFloat(r.netAmount || "0"))}</span></td>
                     <td className="py-3 px-4"><span className="text-sm font-semibold text-green-600">{formatCurrency(parseFloat(r.refundAmount || "0"))}</span></td>
-                    <td className="py-3 px-4"><Badge variant={r.status === 'approved' || r.status === 'refunded' ? 'success' as any : r.status === 'pending' ? 'secondary' as any : 'outline' as any} className="text-xs capitalize">{r.status}</Badge></td>
+                    <td className="py-3 px-4"><Badge variant={r.status === 'approved' || r.status === 'refunded' ? 'success' : r.status === 'pending' ? 'secondary' : 'outline'} className="text-xs capitalize">{r.status}</Badge></td>
                     <td className="py-3 px-4"><div className="flex items-center gap-1">
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><Eye className="h-3.5 w-3.5" /></Button>
                       {r.status === 'pending' && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-green-600" onClick={() => handleApprove(r.id)}><CheckCircle className="h-3.5 w-3.5" /></Button>}

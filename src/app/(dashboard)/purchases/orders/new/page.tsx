@@ -159,10 +159,10 @@ export default function NewPurchaseOrderPage() {
 
       const result = await createPurchaseOrder(data);
       if (result.success && result.data) {
-        const id = (result.data as any).id;
+        const id = (result.data).id;
         if (action === "approve") {
           const ar = await approvePurchaseOrder(id);
-          if (!ar.success) { alert(`Created but approval failed: ${(ar as any).error}`); router.push("/purchases/orders"); return; }
+          if (!ar.success) { alert(`Created but approval failed: ${(ar).error}`); router.push("/purchases/orders"); return; }
         }
         if (action === "close" || action === "approve") { router.push("/purchases/orders"); }
         else { alert(`Purchase order ${result.orderNumber} saved!`); router.refresh(); }

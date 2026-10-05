@@ -7,11 +7,12 @@ vi.mock("@clerk/nextjs/server", () => ({
 
 const mockGetCurrentOrgId = vi.fn();
 const mockRequireRole = vi.fn();
+const mockGenerateDocumentNumber = vi.fn();
 
 vi.mock("@/lib/actions/shared", () => ({
   getCurrentOrgId: (...args: any[]) => mockGetCurrentOrgId(...args),
   requireRole: (...args: any[]) => mockRequireRole(...args),
-  generateDocumentNumber: vi.fn(),
+  generateDocumentNumber: (...args: unknown[]) => mockGenerateDocumentNumber(...args),
   generateJournalEntryNumber: vi.fn(),
 }));
 
@@ -67,6 +68,7 @@ vi.mock("next/cache", () => ({
 describe("SEC-07/08/20: Sales IDOR isolation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGenerateDocumentNumber.mockResolvedValue("DN-00001");
   });
 
   it("createDeliveryNote checks orgId on invoice lookup/update", async () => {

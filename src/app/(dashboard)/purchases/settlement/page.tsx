@@ -37,7 +37,7 @@ export default function VendorSettlementPage() {
       try {
         const [vendorsRes, invoicesRes] = await Promise.all([getVendors(), getPurchaseInvoices()]);
         if (vendorsRes.success && vendorsRes.data) setVendors(vendorsRes.data as Vendor[]);
-        if (invoicesRes.success && invoicesRes.data) setInvoices(invoicesRes.data as any[]);
+        if (invoicesRes.success && invoicesRes.data) setInvoices(invoicesRes.data);
       } catch (error) {} finally { setLoading(false); }
     };
     loadData();
@@ -45,7 +45,7 @@ export default function VendorSettlementPage() {
 
   const handleVendorSelect = (vId: string) => {
     setVendorId(vId);
-    const vendorInvoices = (invoices as any[]).filter(inv => (inv as any).vendorId === vId && (inv.status === 'Approved' || inv.status === 'Sent'));
+    const vendorInvoices = (invoices).filter(inv => (inv).vendorId === vId && (inv.status === 'Approved' || inv.status === 'Sent'));
     const docs: SettlementDoc[] = vendorInvoices.map(inv => ({
       documentId: inv.id,
       documentType: 'invoice',
@@ -123,7 +123,7 @@ export default function VendorSettlementPage() {
             <div className="grid grid-cols-4 gap-3">
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Vendor*</Label><Select value={vendorId} onValueChange={handleVendorSelect}><SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select vendor" /></SelectTrigger><SelectContent>{vendors.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent></Select></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Settlement Date*</Label><Input type="date" value={settlementDate} onChange={e => setSettlementDate(e.target.value)} className="h-9 text-xs" /></div>
-              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Payment Method*</Label><Select value={paymentMethod} onValueChange={v => setPaymentMethod(v as any)}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="bank_transfer">Bank Transfer</SelectItem><SelectItem value="cheque">Cheque</SelectItem><SelectItem value="online">Online</SelectItem><SelectItem value="credit_card">Credit Card</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent></Select></div>
+              <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Payment Method*</Label><Select value={paymentMethod} onValueChange={v => setPaymentMethod(v as typeof paymentMethod)}><SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="bank_transfer">Bank Transfer</SelectItem><SelectItem value="cheque">Cheque</SelectItem><SelectItem value="online">Online</SelectItem><SelectItem value="credit_card">Credit Card</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent></Select></div>
               <div><Label className="text-xs font-medium text-gray-700 mb-1 block">Reference</Label><Input value={reference} onChange={e => setReference(e.target.value)} placeholder="Ref #" className="h-9 text-xs" /></div>
             </div>
           </CardContent></Card>

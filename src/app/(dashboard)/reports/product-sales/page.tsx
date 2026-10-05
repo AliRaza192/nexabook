@@ -21,8 +21,8 @@ export default function ProductSalesReportPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    getCustomers().then((r) => { if (r.success) setCustomers(r.data as any); });
-    getProductsList().then((r) => { if (r.success) setProducts(r.data as any); });
+    getCustomers().then((r) => { if (r.success && r.data) setCustomers(r.data); });
+    getProductsList().then((r) => { if (r.success && r.data) setProducts(r.data); });
     loadReport({ dateFrom: defaultFrom, dateTo: defaultTo });
   }, []);
 

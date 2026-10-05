@@ -20,7 +20,7 @@ export async function getProjects(search?: string, status?: string) {
     if (!orgId) return { success: false as const, error: "No organization found" };
 
     const conditions = [eq(projects.orgId, orgId)];
-    if (status && status !== "all") conditions.push(eq(projects.status, status as any));
+    if (status && status !== "all") conditions.push(eq(projects.status, status as (typeof projects.status.enumValues)[number]));
     if (search) conditions.push(ilike(projects.name, `%${search}%`));
 
     const data = await db
@@ -114,7 +114,7 @@ export async function updateProject(id: string, data: {
         ...(data.name !== undefined && { name: data.name }),
         ...(data.code !== undefined && { code: data.code }),
         ...(data.description !== undefined && { description: data.description }),
-        ...(data.status !== undefined && { status: data.status as any }),
+        ...(data.status !== undefined && { status: data.status as (typeof projects.status.enumValues)[number] }),
         ...(data.startDate !== undefined && { startDate: data.startDate ? new Date(data.startDate) : null }),
         ...(data.endDate !== undefined && { endDate: data.endDate ? new Date(data.endDate) : null }),
         ...(data.budgetAmount !== undefined && { budgetAmount: data.budgetAmount }),
@@ -189,7 +189,7 @@ export async function createTask(data: {
         title: data.title,
         description: data.description || null,
         assigneeId: data.assigneeId || null,
-        priority: (data.priority as any) || "medium",
+        priority: (data.priority as (typeof tasks.priority.enumValues)[number]) || "medium",
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
         estimatedHours: data.estimatedHours || "0",
       })
@@ -222,8 +222,8 @@ export async function updateTask(id: string, data: {
       .set({
         ...(data.title !== undefined && { title: data.title }),
         ...(data.description !== undefined && { description: data.description }),
-        ...(data.status !== undefined && { status: data.status as any }),
-        ...(data.priority !== undefined && { priority: data.priority as any }),
+        ...(data.status !== undefined && { status: data.status as (typeof tasks.status.enumValues)[number] }),
+        ...(data.priority !== undefined && { priority: data.priority as (typeof tasks.priority.enumValues)[number] }),
         ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
         ...(data.dueDate !== undefined && { dueDate: data.dueDate ? new Date(data.dueDate) : null }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
@@ -271,7 +271,7 @@ export async function getTimesheets(filters?: {
     const conditions = [eq(timesheets.orgId, orgId)];
     if (filters?.projectId) conditions.push(eq(timesheets.projectId, filters.projectId));
     if (filters?.profileId) conditions.push(eq(timesheets.profileId, filters.profileId));
-    if (filters?.status) conditions.push(eq(timesheets.status, filters.status as any));
+    if (filters?.status) conditions.push(eq(timesheets.status, filters.status as (typeof timesheets.status.enumValues)[number]));
     if (filters?.startDate) conditions.push(gte(timesheets.date, new Date(filters.startDate)));
     if (filters?.endDate) conditions.push(lte(timesheets.date, new Date(filters.endDate)));
 
@@ -338,7 +338,7 @@ export async function updateTimesheetStatus(id: string, status: string) {
 
     const [timesheet] = await db
       .update(timesheets)
-      .set({ status: status as any, updatedAt: new Date() })
+      .set({ status: status as (typeof timesheets.status.enumValues)[number], updatedAt: new Date() })
       .where(and(eq(timesheets.id, id), eq(timesheets.orgId, orgId)))
       .returning();
 

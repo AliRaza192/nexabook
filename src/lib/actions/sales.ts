@@ -34,7 +34,7 @@ import {
 import { eq, and, or, ilike, desc, gte, lte, count, sum, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { getCurrentOrgId, generateDocumentNumber, generateJournalEntryNumber, requireRole } from "./shared";
+import { getCurrentOrgId, generateDocumentNumber, requireRole } from "./shared";
 import { checkPeriodLocked } from "./fiscal-periods";
 import { getOffset, buildPaginationResult, type PaginationParams } from "@/lib/pagination";
 import { validateJournalBalance } from "../accounting";
@@ -1381,30 +1381,20 @@ export async function deleteInvoice(invoiceId: string) {
               .from(journalEntryLines)
               .where(eq(journalEntryLines.journalEntryId, invoice.journalEntryId));
 
-            const reversalLines = lines.map((l) => ({
+            await postTransaction(tx, {
               orgId,
-              journalEntryId: "", // set after insert
-              accountId: l.accountId,
-              description: `Reversal: ${l.description}`,
-              debitAmount: l.creditAmount,
-              creditAmount: l.debitAmount,
-            }));
-
-            const entryNumber = await generateJournalEntryNumber(orgId);
-            const [revEntry] = await tx.insert(journalEntries).values({
-              orgId,
-              entryNumber,
-              entryDate: new Date(invoice.issueDate),
               description: `Reversal of Invoice ${invoice.invoiceNumber}`,
+              date: new Date(invoice.issueDate),
               referenceType: "reversal",
               referenceId: invoiceId,
-              status: "posted",
-              postedAt: new Date(),
               sourceType: "invoice",
-            }).returning();
-
-            reversalLines.forEach((l) => { l.journalEntryId = revEntry.id; });
-            await tx.insert(journalEntryLines).values(reversalLines);
+              lines: lines.map((l) => ({
+                accountId: l.accountId,
+                description: `Reversal: ${l.description}`,
+                debit: l.creditAmount,
+                credit: l.debitAmount,
+              })),
+            });
 
             await tx.update(journalEntries)
               .set({ status: "reversed" })
@@ -2308,34 +2298,12 @@ export async function convertQuotationToOrder(quotationId: string) {
 
 // ==================== DELIVERY NOTE ACTIONS ====================
 
-async function generateDeliveryNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ deliveryNumber: deliveryNotes.deliveryNumber })
-        .from(deliveryNotes)
-        .where(eq(deliveryNotes.orgId, orgId))
-        .orderBy(desc(deliveryNotes.createdAt))
-        .limit(1);
-      let nextNumber = 1;
-      if (result.length > 0 && result[0].deliveryNumber) {
-        const match = result[0].deliveryNumber.match(/\d+$/);
-        if (match) nextNumber = parseInt(match[0]) + 1;
-      }
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `DN-${String(nextNumber + jitter).padStart(5, "0")}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `DN-${String(Date.now() % 100000).padStart(5, "0")}`;
-}
-
 export async function getNextDeliveryNumber() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    const number = await generateDeliveryNumber(orgId);
+    const number = await generateDocumentNumber("delivery", orgId);
+    if (!number) return { success: false, error: "Failed to generate delivery number" };
     return { success: true, data: number };
   } catch (error) {
     captureException(error, { module: "sales", function: "getNextDeliveryNumber" });
@@ -2388,7 +2356,9 @@ export async function createDeliveryNote(data: DeliveryNoteFormData) {
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.customerId)
       return { success: false, error: "Customer is required" };
-    const deliveryNumber = await generateDeliveryNumber(orgId);
+    const deliveryNumber = await generateDocumentNumber("delivery", orgId);
+    if (!deliveryNumber)
+      return { success: false, error: "Failed to generate delivery number" };
 
     const newDelivery = await db.transaction(async (tx) => {
       const [created] = await tx
@@ -2476,34 +2446,13 @@ export async function updateDeliveryStatus(
 
 // ==================== RECURRING INVOICE ACTIONS ====================
 
-async function generateRecurringInvoiceNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ invoiceNumber: invoices.invoiceNumber })
-        .from(invoices)
-        .where(eq(invoices.orgId, orgId))
-        .orderBy(desc(invoices.createdAt))
-        .limit(1);
-      let nextNumber = 1;
-      if (result.length > 0 && result[0].invoiceNumber) {
-        const match = result[0].invoiceNumber.match(/\d+$/);
-        if (match) nextNumber = parseInt(match[0]) + 1;
-      }
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `SL-${String(nextNumber + jitter).padStart(5, "0")}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `SL-${String(Date.now() % 100000).padStart(5, "0")}`;
-}
-
 export async function getNextRecurringInvoiceNumber() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    return { success: true, data: await generateRecurringInvoiceNumber(orgId) };
+    const number = await generateDocumentNumber("recurring", orgId);
+    if (!number) return { success: false, error: "Failed to generate number" };
+    return { success: true, data: number };
   } catch (error) {
     captureException(error, { module: "sales", function: "getNextRecurringInvoiceNumber" });
     return { success: false, error: "Failed to generate number" };
@@ -2732,7 +2681,8 @@ export async function generateRecurringInvoices() {
         .select()
         .from(recurringInvoiceItems)
         .where(eq(recurringInvoiceItems.recurringInvoiceId, recurring.id));
-      const invoiceNumber = await generateRecurringInvoiceNumber(orgId);
+      const invoiceNumber = await generateDocumentNumber("recurring", orgId);
+      if (!invoiceNumber) continue;
       const grossAmount = items.reduce(
         (sum, item) => sum + parseFloat(item.lineTotal),
         0,
@@ -2821,34 +2771,13 @@ export async function generateRecurringInvoices() {
 
 // ==================== SALES RETURN ACTIONS ====================
 
-async function generateSalesReturnNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ returnNumber: salesReturns.returnNumber })
-        .from(salesReturns)
-        .where(eq(salesReturns.orgId, orgId))
-        .orderBy(desc(salesReturns.createdAt))
-        .limit(1);
-      let nextNumber = 1;
-      if (result.length > 0 && result[0].returnNumber) {
-        const match = result[0].returnNumber.match(/\d+$/);
-        if (match) nextNumber = parseInt(match[0]) + 1;
-      }
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `SR-${String(nextNumber + jitter).padStart(5, "0")}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `SR-${String(Date.now() % 100000).padStart(5, "0")}`;
-}
-
 export async function getNextSalesReturnNumber() {
   try {
     const orgId = await getCurrentOrgId();
     if (!orgId) return { success: false, error: "No organization found" };
-    return { success: true, data: await generateSalesReturnNumber(orgId) };
+    const number = await generateDocumentNumber("sales_return", orgId);
+    if (!number) return { success: false, error: "Failed to generate return number" };
+    return { success: true, data: number };
   } catch (error) {
     captureException(error, { module: "sales", function: "getNextSalesReturnNumber" });
     return { success: false, error: "Failed to generate return number" };
@@ -2901,7 +2830,9 @@ export async function createSalesReturn(data: SalesReturnFormData) {
     if (!orgId) return { success: false, error: "No organization found" };
     if (!data.customerId)
       return { success: false, error: "Customer is required" };
-    const returnNumber = await generateSalesReturnNumber(orgId);
+    const returnNumber = await generateDocumentNumber("sales_return", orgId);
+    if (!returnNumber)
+      return { success: false, error: "Failed to generate return number" };
     const grossAmount = data.items.reduce(
       (sum, item) =>
         sum +
@@ -3019,6 +2950,43 @@ export async function approveSalesReturn(returnId: string) {
               item.productId,
               parseFloat(item.quantity),
             );
+          }
+        }
+      }
+
+      if (salesReturn.invoiceId) {
+        const returnedByProduct = new Map<string, number>();
+        for (const item of items) {
+          if (!item.productId) continue;
+          const qty = parseFloat(item.quantity || "0");
+          if (qty <= 0) continue;
+          returnedByProduct.set(
+            item.productId,
+            (returnedByProduct.get(item.productId) || 0) + qty,
+          );
+        }
+
+        if (returnedByProduct.size > 0) {
+          const originalLines = await tx
+            .select({
+              productId: invoiceItems.productId,
+              batchId: invoiceItems.batchId,
+              quantity: invoiceItems.quantity,
+            })
+            .from(invoiceItems)
+            .where(eq(invoiceItems.invoiceId, salesReturn.invoiceId));
+
+          for (const [productId, returnedQty] of returnedByProduct) {
+            let remaining = returnedQty;
+            for (const line of originalLines) {
+              if (remaining <= 0) break;
+              if (line.productId !== productId || !line.batchId) continue;
+              const soldFromBatch = parseFloat(line.quantity || "0");
+              if (soldFromBatch <= 0) continue;
+              const restoreQty = Math.min(remaining, soldFromBatch);
+              await updateBatchStock(tx, line.batchId, restoreQty);
+              remaining -= restoreQty;
+            }
           }
         }
       }
@@ -3156,29 +3124,6 @@ export async function approveSalesReturn(returnId: string) {
 
 // ==================== CUSTOMER PAYMENT ACTIONS ====================
 
-async function generatePaymentNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ paymentNumber: customerPayments.paymentNumber })
-        .from(customerPayments)
-        .where(eq(customerPayments.orgId, orgId))
-        .orderBy(desc(customerPayments.createdAt))
-        .limit(1);
-      let nextNumber = 1;
-      if (result.length > 0 && result[0].paymentNumber) {
-        const match = result[0].paymentNumber.match(/\d+$/);
-        if (match) nextNumber = parseInt(match[0]) + 1;
-      }
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `CP-${String(nextNumber + jitter).padStart(5, "0")}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `CP-${String(Date.now() % 100000).padStart(5, "0")}`;
-}
-
 export async function getCustomerPayments(searchQuery?: string) {
   try {
     const orgId = await getCurrentOrgId();
@@ -3223,7 +3168,9 @@ export async function createCustomerPayment(data: CustomerPaymentFormData) {
     const locked = await checkPeriodLocked(new Date(data.paymentDate));
     if (locked) return { success: false, error: "Cannot record payment in a locked fiscal period" };
 
-    const paymentNumber = await generatePaymentNumber(orgId);
+    const paymentNumber = await generateDocumentNumber("payment", orgId);
+    if (!paymentNumber)
+      return { success: false, error: "Failed to generate payment number" };
 
     const paymentSubType = data.paymentMethod === 'cash' ? 'cash' : 'bank';
     const [cashBankAccount] = await db
@@ -3442,29 +3389,6 @@ export async function getCustomerOutstandingInvoices(customerId: string) {
 
 // ==================== SETTLEMENT ACTIONS ====================
 
-async function generateSettlementNumber(orgId: string): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      const result = await db
-        .select({ settlementNumber: settlements.settlementNumber })
-        .from(settlements)
-        .where(eq(settlements.orgId, orgId))
-        .orderBy(desc(settlements.createdAt))
-        .limit(1);
-      let nextNumber = 1;
-      if (result.length > 0 && result[0].settlementNumber) {
-        const match = result[0].settlementNumber.match(/\d+$/);
-        if (match) nextNumber = parseInt(match[0]) + 1;
-      }
-      const jitter = attempt > 0 ? Math.floor(Math.random() * (attempt + 1)) : 0;
-      return `STL-${String(nextNumber + jitter).padStart(5, "0")}`;
-    } catch {
-      if (attempt < 4) await new Promise(r => setTimeout(r, Math.random() * 100 * (attempt + 1)));
-    }
-  }
-  return `STL-${String(Date.now() % 100000).padStart(5, "0")}`;
-}
-
 export async function getSettlements(
   entityType?: string,
   statusFilter?: string,
@@ -3499,7 +3423,9 @@ export async function createCustomerSettlement(data: SettlementFormData) {
     const locked = await checkPeriodLocked(new Date(data.settlementDate));
     if (locked) return { success: false, error: "Cannot create settlement in a locked fiscal period" };
 
-    const settlementNumber = await generateSettlementNumber(orgId);
+    const settlementNumber = await generateDocumentNumber("settlement", orgId);
+    if (!settlementNumber)
+      return { success: false, error: "Failed to generate settlement number" };
     const totalOutstanding = data.documents.reduce(
       (sum, doc) => sum + parseFloat(doc.balanceAmount || "0"),
       0,

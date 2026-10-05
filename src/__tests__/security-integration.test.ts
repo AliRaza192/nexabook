@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createTestDb } from "@/__tests__/test-db";
+import { createTestDb, type TestDbHandle, type SqlRow } from "@/__tests__/test-db";
 
 vi.setConfig({ hookTimeout: 60000, testTimeout: 60000 });
 
 let testDb: Awaited<ReturnType<typeof createTestDb>>;
 
-const dbRef: { current: any } = { current: null as any };
+const dbRef: { current: TestDbHandle["db"] | null } = { current: null };
 vi.mock("@/db", () => ({ get db() { return dbRef.current; } }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -74,12 +74,12 @@ const U = {
   payslipB: "c200000f-0000-0000-0000-000000000001",
 };
 
-async function sqlRows(query: string): Promise<any[]> {
+async function sqlRows(query: string): Promise<SqlRow[]> {
   const res = await testDb.db.execute(query);
-  return res.rows as any[];
+  return res.rows as SqlRow[];
 }
 
-async function firstRow(query: string): Promise<any> {
+async function firstRow(query: string): Promise<SqlRow> {
   const rows = await sqlRows(query);
   return rows[0];
 }

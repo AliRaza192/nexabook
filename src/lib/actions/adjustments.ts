@@ -229,7 +229,7 @@ export async function getPdcInstruments(status?: string) {
 
     const conditions = [eq(pdcInstruments.orgId, orgId)];
     if (status) {
-      conditions.push(eq(pdcInstruments.status, status as any));
+      conditions.push(eq(pdcInstruments.status, status as (typeof pdcInstruments.status.enumValues)[number]));
     }
 
     const instruments = await db
@@ -410,12 +410,12 @@ export async function addMiscContactSettlement(data: MiscContactSettlementFormDa
         orgId,
         settlementNumber,
         partyName: data.partyName,
-        contactType: data.contactType as any,
+        contactType: data.contactType as (typeof miscContactSettlements.contactType.enumValues)[number],
         settlementDate: new Date(data.settlementDate),
         totalOutstanding: data.totalOutstanding,
         settledAmount: data.settledAmount,
         discountAmount: data.discountAmount || "0",
-        paymentMethod: (data.paymentMethod as any) || null,
+        paymentMethod: (data.paymentMethod as (typeof miscContactSettlements.paymentMethod.enumValues)[number]) || null,
         bankAccountId: data.bankAccountId || null,
         reference: data.reference,
         notes: data.notes,

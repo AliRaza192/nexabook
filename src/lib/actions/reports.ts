@@ -41,6 +41,7 @@ import {
 } from "@/db/schema";
 import { eq, and, gte, lte, desc, asc, sql, inArray, or, ilike, sum, count } from "drizzle-orm";
 import { getCurrentOrgId } from "./shared";
+import { roundDecimal } from "@/lib/utils/decimal";
 
 // ============= Profit & Loss Report =============
 
@@ -221,9 +222,9 @@ const cashAccount = await db
       const cashIn = parseFloat(row.debitAmount || '0');
       const cashOut = parseFloat(row.creditAmount || '0');
       
-      runningBalance += cashIn - cashOut;
-      totalCashIn += cashIn;
-      totalCashOut += cashOut;
+      runningBalance = roundDecimal(runningBalance + cashIn - cashOut);
+      totalCashIn = roundDecimal(totalCashIn + cashIn);
+      totalCashOut = roundDecimal(totalCashOut + cashOut);
 
       return {
         id: row.id,
@@ -436,10 +437,10 @@ export async function getCustomerLedgerReport(
         description: `Invoice ${inv.invoiceNumber}`,
         debit: invoiceAmount,
         credit: 0,
-        balance: runningBalance + invoiceAmount,
+        balance: roundDecimal(runningBalance + invoiceAmount),
       });
 
-      runningBalance += invoiceAmount;
+      runningBalance = roundDecimal(runningBalance + invoiceAmount);
 
       // Payment (Credit - customer paid)
       if (receivedAmount > 0) {
@@ -449,17 +450,17 @@ export async function getCustomerLedgerReport(
           description: `Payment received for ${inv.invoiceNumber}`,
           debit: 0,
           credit: receivedAmount,
-          balance: runningBalance - receivedAmount,
+          balance: roundDecimal(runningBalance - receivedAmount),
         });
 
-        runningBalance -= receivedAmount;
+        runningBalance = roundDecimal(runningBalance - receivedAmount);
       }
     }
 
     // Calculate totals
-    const totalDebit = ledger.reduce((sum, entry) => sum + entry.debit, 0);
-    const totalCredit = ledger.reduce((sum, entry) => sum + entry.credit, 0);
-    const closingBalance = runningBalance;
+    const totalDebit = roundDecimal(ledger.reduce((sum, entry) => sum + entry.debit, 0));
+    const totalCredit = roundDecimal(ledger.reduce((sum, entry) => sum + entry.credit, 0));
+    const closingBalance = roundDecimal(runningBalance);
 
     return {
       success: true,
@@ -574,8 +575,8 @@ export async function getTrialBalanceReport(asOfDate: string) {
         credit,
       });
 
-      totalDebit += debit;
-      totalCredit += credit;
+      totalDebit = roundDecimal(totalDebit + debit);
+      totalCredit = roundDecimal(totalCredit + credit);
     }
 
     return {
@@ -1303,7 +1304,7 @@ export async function getJobOrderProductionReport(status?: string) {
     if (!orgId) return { success: false, error: "No organization found" };
 
     const conditions = [eq(jobOrders.orgId, orgId)];
-    if (status) conditions.push(eq(jobOrders.status, status as any));
+    if (status) conditions.push(eq(jobOrders.status, status as (typeof jobOrders.status.enumValues)[number]));
 
     const jobOrdersData = await db
       .select({
@@ -1584,7 +1585,7 @@ export async function getSalesInvoiceDetailReport(
       lte(invoices.issueDate, to),
     ];
     if (customerId) conditions.push(eq(invoices.customerId, customerId));
-    if (status) conditions.push(eq(invoices.status, status as any));
+    if (status) conditions.push(eq(invoices.status, status as (typeof invoices.status.enumValues)[number]));
 
     const rows = await db
       .select({
@@ -2598,7 +2599,7 @@ export async function getSaleOrderReport(
       lte(saleOrders.orderDate, to),
     ];
     if (customerId) conditions.push(eq(saleOrders.customerId, customerId));
-    if (status) conditions.push(eq(saleOrders.status, status as any));
+    if (status) conditions.push(eq(saleOrders.status, status as (typeof saleOrders.status.enumValues)[number]));
 
     const rows = await db
       .select({

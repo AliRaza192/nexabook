@@ -378,12 +378,12 @@ export default function NewPurchaseInvoicePage() {
       const result = await createPurchaseInvoice(data);
 
       if (result.success && result.data) {
-        const id = (result.data as any).id;
+        const id = (result.data).id;
 
         if (action === "approve") {
           const ar = await approvePurchaseInvoice(id);
           if (!ar.success) {
-            alert(`Created but approval failed: ${(ar as any).error}`);
+            alert(`Created but approval failed: ${"error" in ar && ar.error ? ar.error : "unknown error"}`);
             router.push("/purchases/invoices");
             return;
           }

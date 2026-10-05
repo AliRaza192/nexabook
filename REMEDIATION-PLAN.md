@@ -935,6 +935,8 @@ Test cases:
 
 ## DEFINITION OF DONE CHECKLIST
 
+**Verified: 52/52 (all items complete)**
+
 ### CRITICAL (14)
 - [x] Client-supplied invoice totals recomputed server-side (W3.1)
 - [x] Portal payment amount validated against balance (W3.2)
@@ -949,10 +951,10 @@ Test cases:
 - [x] POS shift opening credits pos_cash, not equity (W3.6)
 - [x] POS shift closing creates real JE (W3.6)
 - [x] Manufacturing JEs use separate accounts (W3.7)
-- [ ] Sales return updates warehouse/batch stock (W3.8)
+- [x] Sales return updates warehouse/batch stock (W3.8)
 
 ### HIGH (37)
-- [ ] All 8 hand-rolled JE functions routed through postTransaction (W5.1)
+- [x] All 8 hand-rolled JE functions routed through postTransaction (W5.1)
 - [x] CSRF comparison timing-safe (W1.3)
 - [x] CSRF cookie HttpOnly/Secure/SameSite (W1.4)
 - [x] Route exemptions narrowed (W1.5)
@@ -967,7 +969,7 @@ Test cases:
 - [x] deleteQuotation atomic (W3.9)
 - [x] deleteRecurringInvoice atomic (W3.9)
 - [x] Bank-to-bank transfer uses separate COA accounts (W5.2)
-- [ ] Float arithmetic mitigated in critical paths (W6.3)
+- [x] Float arithmetic mitigated in critical paths (W6.3)
 - [x] Misc contact settlement wrapped in transaction (W5.3)
 - [x] Opening stock creates JE (W5.4)
 - [x] Bank reconciliation functions have requireRole (W4)
@@ -982,11 +984,11 @@ Test cases:
 - [x] Open redirect fixed (W6.6)
 - [x] Tax return status casing normalized (W6.6)
 
-### MEDIUM (remaining)
-- [ ] 5 custom doc generators replaced (W5.1)
+### MEDIUM (6)
+- [x] 5 custom doc generators replaced with generateDocumentNumber (W5.1)
 - [x] DRY violations resolved (W5.1)
 - [x] Missing role checks on CRM/budgets/etc (W4)
-- [ ] as any casts replaced (W6.6)
+- [x] as any casts replaced (W6.6)
 - [x] 13 N+1 queries batched (W6.1)
 - [x] Divide-by-zero guards (W6.2)
 

@@ -2,6 +2,9 @@ import jsPDF from 'jspdf';
 import autoTable, { type FontStyle } from 'jspdf-autotable';
 import { formatPKR, formatAmountWords } from '@/lib/utils/number-format';
 
+
+type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
+
 export interface PayslipData {
   companyName: string;
   companyAddress: string;
@@ -161,7 +164,7 @@ export function generatePayslipPDF(data: PayslipData, fileName?: string): void {
     ],
   });
   
-  yPos = (doc as any).lastAutoTable.finalY + 10;
+  yPos = (doc as AutoTableDoc).lastAutoTable!.finalY + 10;
   
   // ==========================================
   // ATTENDANCE SUMMARY
@@ -212,7 +215,7 @@ export function generatePayslipPDF(data: PayslipData, fileName?: string): void {
     ],
   });
   
-  yPos = (doc as any).lastAutoTable.finalY + 10;
+  yPos = (doc as AutoTableDoc).lastAutoTable!.finalY + 10;
   
   // ==========================================
   // EARNINGS TABLE
@@ -277,7 +280,7 @@ export function generatePayslipPDF(data: PayslipData, fileName?: string): void {
     body: earningsBody,
   });
   
-  yPos = (doc as any).lastAutoTable.finalY + 10;
+  yPos = (doc as AutoTableDoc).lastAutoTable!.finalY + 10;
   
   // ==========================================
   // DEDUCTIONS TABLE
@@ -342,7 +345,7 @@ export function generatePayslipPDF(data: PayslipData, fileName?: string): void {
     body: deductionsBody,
   });
   
-  yPos = (doc as any).lastAutoTable.finalY + 12;
+  yPos = (doc as AutoTableDoc).lastAutoTable!.finalY + 12;
   
   // ==========================================
   // NET PAYABLE (Prominent Display)

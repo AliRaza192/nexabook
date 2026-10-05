@@ -27,7 +27,7 @@ export default function SaleReturnReportPage() {
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
-    getCustomers().then((r) => { if (r.success) setCustomers(r.data as any); });
+    getCustomers().then((r) => { if (r.success && r.data) setCustomers(r.data); });
     loadReport({ dateFrom: defaultFrom, dateTo: defaultTo });
   }, []);
 

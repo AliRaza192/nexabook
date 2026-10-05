@@ -65,7 +65,7 @@ export default function RefundPage() {
       // Create a settlement record for the refund
       const { createCustomerSettlement } = await import("@/lib/actions/sales");
       const res = await createCustomerSettlement({
-        customerId, settlementDate: refundDate, paymentMethod: refundMethod as any,
+        customerId, settlementDate: refundDate, paymentMethod: refundMethod as "cash" | "other" | "bank_transfer" | "cheque" | "online" | "credit_card",
         documents: returnId ? [{ documentId: returnId, documentType: "credit_note", originalAmount: amount, paidAmount: "0", balanceAmount: amount, discountAmount: "0", settlementAmount: amount }] : [],
         reference: reference || undefined, notes: notes || `Refund processed${returnId ? ` for return ${returns.find(r => r.id === returnId)?.returnNumber || ''}` : ''}`
       });

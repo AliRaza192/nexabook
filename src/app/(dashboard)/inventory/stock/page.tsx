@@ -62,7 +62,7 @@ export default function StockMovementPage() {
     const data: StockMovementFormData = {
       productId: formData.get("productId") as string,
       movementType: formData.get("movementType") as "in" | "out",
-      reason: formData.get("reason") as any,
+      reason: formData.get("reason") as StockMovementFormData["reason"],
       quantity: formData.get("quantity") as string,
       unitCost: formData.get("unitCost") as string,
       referenceNumber: formData.get("referenceNumber") as string,

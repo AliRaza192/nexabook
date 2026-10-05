@@ -218,7 +218,7 @@ export default function NewLeadPage() {
                 <select
                   id="status"
                   value={formData.status || "new"}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value as typeof formData.status })}
                   className="w-full h-10 px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-nexabook-500 bg-background"
                 >
                   {LEAD_STATUSES.map((status) => (

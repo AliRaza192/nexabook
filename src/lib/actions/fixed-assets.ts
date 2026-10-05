@@ -4,8 +4,6 @@ import { db } from "@/db";
 import {
   fixedAssets,
   depreciationLogs,
-  journalEntries,
-  journalEntryLines,
   chartOfAccounts,
   auditLogs,
 } from "@/db/schema";
@@ -13,7 +11,7 @@ import { eq, and, desc, ilike, or, sql, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { getCurrentOrgId, requireRole } from "./shared";
-import { validateJournalBalance } from "../accounting";
+import { postTransaction } from "../accounting/posting-engine";
 import { checkPeriodLocked } from "./fiscal-periods";
 
 // ==========================================
@@ -293,7 +291,7 @@ export async function getDepreciationSchedule(
 ): Promise<{
   success: boolean;
   data?: {
-    asset: Record<string, unknown>;
+    asset: typeof fixedAssets.$inferSelect;
     schedule: DepreciationScheduleRow[];
     totalDepreciation: number;
     openingBookValue: number;
@@ -533,51 +531,28 @@ export async function postDepreciation(
     if (locked) return { success: false, error: "Cannot post depreciation in a locked fiscal period" };
 
     const result = await db.transaction(async (tx) => {
-      const entryCount = await tx
-        .select()
-        .from(journalEntries)
-        .where(eq(journalEntries.orgId, orgId));
-      const entryNumber = `JE-DEP-${String(entryCount.length + 1).padStart(5, "0")}`;
-
-      // Create journal entry
-      const [journalEntry] = await tx
-        .insert(journalEntries)
-        .values({
-          orgId,
-          entryNumber,
-          entryDate: depreciationDate,
-          referenceType: "depreciation",
-          referenceId: assetId,
-          description: `Depreciation for ${asset.name} - ${MONTH_NAMES[month - 1]} ${year}`,
-          status: "posted",
-          postedAt: new Date(),
-        })
-        .returning();
-
-      // Create journal entry lines
-      if (!validateJournalBalance([
-        { debitAmount: monthlyDepreciation.toFixed(2), creditAmount: "0" },
-        { debitAmount: "0", creditAmount: monthlyDepreciation.toFixed(2) },
-      ])) throw new Error("Journal entry out of balance: total debits must equal total credits");
-
-      // Debit: Depreciation Expense
-      await tx.insert(journalEntryLines).values({
+      const { journalEntryId, entryNumber } = await postTransaction(tx, {
         orgId,
-        journalEntryId: journalEntry.id,
-        accountId: depreciationExpenseAccount.id,
-        debitAmount: monthlyDepreciation.toFixed(2),
-        creditAmount: "0",
-        description: `Depreciation expense - ${asset.name}`,
-      });
-
-      // Credit: Accumulated Depreciation
-      await tx.insert(journalEntryLines).values({
-        orgId,
-        journalEntryId: journalEntry.id,
-        accountId: accumulatedDepreciationAccount.id,
-        debitAmount: "0",
-        creditAmount: monthlyDepreciation.toFixed(2),
-        description: `Accumulated depreciation - ${asset.name}`,
+        description: `Depreciation for ${asset.name} - ${MONTH_NAMES[month - 1]} ${year}`,
+        date: depreciationDate,
+        referenceType: "depreciation",
+        referenceId: assetId,
+        numberPrefix: "JE-DEP",
+        sourceType: "fixed_asset",
+        lines: [
+          {
+            accountId: depreciationExpenseAccount.id,
+            description: `Depreciation expense - ${asset.name}`,
+            debit: monthlyDepreciation.toFixed(2),
+            credit: "0",
+          },
+          {
+            accountId: accumulatedDepreciationAccount.id,
+            description: `Accumulated depreciation - ${asset.name}`,
+            debit: "0",
+            credit: monthlyDepreciation.toFixed(2),
+          },
+        ],
       });
 
       // Calculate new book value
@@ -601,7 +576,7 @@ export async function postDepreciation(
           depreciationDate,
           amount: monthlyDepreciation.toFixed(2),
           bookValueAfter: Math.max(salvageValue, newBookValue).toFixed(2),
-          journalEntryId: journalEntry.id,
+          journalEntryId,
           isPosted: true,
           notes: `Posted via journal entry ${entryNumber}`,
         })
