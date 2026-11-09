@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { organizations, orgFteSubscriptions, digitalFteProducts } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { captureException } from "@/lib/error-handler";
 
 type PlanType = "free" | "professional" | "enterprise";
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Webhook secret not configured" }, { status: 500 });
     }
 
-    const event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    const event = getStripe().webhooks.constructEvent(body, signature, webhookSecret);
 
     switch (event.type) {
       case "checkout.session.completed": {
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
         const productSlug = metadata?.productSlug as string | undefined;
 
         if (orgId && subscriptionId) {
-          const sub = await stripe.subscriptions.retrieve(subscriptionId);
+          const sub = await getStripe().subscriptions.retrieve(subscriptionId);
 
           if (productSlug) {
             const [fteProduct] = await db
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
         const invoice = event.data.object as unknown as Record<string, unknown>;
         const subscriptionId = invoice.subscription as string;
         if (subscriptionId) {
-          const sub = await stripe.subscriptions.retrieve(subscriptionId);
+          const sub = await getStripe().subscriptions.retrieve(subscriptionId);
           const periodEnd = safePeriodEnd(sub as unknown as Record<string, unknown>);
           await db.update(organizations).set({
             subscriptionStatus: sub.status,

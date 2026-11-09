@@ -2,9 +2,12 @@ import type { Config } from 'drizzle-kit';
 import * as dotenv from 'dotenv';
 
 dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env' });
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL is not defined in .env.local');
+const migrationUrl = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
+
+if (!migrationUrl) {
+  throw new Error('DATABASE_URL is not defined in .env.local or .env');
 }
 
 export default {
@@ -12,6 +15,6 @@ export default {
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL,
+    url: migrationUrl,
   },
 } satisfies Config;

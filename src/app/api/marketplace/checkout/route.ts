@@ -6,11 +6,13 @@ import { eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { captureException } from "@/lib/error-handler";
 
-const stripeKey = process.env.STRIPE_SECRET_KEY;
-if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not configured");
-const stripe = new Stripe(stripeKey, {
-  apiVersion: "2026-06-24.dahlia",
-});
+function getStripeClient(): Stripe {
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not configured");
+  return new Stripe(stripeKey, {
+    apiVersion: "2026-06-24.dahlia",
+  });
+}
 
 async function getOrgId(userId: string): Promise<string | null> {
   const profile = await db
@@ -64,7 +66,7 @@ export async function POST(request: NextRequest) {
 
     // Create Stripe customer if needed
     if (!customerId) {
-      const customer = await stripe.customers.create({
+      const customer = await getStripeClient().customers.create({
         name: org?.name || "NexaBook Org",
         metadata: { orgId },
       });
@@ -93,7 +95,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create Stripe Checkout Session
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripeClient().checkout.sessions.create({
       customer: customerId,
       mode: "subscription",
       payment_method_types: ["card"],

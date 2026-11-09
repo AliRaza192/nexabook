@@ -48,24 +48,26 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider
-      appearance={{
-        variables: {
-          colorPrimary: "#0f172a",
-        },
-        elements: {
-          formButtonPrimary: "bg-nexabook-900 hover:bg-nexabook-800",
-          card: "shadow-lg",
-          headerTitle: "text-nexabook-900",
-          headerSubtitle: "text-nexabook-600",
-          socialButtonsBlockButton: "border-nexabook-200 hover:bg-nexabook-50",
-          formFieldInput: "border-nexabook-200 focus:border-nexabook-900",
-        },
-      }}
-    >
-      <html lang="en">
-        <body className={inter.className}>{children}</body>
-      </html>
-    </ClerkProvider>
+    <html lang="en">
+      <body className={inter.className}>
+        <ClerkProvider
+          appearance={{
+            variables: {
+              colorPrimary: "#0f172a",
+            },
+            elements: {
+              formButtonPrimary: "bg-nexabook-900 hover:bg-nexabook-800",
+              card: "shadow-lg",
+              headerTitle: "text-nexabook-900",
+              headerSubtitle: "text-nexabook-600",
+              socialButtonsBlockButton: "border-nexabook-200 hover:bg-nexabook-50",
+              formFieldInput: "border-nexabook-200 focus:border-nexabook-900",
+            },
+          }}
+        >
+          {children}
+        </ClerkProvider>
+      </body>
+    </html>
   );
 }

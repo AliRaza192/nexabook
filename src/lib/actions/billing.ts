@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { organizations } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentOrgId } from "./shared";
-import { stripe, PLANS } from "@/lib/stripe";
+import { getStripe, PLANS } from "@/lib/stripe";
 import { captureException } from "@/lib/error-handler";
 
 export async function createCheckoutSession(priceId: string, planType: string) {
@@ -23,7 +23,7 @@ export async function createCheckoutSession(priceId: string, planType: string) {
     let customerId = org.stripeCustomerId;
 
     if (!customerId) {
-      const customer = await stripe.customers.create({
+      const customer = await getStripe().customers.create({
         name: org.name,
         email: org.email || undefined,
         metadata: { orgId },
@@ -32,7 +32,7 @@ export async function createCheckoutSession(priceId: string, planType: string) {
       await db.update(organizations).set({ stripeCustomerId: customerId }).where(eq(organizations.id, orgId));
     }
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer: customerId,
       mode: "subscription",
       payment_method_types: ["card"],
@@ -95,7 +95,7 @@ export async function createPortalSession() {
 
     if (!org?.stripeCustomerId) return { success: false, error: "No Stripe customer found" };
 
-    const session = await stripe.billingPortal.sessions.create({
+    const session = await getStripe().billingPortal.sessions.create({
       customer: org.stripeCustomerId,
       return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings/billing`,
     });

@@ -9,11 +9,16 @@ import { invoices } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { validateCsrf } from '@/lib/csrf';
 
-// Initialize Resend
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 export async function POST(request: NextRequest) {
   try {
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) {
+      return NextResponse.json(
+        { success: false, error: 'Email service not configured' },
+        { status: 503 }
+      );
+    }
+    const resend = new Resend(resendKey);
     await validateCsrf();
     // Verify user authentication
     const { userId } = await auth();
