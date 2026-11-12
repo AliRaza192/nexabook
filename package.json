@@ -22,6 +22,8 @@
     "@clerk/nextjs": "^7.0.11",
     "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@neon/config": "^1.13.0",
+    "@neon/env": "^2.1.0",
     "@neondatabase/serverless": "^1.0.2",
     "@radix-ui/react-avatar": "^1.1.1",
     "@radix-ui/react-dialog": "^1.1.2",
@@ -81,5 +83,15 @@
     "tailwindcss": "^3.4.16",
     "typescript": "^5.7.2",
     "vitest": "^4.1.9"
+  },
+  "allowScripts": {
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true,
+    "@parcel/watcher@2.5.6": true,
+    "@swc/core@1.15.43": true,
+    "core-js@3.49.0": true,
+    "sharp@0.34.5": true,
+    "unrs-resolver@1.12.2": true
   }
 }

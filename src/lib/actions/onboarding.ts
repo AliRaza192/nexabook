@@ -173,7 +173,9 @@ export async function updateOrganizationOnboarding(data: {
 }) {
   try {
     const orgId = await getCurrentOrgId();
-    if (!orgId) return { success: false, error: "No organization found" };
+    if (!orgId) {
+      return createOrganization(data);
+    }
 
     await db
       .update(organizations)

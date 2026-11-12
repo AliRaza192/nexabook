@@ -1,0 +1,324 @@
+From 0efedff9ef70f93bf4cc760b66d62957f58d5d35 Mon Sep 17 00:00:00 2001
+From: NexaBook Fix <fix@nexabook.local>
+Date: Mon, 9 Nov 2026 17:45:46 +0500
+Subject: [PATCH] fix: make production build independent of runtime secrets +
+ migrate to proxy.ts
+
+---
+ .env.example                                  |  6 ++-
+ .gitignore                                    |  1 +
+ drizzle.config.ts                             |  9 +++--
+ .../(auth)/login/{ => [[...rest]]}/page.tsx   |  0
+ src/app/api/marketplace/checkout/route.ts     | 16 ++++----
+ src/app/api/send-invoice-email/route.ts       | 11 +++--
+ src/app/api/stripe/webhook/route.ts           |  8 ++--
+ src/app/layout.tsx                            | 40 ++++++++++---------
+ src/lib/actions/billing.ts                    |  8 ++--
+ src/lib/stripe.ts                             | 13 +++++-
+ src/{middleware.ts => proxy.ts}               |  9 ++++-
+ 11 files changed, 77 insertions(+), 44 deletions(-)
+ rename src/app/(auth)/login/{ => [[...rest]]}/page.tsx (100%)
+ rename src/{middleware.ts => proxy.ts} (90%)
+
+diff --git a/.env.example b/.env.example
+index c0a6a3b..f0ffb25 100644
+--- a/.env.example
++++ b/.env.example
+@@ -6,8 +6,10 @@
+ 
+ # ---------- REQUIRED ----------
+ 
+-# Neon PostgreSQL
+-DATABASE_URL=postgresql://username:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
++# Neon PostgreSQL (pooled, used by the app at runtime)
++DATABASE_URL=postgresql://username:password@ep-xxx-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
++# Neon PostgreSQL (direct, used by Drizzle migrations)
++DATABASE_URL_UNPOOLED=postgresql://username:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
+ 
+ # Clerk Authentication
+ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxxxx
+diff --git a/.gitignore b/.gitignore
+index c98adb8..41598ac 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -53,3 +53,4 @@ next-env.d.ts
+ 
+ # OCR uploads (served via authenticated API route, never public)
+ .uploads/
++.neon
+diff --git a/drizzle.config.ts b/drizzle.config.ts
+index d6f23a9..b79b105 100644
+--- a/drizzle.config.ts
++++ b/drizzle.config.ts
+@@ -2,9 +2,12 @@ import type { Config } from 'drizzle-kit';
+ import * as dotenv from 'dotenv';
+ 
+ dotenv.config({ path: '.env.local' });
++dotenv.config({ path: '.env' });
+ 
+-if (!process.env.DATABASE_URL) {
+-  throw new Error('DATABASE_URL is not defined in .env.local');
++const migrationUrl = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
++
++if (!migrationUrl) {
++  throw new Error('DATABASE_URL is not defined in .env.local or .env');
+ }
+ 
+ export default {
+@@ -12,6 +15,6 @@ export default {
+   out: './drizzle',
+   dialect: 'postgresql',
+   dbCredentials: {
+-    url: process.env.DATABASE_URL,
++    url: migrationUrl,
+   },
+ } satisfies Config;
+diff --git a/src/app/(auth)/login/page.tsx b/src/app/(auth)/login/[[...rest]]/page.tsx
+similarity index 100%
+rename from src/app/(auth)/login/page.tsx
+rename to src/app/(auth)/login/[[...rest]]/page.tsx
+diff --git a/src/app/api/marketplace/checkout/route.ts b/src/app/api/marketplace/checkout/route.ts
+index d2522b7..2a3c3a6 100644
+--- a/src/app/api/marketplace/checkout/route.ts
++++ b/src/app/api/marketplace/checkout/route.ts
+@@ -6,11 +6,13 @@ import { eq } from "drizzle-orm";
+ import Stripe from "stripe";
+ import { captureException } from "@/lib/error-handler";
+ 
+-const stripeKey = process.env.STRIPE_SECRET_KEY;
+-if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not configured");
+-const stripe = new Stripe(stripeKey, {
+-  apiVersion: "2026-06-24.dahlia",
+-});
++function getStripeClient(): Stripe {
++  const stripeKey = process.env.STRIPE_SECRET_KEY;
++  if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not configured");
++  return new Stripe(stripeKey, {
++    apiVersion: "2026-06-24.dahlia",
++  });
++}
+ 
+ async function getOrgId(userId: string): Promise<string | null> {
+   const profile = await db
+@@ -64,7 +66,7 @@ export async function POST(request: NextRequest) {
+ 
+     // Create Stripe customer if needed
+     if (!customerId) {
+-      const customer = await stripe.customers.create({
++      const customer = await getStripeClient().customers.create({
+         name: org?.name || "NexaBook Org",
+         metadata: { orgId },
+       });
+@@ -93,7 +95,7 @@ export async function POST(request: NextRequest) {
+     }
+ 
+     // Create Stripe Checkout Session
+-    const session = await stripe.checkout.sessions.create({
++    const session = await getStripeClient().checkout.sessions.create({
+       customer: customerId,
+       mode: "subscription",
+       payment_method_types: ["card"],
+diff --git a/src/app/api/send-invoice-email/route.ts b/src/app/api/send-invoice-email/route.ts
+index 2b616c4..39f1390 100644
+--- a/src/app/api/send-invoice-email/route.ts
++++ b/src/app/api/send-invoice-email/route.ts
+@@ -9,11 +9,16 @@ import { invoices } from '@/db/schema';
+ import { eq } from 'drizzle-orm';
+ import { validateCsrf } from '@/lib/csrf';
+ 
+-// Initialize Resend
+-const resend = new Resend(process.env.RESEND_API_KEY);
+-
+ export async function POST(request: NextRequest) {
+   try {
++    const resendKey = process.env.RESEND_API_KEY;
++    if (!resendKey) {
++      return NextResponse.json(
++        { success: false, error: 'Email service not configured' },
++        { status: 503 }
++      );
++    }
++    const resend = new Resend(resendKey);
+     await validateCsrf();
+     // Verify user authentication
+     const { userId } = await auth();
+diff --git a/src/app/api/stripe/webhook/route.ts b/src/app/api/stripe/webhook/route.ts
+index fe0ead1..2047721 100644
+--- a/src/app/api/stripe/webhook/route.ts
++++ b/src/app/api/stripe/webhook/route.ts
+@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
+ import { db } from "@/db";
+ import { organizations, orgFteSubscriptions, digitalFteProducts } from "@/db/schema";
+ import { eq, and } from "drizzle-orm";
+-import { stripe } from "@/lib/stripe";
++import { getStripe } from "@/lib/stripe";
+ import { captureException } from "@/lib/error-handler";
+ 
+ type PlanType = "free" | "professional" | "enterprise";
+@@ -26,7 +26,7 @@ export async function POST(request: Request) {
+       return NextResponse.json({ error: "Webhook secret not configured" }, { status: 500 });
+     }
+ 
+-    const event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
++    const event = getStripe().webhooks.constructEvent(body, signature, webhookSecret);
+ 
+     switch (event.type) {
+       case "checkout.session.completed": {
+@@ -38,7 +38,7 @@ export async function POST(request: Request) {
+         const productSlug = metadata?.productSlug as string | undefined;
+ 
+         if (orgId && subscriptionId) {
+-          const sub = await stripe.subscriptions.retrieve(subscriptionId);
++          const sub = await getStripe().subscriptions.retrieve(subscriptionId);
+ 
+           if (productSlug) {
+             const [fteProduct] = await db
+@@ -75,7 +75,7 @@ export async function POST(request: Request) {
+         const invoice = event.data.object as unknown as Record<string, unknown>;
+         const subscriptionId = invoice.subscription as string;
+         if (subscriptionId) {
+-          const sub = await stripe.subscriptions.retrieve(subscriptionId);
++          const sub = await getStripe().subscriptions.retrieve(subscriptionId);
+           const periodEnd = safePeriodEnd(sub as unknown as Record<string, unknown>);
+           await db.update(organizations).set({
+             subscriptionStatus: sub.status,
+diff --git a/src/app/layout.tsx b/src/app/layout.tsx
+index ea20a59..9559638 100644
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -48,24 +48,26 @@ export default function RootLayout({
+   children: React.ReactNode;
+ }>) {
+   return (
+-    <ClerkProvider
+-      appearance={{
+-        variables: {
+-          colorPrimary: "#0f172a",
+-        },
+-        elements: {
+-          formButtonPrimary: "bg-nexabook-900 hover:bg-nexabook-800",
+-          card: "shadow-lg",
+-          headerTitle: "text-nexabook-900",
+-          headerSubtitle: "text-nexabook-600",
+-          socialButtonsBlockButton: "border-nexabook-200 hover:bg-nexabook-50",
+-          formFieldInput: "border-nexabook-200 focus:border-nexabook-900",
+-        },
+-      }}
+-    >
+-      <html lang="en">
+-        <body className={inter.className}>{children}</body>
+-      </html>
+-    </ClerkProvider>
++    <html lang="en">
++      <body className={inter.className}>
++        <ClerkProvider
++          appearance={{
++            variables: {
++              colorPrimary: "#0f172a",
++            },
++            elements: {
++              formButtonPrimary: "bg-nexabook-900 hover:bg-nexabook-800",
++              card: "shadow-lg",
++              headerTitle: "text-nexabook-900",
++              headerSubtitle: "text-nexabook-600",
++              socialButtonsBlockButton: "border-nexabook-200 hover:bg-nexabook-50",
++              formFieldInput: "border-nexabook-200 focus:border-nexabook-900",
++            },
++          }}
++        >
++          {children}
++        </ClerkProvider>
++      </body>
++    </html>
+   );
+ }
+diff --git a/src/lib/actions/billing.ts b/src/lib/actions/billing.ts
+index 090bfd6..13860d2 100644
+--- a/src/lib/actions/billing.ts
++++ b/src/lib/actions/billing.ts
+@@ -4,7 +4,7 @@ import { db } from "@/db";
+ import { organizations } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ import { getCurrentOrgId } from "./shared";
+-import { stripe, PLANS } from "@/lib/stripe";
++import { getStripe, PLANS } from "@/lib/stripe";
+ import { captureException } from "@/lib/error-handler";
+ 
+ export async function createCheckoutSession(priceId: string, planType: string) {
+@@ -23,7 +23,7 @@ export async function createCheckoutSession(priceId: string, planType: string) {
+     let customerId = org.stripeCustomerId;
+ 
+     if (!customerId) {
+-      const customer = await stripe.customers.create({
++      const customer = await getStripe().customers.create({
+         name: org.name,
+         email: org.email || undefined,
+         metadata: { orgId },
+@@ -32,7 +32,7 @@ export async function createCheckoutSession(priceId: string, planType: string) {
+       await db.update(organizations).set({ stripeCustomerId: customerId }).where(eq(organizations.id, orgId));
+     }
+ 
+-    const session = await stripe.checkout.sessions.create({
++    const session = await getStripe().checkout.sessions.create({
+       customer: customerId,
+       mode: "subscription",
+       payment_method_types: ["card"],
+@@ -95,7 +95,7 @@ export async function createPortalSession() {
+ 
+     if (!org?.stripeCustomerId) return { success: false, error: "No Stripe customer found" };
+ 
+-    const session = await stripe.billingPortal.sessions.create({
++    const session = await getStripe().billingPortal.sessions.create({
+       customer: org.stripeCustomerId,
+       return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings/billing`,
+     });
+diff --git a/src/lib/stripe.ts b/src/lib/stripe.ts
+index fb3d2d0..87ad7d7 100644
+--- a/src/lib/stripe.ts
++++ b/src/lib/stripe.ts
+@@ -1,6 +1,17 @@
+ import Stripe from "stripe";
+ 
+-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
++let stripeClient: Stripe | null = null;
++
++export function getStripe(): Stripe {
++  const key = process.env.STRIPE_SECRET_KEY;
++  if (!key) {
++    throw new Error("STRIPE_SECRET_KEY is not configured");
++  }
++  if (!stripeClient) {
++    stripeClient = new Stripe(key);
++  }
++  return stripeClient;
++}
+ 
+ export const PLANS = {
+   free: { priceId: null, name: "Free", limit: "basic" },
+diff --git a/src/middleware.ts b/src/proxy.ts
+similarity index 90%
+rename from src/middleware.ts
+rename to src/proxy.ts
+index 1a46f0f..dfe2710 100644
+--- a/src/middleware.ts
++++ b/src/proxy.ts
+@@ -76,8 +76,15 @@ export default clerkMiddleware(async (auth, req) => {
+   }
+ 
+   return NextResponse.next();
++}, {
++  signInUrl: "/login",
++  signUpUrl: "/register",
+ });
+ 
+ export const config = {
+-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
++  matcher: [
++    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
++    "/(api|trpc)(.*)",
++    "/__clerk/(.*)",
++  ],
+ };
+-- 
+2.43.0
+
